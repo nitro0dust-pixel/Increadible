@@ -1,6 +1,7 @@
 # Increadible on Kubernetes (increadible-staging).
-# NOT VERIFIED against a live cluster: these manifests have only been parsed and
-# consistency-checked by tests/config.test.ts.
+# Applied once to a local Docker Desktop cluster (2026-10-05) with a locally built image: rollout,
+# auth, ConfigMap rules and A/B persistence across `rollout restart` were checked. NOT verified:
+# pulling the image from GHCR, and any managed cluster.
 #
 # One replica on purpose: A/B experiments and measurements are persisted to a JSONL file on a
 # PersistentVolumeClaim (AB_DATA_FILE), which has exactly one writer. More replicas would each

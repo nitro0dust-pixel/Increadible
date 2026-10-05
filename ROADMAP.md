@@ -3,8 +3,9 @@
 Last updated: 2026-10-05 20:18 UTC (6 Oct 2026, 01:48 IST), measured at `main` = `38865a3` plus the runtime upgrade in PR #8.
 
 **Bottom line:** the in-repo code (Features #7-#9 and the server around them) is built, tested, containerised, and the
-image published to GHCR passes its probe. **Nothing is deployed anywhere**, the Kubernetes manifests have never been
-applied to a cluster, and no cost saving has ever been measured.
+image published to GHCR passes its probe. **Nothing is deployed anywhere beyond a local rehearsal**: the staging
+manifest has been applied to a local Docker Desktop cluster (see the snapshot), the production manifest and monitoring have
+not been applied to anything, and no cost saving has ever been measured.
 
 ## Current stage
 
@@ -24,8 +25,10 @@ Update this line when the owner confirms or changes it.
 | Lint, type-check | clean | `npm run lint`, `npm run type-check` |
 | Dependency audit (prod deps) | 0 vulnerabilities | `npm audit --omit=dev` |
 | Published image | pushed to GHCR, pulled by digest and probed in CI; package is private | `verify-published-image` job |
-| Kubernetes manifests, Prometheus rules | **NOT VERIFIED** (no cluster available) | parsed and consistency-tested only |
-| Local run on the owner's Windows PC | **NOT VERIFIED**, pending the owner running the local verification steps | Windows portability fixes were made without access to a Windows machine |
+| Staging manifest (`k8s/staging-deployment.yaml`) | **verified on a local Docker Desktop cluster** (kind-based, Kubernetes v1.36.1), 2026-10-05 ~20:20 UTC: all six objects applied, PVC bound, pod Ready, `/health` and `/ready` ok, `/metrics` and `/mcp` 401 without the token, 13 tools, ConfigMap rules loaded, A/B data survived `kubectl rollout restart` (file on the PVC unchanged in the new pod) | run with the locally built image (`increadible:local`, `imagePullPolicy: IfNotPresent`) because the GHCR package is private; the GHCR pull path was **not** exercised |
+| Production manifest (`k8s/production-deployment.yaml`) | **NOT VERIFIED** (not applied) | differs from staging only in namespace and `imagePullPolicy: IfNotPresent` (`git diff --no-index`); structurally covered by the staging run, but never applied |
+| Prometheus rules (`k8s/monitoring.yaml`) | **NOT VERIFIED** | needs Prometheus Operator CRDs and kube-state-metrics; none installed |
+| Local run on the owner's Windows PC | **verified** (Windows 11, Node v24.14, npm 11.9), 2026-10-05: `npm ci`, type-check, lint, `npm test` (90 passed, 6 todo), build; server health/auth/tools/routing; A/B data survived a restart; Docker image built, healthy, and started with a volume | the Docker-container restart check did not record a metric, so it does not prove volume persistence (the file-persistence check was done natively and on Kubernetes) |
 | Cost savings and quality figures | **never measured** | the old headline percentages were removed |
 | Release tag `v1.0.0` | exists locally only, on an old commit; never pushed | `git ls-remote --tags origin` is empty |
 

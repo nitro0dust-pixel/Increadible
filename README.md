@@ -148,6 +148,7 @@ Layout: `src/` (server + transports), `features/07..09/*/src/` (our modules), `t
 
 - Cost-savings and quality percentages (e.g. "99.98%") are **targets, not measurements**. To
   measure real savings, run agentacct (#6) against real usage and compare to a baseline.
-- No `k8s/` manifest has been applied to a cluster and the Docker image has not been built in CI here.
+- Only `k8s/staging-deployment.yaml` has been applied to a cluster (a local Docker Desktop one, with a locally built image).
+  The production and monitoring manifests have not been applied, and the GHCR pull path has not been exercised on a cluster.
 - Features #1-#6 are not exercised by this repo's tests (see the `todo` list in `tests/e2e-integration.test.ts`).
 - `call_api` is mock-only. A/B persistence needs `AB_DATA_FILE`, is single-writer and never compacted.
