@@ -128,6 +128,15 @@ describe("Dockerfile and package.json", () => {
     expect(dockerfile).toMatch(/chown node:node \/data/);
   });
 
+  it("copies every script the build command runs into the image's builder stage", () => {
+    const referenced = [...pkg.scripts.build.matchAll(/scripts\/[\w.-]+/g)].map((m: RegExpMatchArray) => m[0]);
+    expect(referenced.length).toBeGreaterThan(0);
+    const builder = dockerfile.slice(dockerfile.indexOf("AS builder"), dockerfile.indexOf("# ---- runtime ----"));
+    for (const file of referenced) {
+      expect(builder).toMatch(new RegExp(`COPY\\s+${file.replace(/[.]/g, "\\.")}\\s`));
+    }
+  });
+
   it("uses a tracked lockfile for reproducible installs", () => {
     expect(fs.existsSync(path.join(root, "package-lock.json"))).toBe(true);
     expect(read(".gitignore")).not.toMatch(/^package-lock\.json$/m);
