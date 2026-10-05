@@ -201,6 +201,14 @@ describe("repository hygiene", () => {
     }
   });
 
+  it("keeps ROADMAP.md present, linked from the README, and listing owner decisions", () => {
+    expect(fs.existsSync(path.join(root, "ROADMAP.md"))).toBe(true);
+    expect(read("README.md")).toContain("(ROADMAP.md)");
+    const roadmap = read("ROADMAP.md");
+    expect(roadmap).toContain("## Open decisions");
+    expect(roadmap).toContain("NOT VERIFIED");
+  });
+
   it("has no unmeasured headline claims left in the docs", () => {
     const text = [read("README.md"), read("DEPLOYMENT.md")].join("\n");
     expect(text).not.toMatch(/PRODUCTION DEPLOYMENT AUTHORIZED|1000\+ APIs|99\.98% (cost )?(reduction|savings|optimization)/i);

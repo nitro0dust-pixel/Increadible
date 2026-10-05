@@ -8,6 +8,8 @@ MCP server) and **vendors five third-party projects as git submodules** (Feature
 > security-scanned or independently reviewed. Cost and quality figures quoted by upstream
 > projects are *not* verified here. See [Limitations](#limitations).
 
+Project status, the plan and open decisions are tracked in [ROADMAP.md](ROADMAP.md).
+
 ## Components
 
 | # | Component | Source | Tested in this repo |
