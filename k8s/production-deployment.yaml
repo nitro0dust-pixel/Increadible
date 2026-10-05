@@ -2,8 +2,10 @@
 # NOT VERIFIED against a live cluster: these manifests have only been parsed and
 # consistency-checked by tests/config.test.ts.
 #
-# One replica on purpose: A/B measurements and rule stats live in process memory, so more
-# replicas would each see a slice of the data and give wrong experiment results.
+# One replica on purpose: A/B experiments and measurements are persisted to a JSONL file on a
+# PersistentVolumeClaim (AB_DATA_FILE), which has exactly one writer. More replicas would each
+# keep their own in-memory view and a ReadWriteOnce volume cannot be shared. Rule hit counts
+# are in memory and reset on restart.
 # Rules come from the ConfigMap and are read-only here: edit the ConfigMap and restart the pod
 # (the update_rules tool returns an error because the file is read-only).
 #
@@ -62,6 +64,17 @@ data:
         provider: claude-sonnet
         reason: Balanced default
 ---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: increadible-data
+  namespace: increadible
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 1Gi
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -86,6 +99,7 @@ spec:
         runAsNonRoot: true
         runAsUser: 1000
         runAsGroup: 1000
+        fsGroup: 1000
         seccompProfile:
           type: RuntimeDefault
       containers:
@@ -103,6 +117,8 @@ spec:
               value: "0.0.0.0"
             - name: RULES_FILE
               value: /config/routing-rules.yaml
+            - name: AB_DATA_FILE
+              value: /data/ab-data.jsonl
             - name: AUTH_TOKEN
               valueFrom:
                 secretKeyRef:
@@ -136,12 +152,17 @@ spec:
             - name: config
               mountPath: /config
               readOnly: true
+            - name: data
+              mountPath: /data
             - name: tmp
               mountPath: /tmp
       volumes:
         - name: config
           configMap:
             name: increadible-config
+        - name: data
+          persistentVolumeClaim:
+            claimName: increadible-data
         - name: tmp
           emptyDir: {}
 ---

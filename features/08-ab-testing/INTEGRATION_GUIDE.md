@@ -46,4 +46,7 @@ experiments:                    # optional file, EXPERIMENTS_FILE; invalid entri
 - `status` is `incomplete` (with `confidence: 0` and a message) until there are >= 100 measurements in total and >= 30 per variant.
 - Only the **first** metric decides the winner; the higher mean wins, and only if `p < 0.05`. `confidence = 1 - p`.
 - `ci_95` is a 95% confidence interval for the mean. `effect_sizes` is Cohen's d (pooled SD).
-- Measurements are stored in memory and are lost on restart; run one replica.
+- **Persistence** (`AB_DATA_FILE`, optional): an append-only JSONL log of created experiments and measurements,
+  written before each change is applied and replayed at startup. If a write fails, the tool call returns an error and
+  nothing is recorded. Without `AB_DATA_FILE`, everything is in memory and lost on restart. Run one process per file.
+- `create_experiment` with an id that already exists is rejected; YAML definitions override a logged experiment with the same id.

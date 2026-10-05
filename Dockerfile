@@ -18,7 +18,8 @@ ENV NODE_ENV=production \
     PORT=3000 \
     HOST=0.0.0.0 \
     RULES_FILE=/data/rules.yaml \
-    EXPERIMENTS_FILE=/data/experiments.yaml
+    EXPERIMENTS_FILE=/data/experiments.yaml \
+    AB_DATA_FILE=/data/ab-data.jsonl
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev && npm cache clean --force
 COPY --from=builder /app/dist ./dist

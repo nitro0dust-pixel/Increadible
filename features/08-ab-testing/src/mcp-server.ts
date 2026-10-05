@@ -1,4 +1,5 @@
 import * as fs from "fs";
+import * as path from "path";
 import * as yaml from "yaml";
 
 interface Variant {
@@ -99,19 +100,112 @@ function sampleStats(values: number[]) {
   return { n, mean, variance, std: Math.sqrt(variance) };
 }
 
+interface Measurement {
+  experiment_id: string;
+  variant_id: string;
+  metrics: Record<string, number>;
+  timestamp: string;
+}
+
+type LogEntry =
+  | { type: "experiment"; experiment: Experiment }
+  | ({ type: "measurement" } & Measurement);
+
 class ABTestingFramework {
   private experiments: Map<string, Experiment> = new Map();
-  private measurements: Array<{
-    experiment_id: string;
-    variant_id: string;
-    metrics: Record<string, number>;
-    timestamp: string;
-  }> = [];
+  private measurements: Measurement[] = [];
   private experimentsFile: string;
+  private dataFile?: string;
 
-  constructor(experimentsFile: string = "./experiments.yaml") {
+  /**
+   * @param experimentsFile optional YAML with experiment definitions (read-only config)
+   * @param dataFile optional append-only JSONL log. When set, experiments created at runtime and
+   *   every measurement are written to it before being applied, and replayed on startup.
+   *   One process should own a data file; a second process would not see the first one's writes.
+   */
+  constructor(experimentsFile: string = "./experiments.yaml", dataFile?: string) {
     this.experimentsFile = experimentsFile;
     this.loadExperiments();
+    if (dataFile) {
+      this.dataFile = dataFile;
+      this.openDataFile();
+    }
+  }
+
+  private openDataFile(): void {
+    const file = this.dataFile!;
+    try {
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      if (!fs.existsSync(file)) {
+        fs.writeFileSync(file, "", { mode: 0o600 });
+        return;
+      }
+      const content = fs.readFileSync(file, "utf-8");
+      let experiments = 0;
+      let measurements = 0;
+      let skipped = 0;
+      let dropped = 0;
+
+      for (const line of content.split("\n")) {
+        if (!line.trim()) continue;
+        let entry: LogEntry;
+        try {
+          entry = JSON.parse(line);
+        } catch {
+          skipped++; // e.g. a line torn by a crash mid-write
+          continue;
+        }
+        if (entry?.type === "experiment") {
+          try {
+            this.validateExperiment(entry.experiment);
+          } catch {
+            skipped++;
+            continue;
+          }
+          // Definitions from the YAML file are authoritative.
+          if (!this.experiments.has(entry.experiment.id)) {
+            this.experiments.set(entry.experiment.id, entry.experiment);
+            experiments++;
+          }
+        } else if (entry?.type === "measurement") {
+          const exp = this.experiments.get(entry.experiment_id);
+          const valid =
+            exp &&
+            exp.variants.some((v) => v.id === entry.variant_id) &&
+            Object.values(entry.metrics ?? {}).every((v) => typeof v === "number" && Number.isFinite(v));
+          if (!valid) {
+            dropped++;
+            continue;
+          }
+          this.measurements.push({
+            experiment_id: entry.experiment_id,
+            variant_id: entry.variant_id,
+            metrics: entry.metrics,
+            timestamp: entry.timestamp,
+          });
+          measurements++;
+        } else {
+          skipped++;
+        }
+      }
+
+      // A crash can leave the last line without a newline; terminate it so the next append
+      // starts on its own line instead of being glued to the torn one.
+      if (content.length > 0 && !content.endsWith("\n")) {
+        fs.appendFileSync(file, "\n");
+      }
+      console.error(
+        `Restored ${experiments} experiments and ${measurements} measurements from ${file}` +
+          (skipped || dropped ? ` (skipped ${skipped} unreadable lines, dropped ${dropped} orphaned measurements)` : "")
+      );
+    } catch (error: any) {
+      throw new Error(`Cannot use A/B data file ${file}: ${error.message}`);
+    }
+  }
+
+  private persist(entry: LogEntry): void {
+    if (!this.dataFile) return;
+    fs.appendFileSync(this.dataFile, JSON.stringify(entry) + "\n", { mode: 0o600 });
   }
 
   private loadExperiments(): void {
@@ -156,10 +250,13 @@ class ABTestingFramework {
 
   public createExperiment(experiment: Experiment): void {
     this.validateExperiment(experiment);
-    this.experiments.set(experiment.id, {
-      ...experiment,
-      status: "setup",
-    });
+    if (this.experiments.has(experiment.id)) {
+      throw new Error(`Experiment already exists: ${experiment.id}`);
+    }
+    const created: Experiment = { ...experiment, status: "setup" };
+    // Write first: if the disk write fails the experiment is not created, so memory never gets ahead of disk.
+    this.persist({ type: "experiment", experiment: created });
+    this.experiments.set(created.id, created);
   }
 
   public assignVariant(
@@ -205,12 +302,14 @@ class ABTestingFramework {
         throw new Error(`Metric ${key} must be a finite number`);
       }
     }
-    this.measurements.push({
+    const measurement: Measurement = {
       experiment_id: experimentId,
       variant_id: variantId,
       metrics,
       timestamp: new Date().toISOString(),
-    });
+    };
+    this.persist({ type: "measurement", ...measurement });
+    this.measurements.push(measurement);
   }
 
   public getExperimentResults(experimentId: string): ExperimentResults | null {
@@ -368,7 +467,8 @@ class ABTestingFramework {
 
 // Initialize framework
 const abTesting = new ABTestingFramework(
-  process.env.EXPERIMENTS_FILE || "./experiments.yaml"
+  process.env.EXPERIMENTS_FILE || "./experiments.yaml",
+  process.env.AB_DATA_FILE || undefined
 );
 
 // Tool: Create experiment

@@ -91,6 +91,44 @@ describe("JSON-RPC handler", () => {
   });
 });
 
+describe("A/B persistence through the server entry point", () => {
+  it("survives a server restart when AB_DATA_FILE is set", async () => {
+    const file = path.join(tmpDir, "server-ab.jsonl");
+    process.env.AB_DATA_FILE = file;
+    const boot = () => {
+      let mod: ServerModule;
+      jest.isolateModules(() => {
+        mod = require("../src/server");
+      });
+      return mod!;
+    };
+    const run = async (m: ServerModule, name: string, args: Record<string, any>) => {
+      const r: any = await m.handleMessage({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: args } });
+      return JSON.parse(r.result.content[0].text);
+    };
+    try {
+      const first = boot();
+      await run(first, "create_experiment", {
+        id: "persisted", name: "n", hypothesis: "h", metrics: [{ id: "q", name: "q", type: "c", aggregation: "mean" }],
+        variants: [{ id: "A", name: "a", config: {} }, { id: "B", name: "b", config: {} }],
+      });
+      for (let i = 0; i < 60; i++) {
+        await run(first, "record_metric", { experiment_id: "persisted", variant_id: "A", metrics: { q: 10 + (i % 3) } });
+        await run(first, "record_metric", { experiment_id: "persisted", variant_id: "B", metrics: { q: 5 + (i % 3) } });
+      }
+      const before = await run(first, "get_experiment_results", { experiment_id: "persisted" });
+      expect(before.winner).toBe("A");
+
+      const second = boot(); // "restart": fresh module state, same file
+      expect(await run(second, "get_experiment_results", { experiment_id: "persisted" })).toEqual(before);
+      expect((await run(second, "create_experiment", { id: "persisted", name: "n", hypothesis: "h", metrics: [], variants: [] })).error)
+        .toBeDefined();
+    } finally {
+      delete process.env.AB_DATA_FILE;
+    }
+  });
+});
+
 describe("stdio transport", () => {
   it("replies in order, ignores notifications, reports parse errors, and writes only JSON to stdout", async () => {
     const input = new PassThrough();

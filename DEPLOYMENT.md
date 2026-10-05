@@ -22,8 +22,9 @@ curl localhost:3000/health
 ```
 
 Config via env: `PORT` (3000), `HOST` (0.0.0.0 in the image, 127.0.0.1 otherwise), `AUTH_TOKEN`,
-`RULES_FILE` (/data/rules.yaml), `EXPERIMENTS_FILE` (/data/experiments.yaml). Mount a volume at `/data`
-to keep edited rules across restarts. A/B measurements are in memory only.
+`RULES_FILE` (/data/rules.yaml), `EXPERIMENTS_FILE` (/data/experiments.yaml), `AB_DATA_FILE`
+(/data/ab-data.jsonl). Mount a volume at `/data` to keep edited rules and A/B data across container restarts
+(`docker run -v increadible-data:/data ...`). Without a volume, A/B data is lost when the container is removed.
 
 CI (`.github/workflows/ci-cd.yml`) builds the image, starts it, probes `/health`, `/metrics` (must be 401
 without the token) and `/mcp`, and pushes `ghcr.io/nitro0dust-pixel/increadible:{latest,sha-<commit>}` on
@@ -43,7 +44,9 @@ kubectl -n increadible-staging port-forward svc/increadible 8080:80   # then cur
 Production is the same with `k8s/production-deployment.yaml` and namespace `increadible`; pin the image to a
 `sha-<commit>` tag. Design choices to be aware of:
 
-- **One replica**, `Recreate` strategy: experiment data and stats are per-process memory. Do not add an HPA.
+- **One replica**, `Recreate` strategy: A/B data is appended to a file on a 1Gi `ReadWriteOnce` PersistentVolumeClaim
+  (`increadible-data`, mounted at `/data`), which has a single writer. Do not add an HPA or more replicas.
+  Rule hit counts are still in memory. The cluster needs a default StorageClass (or set `storageClassName` in the PVC).
 - **Rules are read-only** (ConfigMap mount): edit `increadible-config`, then `kubectl rollout restart`. The
   `update_rules` tool returns an error in this setup.
 - **ClusterIP only**, protected by `AUTH_TOKEN`. There is no TLS or ingress; add one before exposing it.
