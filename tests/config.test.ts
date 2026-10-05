@@ -137,6 +137,22 @@ describe("Dockerfile and package.json", () => {
     }
   });
 
+  it("pins one Node major in both image stages, in every CI setup-node step and in @types/node, inside the engines range", () => {
+    const images = [...dockerfile.matchAll(/^FROM node:(\d+)-alpine/gm)].map((m) => Number(m[1]));
+    expect(images).toHaveLength(2);
+    const wf: any = yaml.parse(read(".github/workflows/ci-cd.yml"));
+    const ci: number[] = Object.values<any>(wf.jobs).flatMap((job) =>
+      (job.steps ?? [])
+        .filter((s: any) => /^actions\/setup-node@/.test(s.uses ?? ""))
+        .map((s: any) => Number(s.with["node-version"]))
+    );
+    expect(ci.length).toBeGreaterThan(0);
+    const major = images[0];
+    expect(new Set([...images, ...ci])).toEqual(new Set([major]));
+    expect(Number(/(\d+)/.exec(pkg.devDependencies["@types/node"])![1])).toBe(major);
+    expect(major).toBeGreaterThanOrEqual(Number(/(\d+)/.exec(pkg.engines.node)![1]));
+  });
+
   it("uses a tracked lockfile for reproducible installs", () => {
     expect(fs.existsSync(path.join(root, "package-lock.json"))).toBe(true);
     expect(read(".gitignore")).not.toMatch(/^package-lock\.json$/m);

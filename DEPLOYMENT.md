@@ -1,8 +1,10 @@
 # Deployment
 
 > **Verification status:** the server is tested locally (`npm run verify`) and CI builds and probes the
-> Docker image. **Nothing has been deployed to a cluster.** The `k8s/` manifests are parsed and checked for
-> internal consistency by `tests/config.test.ts`, not applied. Treat them as a starting point.
+> Docker image. **Nothing has been deployed to a real environment.** `k8s/staging-deployment.yaml` has been applied once
+> to a local Docker Desktop cluster with a locally built image (rollout, auth, ConfigMap rules and A/B persistence across
+> `rollout restart` all checked). The production and monitoring manifests have only been parsed and checked for internal
+> consistency by `tests/config.test.ts`, and the GHCR pull path is untested. Treat them as a starting point.
 
 ## Run locally
 
@@ -37,7 +39,7 @@ the same probe (`scripts/probe-image.sh`) against the pulled copy: non-root user
 auth behavior, A/B data surviving a container restart on a volume, and Docker's `HEALTHCHECK` reporting healthy.
 You can run the probe yourself against any image with `bash scripts/probe-image.sh <image-ref>` (needs Docker, curl and jq).
 
-## Kubernetes (unverified)
+## Kubernetes (staging verified locally only)
 
 Run this from a machine whose `kubectl` points at the cluster you intend (check `kubectl config current-context`).
 Do it in staging first.
