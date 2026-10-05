@@ -1,473 +1,496 @@
-import { describe, it, expect, beforeAll } from "@jest/globals";
+import { describe, it, expect, beforeAll, afterAll, afterEach, jest } from "@jest/globals";
+import * as fs from "fs";
+import * as os from "os";
+import * as path from "path";
+import { RoutingPluginsMCP, RoutingRule } from "../features/07-routing-plugins/src/mcp-server";
+import { ABTestingFramework, Experiment } from "../features/08-ab-testing/src/mcp-server";
+import { UniversalAPIGateway } from "../features/09-api-gateway/src/mcp-server";
 
 /**
- * End-to-End Integration Tests for Increadible 9-Feature Stack
+ * Integration tests for the Increadible components implemented in this repo
+ * (Features #7 Routing Plugins, #8 A/B Testing, #9 API Gateway).
  *
- * Tests the complete workflow: request → routing → memory → compression →
- * cost tracking → A/B testing → API gateway → response optimization
+ * These exercise the real classes. Features #1-#6 are external projects
+ * (git submodules) and are not testable in-process here; see the todo list.
  */
 
-interface CompletePipeline {
-  request: {
-    id: string;
-    query: string;
-    complexity: "low" | "medium" | "high";
-    priority: "normal" | "critical";
+const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "increadible-e2e-"));
+const tmpFile = (name: string) => path.join(tmpDir, name);
+
+// Deterministic PRNG so statistical tests never flake.
+function mulberry32(seed: number) {
+  return () => {
+    seed |= 0;
+    seed = (seed + 0x6d2b79f5) | 0;
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
-  routing: {
-    provider: string;
-    fallback: string[];
-    cost_tier: string;
-  };
-  memory: {
-    context_compressed: boolean;
-    compression_ratio: number;
-    tokens_saved: number;
-  };
-  apis: {
-    calls_made: number;
-    cache_hits: number;
-    total_cost: number;
-  };
-  cost_tracking: {
-    llm_cost: number;
-    api_cost: number;
-    total_cost: number;
-    savings_vs_baseline: number;
-  };
-  experiment: {
-    variant_assigned: string;
-    metrics_recorded: boolean;
+}
+function normalSampler(mean: number, sd: number, seed: number) {
+  const rand = mulberry32(seed);
+  return () => {
+    const u = Math.max(rand(), 1e-12);
+    const v = rand();
+    return mean + sd * Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
   };
 }
 
-describe("Increadible 9-Feature Stack - End-to-End Integration", () => {
-  let pipeline: CompletePipeline;
+function makeExperiment(overrides: Partial<Experiment> = {}): Experiment {
+  return {
+    id: "exp-1",
+    name: "Sonnet vs Haiku",
+    hypothesis: "Haiku is as good for low-complexity tasks",
+    status: "running",
+    variants: [
+      { id: "A", name: "control", config: {} },
+      { id: "B", name: "treatment", config: {} },
+    ],
+    traffic_split: 0.5,
+    metrics: [{ id: "quality", name: "Quality", type: "continuous", aggregation: "mean" }],
+    ...overrides,
+  };
+}
+
+function recordSamples(
+  ab: ABTestingFramework,
+  expId: string,
+  variantId: string,
+  n: number,
+  sample: () => number
+) {
+  for (let i = 0; i < n; i++) ab.recordMetric(expId, variantId, { quality: sample() });
+}
+
+afterAll(() => {
+  fs.rmSync(tmpDir, { recursive: true, force: true });
+});
+
+describe("Feature #7: Routing Plugins", () => {
+  let router: RoutingPluginsMCP;
 
   beforeAll(() => {
-    pipeline = {
-      request: {
-        id: "req-e2e-001",
-        query:
-          "Analyze weather trends and tech news, optimize cost with all features",
-        complexity: "high",
-        priority: "normal",
-      },
-      routing: {
-        provider: "claude-sonnet",
-        fallback: ["claude-haiku"],
-        cost_tier: "mid",
-      },
-      memory: {
-        context_compressed: true,
-        compression_ratio: 0.89,
-        tokens_saved: 450,
-      },
-      apis: {
-        calls_made: 2,
-        cache_hits: 0,
-        total_cost: 0,
-      },
-      cost_tracking: {
-        llm_cost: 0.0015,
-        api_cost: 0,
-        total_cost: 0.0015,
-        savings_vs_baseline: 0.9998,
-      },
-      experiment: {
-        variant_assigned: "sonnet-optimized",
-        metrics_recorded: true,
-      },
-    };
+    jest.spyOn(console, "warn").mockImplementation(() => undefined);
+    jest.spyOn(console, "error").mockImplementation(() => undefined);
   });
 
-  describe("Feature #1: OmniRoute (Multi-Provider AI Routing)", () => {
-    it("should route high-priority request to premium provider", () => {
-      const request = { ...pipeline.request, priority: "critical" };
-      const routing = pipeline.routing;
+  afterAll(() => { jest.restoreAllMocks(); });
 
-      expect(routing.provider).toBeDefined();
-      expect(routing.fallback).toEqual(expect.arrayContaining(["claude-haiku"]));
-      expect(request.priority).toBe("critical");
-    });
+  // A nonexistent rules file triggers the built-in default rules.
+  const fresh = (name = "missing-rules.yaml") => new RoutingPluginsMCP(tmpFile(name));
 
-    it("should select cost-optimized provider for low-complexity tasks", () => {
-      const request = { ...pipeline.request, complexity: "low" };
-      // Low complexity should route to Haiku (cheaper)
-      const selectedProvider = request.complexity === "low" ? "claude-haiku" : "claude-sonnet";
-      expect(["claude-haiku", "claude-sonnet"]).toContain(selectedProvider);
-    });
+  it("routes low-complexity QA to Haiku", () => {
+    router = fresh();
+    const r = router.applyRoutingRules({ task_type: "qa", task_complexity: "low" });
+    expect(r).toMatchObject({ provider: "claude-haiku", rule_id: "simple-tasks" });
+    expect(r.fallback).toEqual(["claude-sonnet"]);
   });
 
-  describe("Feature #2: Claude-Mem (Persistent Memory)", () => {
-    it("should store conversation context with progressive disclosure", () => {
-      const memory = {
-        session_id: "sess-001",
-        context_window: 8192,
-        compressed: true,
-        layers: ["core", "supporting", "metadata"],
-      };
-
-      expect(memory.layers).toHaveLength(3);
-      expect(memory.compressed).toBe(true);
-    });
+  it("routes critical security work to Opus", () => {
+    router = fresh();
+    const r = router.applyRoutingRules({ task_type: "security", priority: "critical" });
+    expect(r).toMatchObject({ provider: "claude-opus", rule_id: "critical-tasks" });
   });
 
-  describe("Feature #3: Token Optimizer (Context Window Compression)", () => {
-    it("should compress context maintaining 99.2% fidelity", () => {
-      const memory = pipeline.memory;
-
-      expect(memory.context_compressed).toBe(true);
-      expect(memory.compression_ratio).toBeGreaterThan(0.8);
-      expect(memory.compression_ratio).toBeLessThan(1);
-      expect(memory.tokens_saved).toBeGreaterThan(0);
-    });
-
-    it("should achieve 99.2% token reduction on large contexts", () => {
-      const original_tokens = 50000;
-      const reduced_tokens = original_tokens * (1 - pipeline.memory.compression_ratio);
-      const reduction_percentage = (reduced_tokens / original_tokens) * 100;
-
-      expect(reduction_percentage).toBeGreaterThan(85);
-    });
+  it("orders the built-in default rules by priority", () => {
+    const priorities = ((fresh() as any).rules as RoutingRule[]).map((r) => r.priority);
+    expect(priorities).toEqual([...priorities].sort((a, b) => a - b));
   });
 
-  describe("Feature #4: gstack (Workflow Automation & Habit Learning)", () => {
-    it("should detect multi-step workflow from query", () => {
-      const query = pipeline.request.query;
-      const steps = query.includes("and") ? 2 : 1;
-
-      expect(steps).toBeGreaterThanOrEqual(1);
-    });
-
-    it("should learn and optimize workflow execution patterns", () => {
-      const workflow = {
-        steps: [
-          { action: "fetch_weather", status: "completed" },
-          { action: "fetch_news", status: "completed" },
-          { action: "analyze", status: "completed" },
-        ],
-        execution_time: 1200, // ms
-        optimization_applied: true,
-      };
-
-      expect(workflow.steps).toHaveLength(3);
-      expect(workflow.optimization_applied).toBe(true);
-    });
+  it("falls through to the default rule when nothing else matches", () => {
+    router = fresh();
+    const r = router.applyRoutingRules({ task_type: "development", task_complexity: "high" });
+    expect(r).toMatchObject({ provider: "claude-sonnet", rule_id: "default" });
   });
 
-  describe("Feature #5: Headroom (Context Bloat Removal)", () => {
-    it("should identify and remove redundant context", () => {
-      const bloat_detection = {
-        redundant_tokens_found: 234,
-        cache_misses_avoided: 12,
-        context_efficiency: 0.92,
-      };
-
-      expect(bloat_detection.context_efficiency).toBeGreaterThan(0.9);
-      expect(bloat_detection.redundant_tokens_found).toBeGreaterThan(0);
-    });
+  it("does not match a rule when the request lacks a required key", () => {
+    router = fresh();
+    // security task but no priority field -> must not hit critical-tasks
+    const r = router.applyRoutingRules({ task_type: "security" });
+    expect(r.rule_id).toBe("default");
   });
 
-  describe("Feature #6: agentacct (Cost Analytics & Tracking)", () => {
-    it("should track multi-provider costs in real-time", () => {
-      const costs = pipeline.cost_tracking;
-
-      expect(costs.llm_cost).toBeGreaterThan(0);
-      expect(costs.total_cost).toBe(costs.llm_cost + costs.api_cost);
-    });
-
-    it("should calculate 99.98% cost savings vs baseline", () => {
-      const baseline_cost = 1.0; // $1 baseline
-      const optimized_cost = pipeline.cost_tracking.total_cost;
-      const savings = ((baseline_cost - optimized_cost) / baseline_cost) * 100;
-
-      expect(savings).toBeGreaterThan(99.9);
-      expect(pipeline.cost_tracking.savings_vs_baseline).toBeGreaterThan(0.9998);
-    });
-
-    it("should provide cost breakdown by feature", () => {
-      const breakdown = {
-        omniRoute: 0.0005,
-        compression: 0.0002,
-        apiGateway: 0,
-        abTesting: 0.0008,
-        total: 0.0015,
-      };
-
-      expect(breakdown.total).toBe(
-        breakdown.omniRoute +
-          breakdown.compression +
-          breakdown.apiGateway +
-          breakdown.abTesting
-      );
-    });
+  it("applies rules in priority order and skips disabled rules", () => {
+    router = fresh("priority-rules.yaml");
+    const rules: RoutingRule[] = [
+      { id: "low-prio", name: "l", enabled: true, priority: 50, match: { task_type: "x" }, provider: "p-low", reason: "r" },
+      { id: "high-prio", name: "h", enabled: true, priority: 1, match: { task_type: "x" }, provider: "p-high", reason: "r" },
+      { id: "disabled", name: "d", enabled: false, priority: 0, match: { task_type: "x" }, provider: "p-off", reason: "r" },
+    ];
+    router.updateRules(rules);
+    expect(router.applyRoutingRules({ task_type: "x" }).provider).toBe("p-high");
   });
 
-  describe("Feature #7: Routing Plugins (Team-Specific Rules)", () => {
-    it("should apply custom routing rules without code changes", () => {
-      const rules = [
-        {
-          id: "simple-tasks",
-          match: { task_complexity: "low" },
-          provider: "claude-haiku",
-          cost_savings: "70%",
-        },
-        {
-          id: "critical-tasks",
-          match: { priority: "critical" },
-          provider: "claude-opus",
-          cost_savings: "0%",
-        },
-      ];
-
-      expect(rules).toHaveLength(2);
-      rules.forEach((rule) => {
-        expect(rule.provider).toBeDefined();
-      });
-    });
-
-    it("should track rule application statistics", () => {
-      const stats = {
-        total_requests: 1000,
-        simple_tasks_routed: 650,
-        critical_tasks_routed: 150,
-        coverage_percentage: 80,
-      };
-
-      expect(stats.coverage_percentage).toBeGreaterThan(75);
-    });
+  it("persists updated rules and reloads them in a new instance (no code change)", () => {
+    const file = tmpFile("persist-rules.yaml");
+    const a = new RoutingPluginsMCP(file);
+    a.updateRules([
+      { id: "only", name: "o", enabled: true, priority: 1, match: {}, provider: "custom-model", reason: "r" },
+    ]);
+    const b = new RoutingPluginsMCP(file);
+    expect(b.applyRoutingRules({ task_type: "anything" }).provider).toBe("custom-model");
   });
 
-  describe("Feature #8: A/B Testing Framework", () => {
-    it("should assign variants and track metrics", () => {
-      const experiment = pipeline.experiment;
-
-      expect(experiment.variant_assigned).toBeDefined();
-      expect(experiment.metrics_recorded).toBe(true);
-    });
-
-    it("should perform statistical significance testing", () => {
-      const results = {
-        variant_a: { mean: 0.85, std_dev: 0.05, sample_size: 150 },
-        variant_b: { mean: 0.92, std_dev: 0.04, sample_size: 150 },
-        effect_size: 1.4, // Cohen's d
-        p_value: 0.01,
-        significant: true,
-        confidence_level: 0.95,
-      };
-
-      expect(results.effect_size).toBeGreaterThan(1.2);
-      expect(results.p_value).toBeLessThan(0.05);
-      expect(results.significant).toBe(true);
-    });
-
-    it("should recommend winner with confidence score", () => {
-      const recommendation = {
-        winner: "variant_b",
-        confidence: 0.95,
-        expected_improvement: "8.2%",
-        risk_level: "low",
-      };
-
-      expect(recommendation.winner).toBeDefined();
-      expect(recommendation.confidence).toBeGreaterThanOrEqual(0.9);
-    });
+  it("falls back to default rules when the rules file is corrupt", () => {
+    const file = tmpFile("corrupt-rules.yaml");
+    fs.writeFileSync(file, "rules: [this is: : not valid yaml");
+    jest.spyOn(console, "error").mockImplementation(() => undefined);
+    const r = new RoutingPluginsMCP(file);
+    expect(r.applyRoutingRules({ task_type: "qa", task_complexity: "low" }).provider).toBe("claude-haiku");
   });
 
-  describe("Feature #9: Universal API Gateway", () => {
-    it("should discover and select appropriate APIs", () => {
-      const apis_selected = [
-        {
-          id: "openweathermap",
-          category: "weather",
-          cost: 0,
-          cache_ttl: 300,
-        },
-        {
-          id: "newsapi",
-          category: "news",
-          cost: 0,
-          cache_ttl: 300,
-        },
-      ];
+  it("reports per-rule counts and provider breakdown that sum correctly", () => {
+    router = fresh();
+    for (let i = 0; i < 3; i++) router.applyRoutingRules({ task_type: "qa", task_complexity: "low" });
+    router.applyRoutingRules({ task_type: "development" });
+    const stats = router.getStats();
+    expect(stats.total_requests).toBe(4);
+    expect(stats.rules_applied).toEqual({ "simple-tasks": 3, default: 1 });
+    expect(stats.provider_breakdown).toEqual({ "claude-haiku": "75.0%", "claude-sonnet": "25.0%" });
+  });
+});
 
-      expect(apis_selected).toHaveLength(2);
-      apis_selected.forEach((api) => {
-        expect(api.cost).toBe(0);
-      });
-    });
+describe("Feature #8: A/B Testing Framework", () => {
+  let ab: ABTestingFramework;
 
-    it("should cache API responses for 5 minutes", () => {
-      const cache = {
-        entry: {
-          api_id: "openweathermap",
-          cached: true,
-          ttl: 300,
-          age_seconds: 45,
-        },
-      };
+  beforeAll(() => {
+    jest.spyOn(console, "error").mockImplementation(() => undefined);
+    jest.spyOn(console, "error").mockImplementation(() => undefined);
+  });
+  afterAll(() => { jest.restoreAllMocks(); });
 
-      expect(cache.entry.ttl).toBe(300);
-      expect(cache.entry.age_seconds).toBeLessThan(cache.entry.ttl);
-    });
+  const fresh = () => new ABTestingFramework(tmpFile("missing-experiments.yaml"));
 
-    it("should aggregate multiple API calls in parallel", () => {
-      const aggregation = {
-        apis: 2,
-        parallel_calls: true,
-        total_time_ms: 850,
-        sequential_equivalent_ms: 1200,
-        efficiency_gain: "29%",
-      };
-
-      expect(aggregation.parallel_calls).toBe(true);
-      expect(aggregation.total_time_ms).toBeLessThan(aggregation.sequential_equivalent_ms);
-    });
+  it("assigns only valid variants and honours the traffic split", () => {
+    ab = fresh();
+    ab.createExperiment(makeExperiment({ traffic_split: 0.5 }));
+    const rand = mulberry32(42);
+    const spy = jest.spyOn(Math, "random").mockImplementation(rand);
+    let a = 0;
+    const N = 4000;
+    for (let i = 0; i < N; i++) {
+      const v = ab.assignVariant("exp-1").variant_id;
+      expect(["A", "B"]).toContain(v);
+      if (v === "A") a++;
+    }
+    spy.mockRestore();
+    expect(a / N).toBeGreaterThan(0.47);
+    expect(a / N).toBeLessThan(0.53);
   });
 
-  describe("Complete Pipeline Integration", () => {
-    it("should execute full 9-feature pipeline end-to-end", () => {
-      const result = {
-        request_id: pipeline.request.id,
-        features_engaged: 9,
-        total_latency_ms: 1500,
-        total_cost: pipeline.cost_tracking.total_cost,
-        baseline_cost: 1.0,
-        savings_percentage: 99.98,
-        success: true,
-      };
-
-      expect(result.features_engaged).toBe(9);
-      expect(result.success).toBe(true);
-      expect(result.total_cost).toBeLessThan(0.01);
-    });
-
-    it("should maintain response quality while optimizing cost", () => {
-      const quality_metrics = {
-        response_relevance: 0.97,
-        factual_accuracy: 0.98,
-        completeness: 0.95,
-        user_satisfaction: 4.8,
-        quality_score: 0.965,
-      };
-
-      expect(quality_metrics.quality_score).toBeGreaterThan(0.95);
-      expect(quality_metrics.user_satisfaction).toBeGreaterThan(4.5);
-    });
-
-    it("should handle concurrent requests with feature composition", () => {
-      const concurrency_test = {
-        concurrent_requests: 100,
-        avg_response_time_ms: 1200,
-        p99_response_time_ms: 2500,
-        throughput_rps: 83.3,
-        error_rate: 0.0,
-        all_features_active: true,
-      };
-
-      expect(concurrency_test.error_rate).toBe(0.0);
-      expect(concurrency_test.all_features_active).toBe(true);
-      expect(concurrency_test.throughput_rps).toBeGreaterThan(50);
-    });
-
-    it("should demonstrate 99.98% cost reduction across all scenarios", () => {
-      const scenarios = [
-        {
-          name: "Simple Q&A",
-          baseline: 0.05,
-          optimized: 0.0001,
-          savings: 99.8,
-        },
-        {
-          name: "Complex Analysis",
-          baseline: 1.5,
-          optimized: 0.003,
-          savings: 99.8,
-        },
-        {
-          name: "Multi-API Workflow",
-          baseline: 2.0,
-          optimized: 0.0004,
-          savings: 99.98,
-        },
-        {
-          name: "Real-time Monitoring",
-          baseline: 10.0,
-          optimized: 0.02,
-          savings: 99.8,
-        },
-      ];
-
-      scenarios.forEach((scenario) => {
-        const actual_savings =
-          ((scenario.baseline - scenario.optimized) / scenario.baseline) * 100;
-        expect(actual_savings).toBeGreaterThan(scenario.savings - 0.5);
-      });
-    });
+  it("keeps a user in the same variant across calls, and splits users roughly by traffic_split", () => {
+    ab = fresh();
+    ab.createExperiment(makeExperiment({ traffic_split: 0.3 }));
+    for (const user of ["alice", "bob", "carol"]) {
+      const first = ab.assignVariant("exp-1", user).variant_id;
+      for (let i = 0; i < 50; i++) expect(ab.assignVariant("exp-1", user).variant_id).toBe(first);
+    }
+    let a = 0;
+    const N = 5000;
+    for (let i = 0; i < N; i++) if (ab.assignVariant("exp-1", `user-${i}`).variant_id === "A") a++;
+    expect(a / N).toBeGreaterThan(0.27);
+    expect(a / N).toBeLessThan(0.33);
   });
 
-  describe("Production Readiness Checklist", () => {
-    it("should have all 9 features deployed and operational", () => {
-      const features = [
-        "OmniRoute",
-        "Claude-Mem",
-        "Token-Optimizer",
-        "gstack",
-        "Headroom",
-        "agentacct",
-        "RoutingPlugins",
-        "ABTesting",
-        "APIGateway",
-      ];
+  it("sends all traffic to A at split 1 and all to B at split 0", () => {
+    ab = fresh();
+    ab.createExperiment(makeExperiment({ id: "all-a", traffic_split: 1 }));
+    ab.createExperiment(makeExperiment({ id: "all-b", traffic_split: 0 }));
+    for (let i = 0; i < 50; i++) {
+      expect(ab.assignVariant("all-a").variant_id).toBe("A");
+      expect(ab.assignVariant("all-b").variant_id).toBe("B");
+    }
+  });
 
-      expect(features).toHaveLength(9);
-      features.forEach((feature) => {
-        expect(feature).toBeTruthy();
-      });
+  it("throws for assignment on an unknown experiment and returns null results", () => {
+    ab = fresh();
+    expect(() => ab.assignVariant("nope")).toThrow("Experiment not found");
+    expect(ab.getExperimentResults("nope")).toBeNull();
+  });
+
+  it("rejects experiments the statistics cannot handle (must have exactly 2 variants)", () => {
+    ab = fresh();
+    expect(() =>
+      ab.createExperiment(makeExperiment({ variants: [{ id: "only", name: "o", config: {} }] }))
+    ).toThrow(/exactly 2 variants/);
+  });
+
+  it("reports incomplete with zero confidence until enough data is collected", () => {
+    ab = fresh();
+    ab.createExperiment(makeExperiment());
+    recordSamples(ab, "exp-1", "A", 40, normalSampler(10, 1, 1));
+    const r = ab.getExperimentResults("exp-1")!;
+    expect(r.status).toBe("incomplete");
+    expect(r.confidence).toBe(0);
+    expect(r.statistical_analysis.message).toContain("60 more samples");
+    expect(ab.recommendWinner("exp-1")).toBe("Insufficient data for recommendation");
+  });
+
+  it("declares the better variant the winner when the difference is large", () => {
+    ab = fresh();
+    ab.createExperiment(makeExperiment());
+    recordSamples(ab, "exp-1", "A", 60, normalSampler(10, 1, 11));
+    recordSamples(ab, "exp-1", "B", 60, normalSampler(5, 1, 12));
+    const r = ab.getExperimentResults("exp-1")!;
+    expect(r.status).toBe("complete");
+    expect(r.winner).toBe("A");
+    expect(r.statistical_analysis.p_values.quality).toBeLessThan(0.001);
+    expect(Math.abs(r.statistical_analysis.effect_sizes.quality)).toBeGreaterThan(3);
+    expect(r.confidence).toBeGreaterThan(0.99);
+    expect(ab.recommendWinner("exp-1")).toBe("A");
+  });
+
+  it("picks B when B is better (winner is not hard-wired to a position)", () => {
+    ab = fresh();
+    ab.createExperiment(makeExperiment());
+    recordSamples(ab, "exp-1", "A", 60, normalSampler(5, 1, 21));
+    recordSamples(ab, "exp-1", "B", 60, normalSampler(10, 1, 22));
+    expect(ab.getExperimentResults("exp-1")!.winner).toBe("B");
+  });
+
+  it("does NOT declare a winner when both variants come from the same distribution", () => {
+    ab = fresh();
+    ab.createExperiment(makeExperiment());
+    recordSamples(ab, "exp-1", "A", 60, normalSampler(10, 2, 31));
+    recordSamples(ab, "exp-1", "B", 60, normalSampler(10, 2, 32));
+    const r = ab.getExperimentResults("exp-1")!;
+    expect(r.statistical_analysis.p_values.quality).toBeGreaterThan(0.05);
+    expect(r.winner).toBeUndefined();
+    expect(r.confidence).toBeLessThan(0.95);
+    expect(ab.recommendWinner("exp-1")).toBe("No clear winner");
+  });
+
+  it("computes a 95% CI for the mean (narrower than the raw data spread)", () => {
+    ab = fresh();
+    ab.createExperiment(makeExperiment());
+    recordSamples(ab, "exp-1", "A", 100, normalSampler(10, 2, 41));
+    recordSamples(ab, "exp-1", "B", 100, normalSampler(10, 2, 42));
+    const m = ab.getExperimentResults("exp-1")!.variant_results.A.metrics.quality;
+    const [lo, hi] = m.ci_95;
+    // CI of the mean should be about +/- 1.96 * 2 / sqrt(100) = +/- 0.39, not +/- 3.9
+    expect(hi - lo).toBeGreaterThan(0.5);
+    expect(hi - lo).toBeLessThan(1.2);
+    expect(lo).toBeLessThan(m.mean);
+    expect(hi).toBeGreaterThan(m.mean);
+  });
+
+  it("does not return NaN when a variant has zero variance", () => {
+    ab = fresh();
+    ab.createExperiment(makeExperiment());
+    recordSamples(ab, "exp-1", "A", 50, () => 1);
+    recordSamples(ab, "exp-1", "B", 50, () => 1);
+    const r = ab.getExperimentResults("exp-1")!;
+    expect(Number.isNaN(r.statistical_analysis.effect_sizes.quality)).toBe(false);
+    expect(Number.isNaN(r.statistical_analysis.p_values.quality)).toBe(false);
+    expect(r.winner).toBeUndefined();
+  });
+
+  it("keeps results for different experiments separate", () => {
+    ab = fresh();
+    ab.createExperiment(makeExperiment({ id: "e1" }));
+    ab.createExperiment(makeExperiment({ id: "e2" }));
+    recordSamples(ab, "e1", "A", 60, normalSampler(10, 1, 51));
+    recordSamples(ab, "e1", "B", 60, normalSampler(5, 1, 52));
+    expect(ab.getExperimentResults("e1")!.status).toBe("complete");
+    expect(ab.getExperimentResults("e2")!.status).toBe("incomplete");
+  });
+});
+
+describe("Feature #9: Universal API Gateway", () => {
+  let gw: UniversalAPIGateway;
+
+  beforeAll(() => {
+    jest.spyOn(console, "error").mockImplementation(() => undefined);
+  });
+  afterEach(() => { jest.restoreAllMocks(); });
+
+  it("discovers the registered APIs and filters by name/category/description", () => {
+    gw = new UniversalAPIGateway();
+    const all = gw.discoverAPIs();
+    expect(all.length).toBe(9);
+    expect(gw.discoverAPIs("weather").map((a) => a.id).sort()).toEqual(["openweathermap", "weatherapi"]);
+    expect(gw.discoverAPIs("WEATHER").length).toBe(2);
+    expect(gw.discoverAPIs("no-such-thing-xyz")).toEqual([]);
+  });
+
+  it("returns data on a miss, then serves identical calls from cache", async () => {
+    gw = new UniversalAPIGateway();
+    const first = await gw.callAPI("openweathermap", "/weather", { q: "London" });
+    const second = await gw.callAPI("openweathermap", "/weather", { q: "London" });
+    expect(first.cached).toBe(false);
+    expect(first.data.main.temp).toBeDefined();
+    expect(second.cached).toBe(true);
+    expect(second.data).toEqual(first.data);
+  });
+
+  it("does not share cache entries across different params or endpoints", async () => {
+    gw = new UniversalAPIGateway();
+    await gw.callAPI("openweathermap", "/weather", { q: "London" });
+    expect((await gw.callAPI("openweathermap", "/weather", { q: "Paris" })).cached).toBe(false);
+    expect((await gw.callAPI("openweathermap", "/forecast", { q: "London" })).cached).toBe(false);
+  });
+
+  it("expires cache entries after the 5 minute TTL", async () => {
+    gw = new UniversalAPIGateway();
+    let now = 1_000_000;
+    jest.spyOn(Date, "now").mockImplementation(() => now);
+    await gw.callAPI("newsapi", "/top", {});
+    now += 299_000;
+    expect((await gw.callAPI("newsapi", "/top", {})).cached).toBe(true);
+    now += 2_000; // 301s after the original write
+    expect((await gw.callAPI("newsapi", "/top", {})).cached).toBe(false);
+  });
+
+  it("rejects unknown APIs and counts the failure", async () => {
+    gw = new UniversalAPIGateway();
+    await expect(gw.callAPI("does-not-exist", "/x")).rejects.toThrow("API not found");
+    expect(gw.getStats()).toMatchObject({ total_calls: 1, failed: 1, successful: 0 });
+  });
+
+  it("aggregates calls in order and tracks stats", async () => {
+    gw = new UniversalAPIGateway();
+    const out = await gw.aggregateAPIs([
+      { id: "openweathermap", endpoint: "/weather", params: { q: "NYC" } },
+      { id: "newsapi", endpoint: "/top" },
+      { id: "coingecko", endpoint: "/price" },
+    ]);
+    expect(out).toHaveLength(3);
+    expect(out[0].data.main).toBeDefined();
+    expect(out[1].data.articles).toBeDefined();
+    expect(out[2].data.bitcoin).toBeDefined();
+    const s = gw.getStats();
+    expect(s.successful).toBe(3);
+    expect(s.cached_items).toBe(3);
+  });
+
+  it("reports a cache hit rate", async () => {
+    gw = new UniversalAPIGateway();
+    await gw.callAPI("wikipedia", "/page", { t: "x" });
+    await gw.callAPI("wikipedia", "/page", { t: "x" });
+    expect(gw.getStats().cache_hit_rate).toBe("0.50");
+  });
+
+  it("clearCache forces a fresh call, and custom APIs can be registered", async () => {
+    gw = new UniversalAPIGateway();
+    await gw.callAPI("wikipedia", "/page", {});
+    gw.clearCache();
+    expect((await gw.callAPI("wikipedia", "/page", {})).cached).toBe(false);
+    gw.addCustomAPI({
+      id: "custom", name: "Custom", category: "test", endpoint: "https://example.invalid",
+      methods: ["GET"], auth: "none", free: true, description: "custom api",
     });
+    expect(gw.discoverAPIs("custom").map((a) => a.id)).toContain("custom");
+    expect((await gw.callAPI("custom", "/x", { a: 1 })).data.status).toBe("success");
+  });
 
-    it("should meet performance SLAs", () => {
-      const slas = {
-        p99_latency_ms: 2500,
-        availability: 0.9998,
-        error_rate: 0.001,
-        cache_hit_rate: 0.75,
-      };
+  it("handles 100 concurrent calls correctly", async () => {
+    gw = new UniversalAPIGateway();
+    const calls = Array.from({ length: 100 }, (_, i) => ({
+      id: "openweathermap", endpoint: "/weather", params: { q: `city-${i % 10}` },
+    }));
+    const start = process.hrtime.bigint();
+    const out = await gw.aggregateAPIs(calls);
+    const ms = Number(process.hrtime.bigint() - start) / 1e6;
+    expect(out).toHaveLength(100);
+    expect(out.every((r) => r.data.main.temp !== undefined)).toBe(true);
+    // Mock backend, in-process: measures gateway overhead only, not real API latency.
+    expect(ms).toBeLessThan(2000);
+  });
+});
 
-      expect(slas.availability).toBeGreaterThan(0.999);
-      expect(slas.error_rate).toBeLessThan(0.01);
-      expect(slas.cache_hit_rate).toBeGreaterThan(0.7);
-    });
+describe("Composition: routing -> experiment -> gateway", () => {
+  beforeAll(() => {
+    jest.spyOn(console, "error").mockImplementation(() => undefined);
+    jest.spyOn(console, "warn").mockImplementation(() => undefined);
+    jest.spyOn(console, "error").mockImplementation(() => undefined);
+  });
+  afterAll(() => { jest.restoreAllMocks(); });
 
-    it("should have complete documentation and integration guides", () => {
-      const docs = {
-        readme: true,
-        integration_guides: 9,
-        mcp_server_implementations: 9,
-        example_workflows: true,
-        api_schemas: true,
-      };
+  it("runs a request through all three real components", async () => {
+    const router = new RoutingPluginsMCP(tmpFile("pipeline-rules-missing.yaml"));
+    const ab = new ABTestingFramework(tmpFile("pipeline-exp-missing.yaml"));
+    const gw = new UniversalAPIGateway();
+    ab.createExperiment(makeExperiment({ id: "pipeline" }));
 
-      expect(docs.integration_guides).toBe(9);
-      expect(docs.mcp_server_implementations).toBe(9);
-      expect(docs.readme).toBe(true);
-    });
+    const request = { task_type: "qa", task_complexity: "low" };
+    const route = router.applyRoutingRules(request);
+    const variant = ab.assignVariant("pipeline");
+    const data = await gw.aggregateAPIs([
+      { id: "openweathermap", endpoint: "/weather", params: { q: "SF" } },
+      { id: "newsapi", endpoint: "/top" },
+    ]);
+    ab.recordMetric("pipeline", variant.variant_id, { quality: 0.9 });
 
-    it("should be ready for production deployment", () => {
-      const readiness = {
-        all_tests_passing: true,
-        security_reviewed: true,
-        performance_benchmarked: true,
-        documentation_complete: true,
-        rollback_plan: true,
-        monitoring_configured: true,
-        production_ready: true,
-      };
+    expect(route.provider).toBe("claude-haiku");
+    expect(["A", "B"]).toContain(variant.variant_id);
+    expect(data).toHaveLength(2);
+    expect(ab.getExperimentResults("pipeline")!.status).toBe("incomplete");
+    expect(router.getStats().total_requests).toBe(1);
+    expect(gw.getStats().successful).toBe(2);
+  });
+});
 
-      Object.values(readiness).forEach((value) => {
-        expect(value).toBe(true);
-      });
+describe("Tool dispatch (processToolCall), isolated from the working directory", () => {
+  const saved = { r: process.env.RULES_FILE, e: process.env.EXPERIMENTS_FILE };
+  let routing: typeof import("../features/07-routing-plugins/src/mcp-server");
+  let abTool: typeof import("../features/08-ab-testing/src/mcp-server");
+  let gwTool: typeof import("../features/09-api-gateway/src/mcp-server");
+
+  beforeAll(() => {
+    jest.spyOn(console, "error").mockImplementation(() => undefined);
+    jest.spyOn(console, "warn").mockImplementation(() => undefined);
+    process.env.RULES_FILE = tmpFile("tool-rules.yaml");
+    process.env.EXPERIMENTS_FILE = tmpFile("tool-experiments.yaml");
+    jest.isolateModules(() => {
+      routing = require("../features/07-routing-plugins/src/mcp-server");
+      abTool = require("../features/08-ab-testing/src/mcp-server");
+      gwTool = require("../features/09-api-gateway/src/mcp-server");
     });
   });
+  afterAll(() => {
+    jest.restoreAllMocks();
+    process.env.RULES_FILE = saved.r;
+    process.env.EXPERIMENTS_FILE = saved.e;
+    if (saved.r === undefined) delete process.env.RULES_FILE;
+    if (saved.e === undefined) delete process.env.EXPERIMENTS_FILE;
+  });
+
+  it("routing tools: apply_routing_rules, get_rule_stats, update_rules, unknown tool", async () => {
+    const applied = JSON.parse(await routing.processToolCall("apply_routing_rules", { task_type: "qa", task_complexity: "low" }));
+    expect(applied.provider).toBe("claude-haiku");
+    expect(JSON.parse(await routing.processToolCall("get_rule_stats", {})).total_requests).toBe(1);
+    const upd = JSON.parse(await routing.processToolCall("update_rules", {
+      rules: [{ id: "x", name: "x", enabled: true, priority: 1, match: {}, provider: "p", reason: "r" }],
+    }));
+    expect(upd.status).toBe("success");
+    expect(fs.existsSync(tmpFile("tool-rules.yaml"))).toBe(true);
+    expect(JSON.parse(await routing.processToolCall("nope", {})).error).toBe("Unknown tool");
+  });
+
+  it("A/B tools: create, assign, record, results, recommend", async () => {
+    await abTool.processToolCall("create_experiment", makeExperiment({ id: "t1" }) as any);
+    const a = JSON.parse(await abTool.processToolCall("assign_variant", { experiment_id: "t1" }));
+    expect(["A", "B"]).toContain(a.variant_id);
+    await abTool.processToolCall("record_metric", { experiment_id: "t1", variant_id: a.variant_id, metrics: { quality: 1 } });
+    expect(JSON.parse(await abTool.processToolCall("get_experiment_results", { experiment_id: "t1" })).status).toBe("incomplete");
+    expect(JSON.parse(await abTool.processToolCall("recommend_winner", { experiment_id: "t1" })).recommendation)
+      .toBe("Insufficient data for recommendation");
+  });
+
+  it("gateway tools: discover, call, aggregate, stats, and error shaping", async () => {
+    expect(JSON.parse(await gwTool.processToolCall("discover_apis", { query: "news" })).length).toBeGreaterThan(0);
+    expect(JSON.parse(await gwTool.processToolCall("call_api", { api_id: "newsapi", endpoint: "/top" })).cached).toBe(false);
+    expect(JSON.parse(await gwTool.processToolCall("call_api", { api_id: "bogus", endpoint: "/x" })).error).toContain("API not found");
+    expect(JSON.parse(await gwTool.processToolCall("aggregate_apis", { apis: [{ id: "newsapi", endpoint: "/top" }] })).count).toBe(1);
+    expect(JSON.parse(await gwTool.processToolCall("get_api_stats", {})).total_calls).toBeGreaterThan(0);
+  });
+});
+
+describe("Vendored features #1-#4, #6 (git submodules, not exercised here)", () => {
+  it.todo("#1 OmniRoute: runs as a separate service; needs a live-service integration test");
+  it.todo("#2 Claude-Mem: no in-process test in this repo");
+  it.todo("#3 Token-Optimizer: real compression ratio must be measured on real contexts");
+  it.todo("#3b Headroom: no in-process test in this repo");
+  it.todo("#4 gstack: installs as Claude Code skills; no in-process test in this repo");
+  it.todo("#6 agentacct: real cost savings must be measured from actual usage logs");
 });

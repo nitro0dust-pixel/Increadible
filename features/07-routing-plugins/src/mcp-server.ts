@@ -1,9 +1,5 @@
-import Anthropic from "@anthropic-ai/sdk";
 import * as fs from "fs";
 import * as yaml from "yaml";
-import * as path from "path";
-
-const client = new Anthropic();
 
 interface RoutingRule {
   id: string;
@@ -46,7 +42,7 @@ class RoutingPluginsMCP {
         const content = fs.readFileSync(this.rulesFile, "utf-8");
         const config: RulesConfig = yaml.parse(content);
         this.rules = config.rules.sort((a, b) => a.priority - b.priority);
-        console.log(`Loaded ${this.rules.length} routing rules`);
+        console.error(`Loaded ${this.rules.length} routing rules`);
       } else {
         console.warn(`Rules file not found: ${this.rulesFile}`);
         this.createDefaultRules();
@@ -88,7 +84,7 @@ class RoutingPluginsMCP {
         provider: "claude-sonnet",
         reason: "Balanced default",
       },
-    ];
+    ].sort((a, b) => a.priority - b.priority);
   }
 
   private matchesConditions(
@@ -175,7 +171,25 @@ class RoutingPluginsMCP {
   }
 
   public updateRules(newRules: RoutingRule[]): void {
-    this.rules = newRules.sort((a, b) => a.priority - b.priority);
+    if (!Array.isArray(newRules)) {
+      throw new Error("rules must be an array");
+    }
+    for (const rule of newRules) {
+      if (
+        !rule ||
+        typeof rule.id !== "string" ||
+        typeof rule.provider !== "string" ||
+        typeof rule.priority !== "number" ||
+        typeof rule.enabled !== "boolean" ||
+        typeof rule.match !== "object" ||
+        rule.match === null
+      ) {
+        throw new Error(
+          "each rule needs string id, string provider, number priority, boolean enabled and object match"
+        );
+      }
+    }
+    this.rules = [...newRules].sort((a, b) => a.priority - b.priority);
     this.saveRules();
   }
 
@@ -275,6 +289,17 @@ export async function processToolCall(
   toolName: string,
   toolInput: Record<string, any>
 ): Promise<string> {
+  try {
+    return await dispatchToolCall(toolName, toolInput);
+  } catch (error: any) {
+    return JSON.stringify({ error: error.message });
+  }
+}
+
+async function dispatchToolCall(
+  toolName: string,
+  toolInput: Record<string, any>
+): Promise<string> {
   switch (toolName) {
     case "apply_routing_rules": {
       const result = routingPlugins.applyRoutingRules(toolInput);
@@ -296,14 +321,20 @@ export async function processToolCall(
 
     case "suggest_rules": {
       const stats = routingPlugins.getStats();
-      const suggestions = [
-        {
-          type: "optimization",
-          suggestion:
-            "Route more low-complexity tasks to Haiku for cost savings",
-          potential_savings: "70-80%",
-        },
-      ];
+      const haikuShare = parseFloat(stats.provider_breakdown["claude-haiku"] ?? "0");
+      const suggestions =
+        stats.total_requests === 0
+          ? []
+          : haikuShare < 50
+          ? [
+              {
+                type: "optimization",
+                suggestion:
+                  "Less than half of requests go to a low-cost model; review whether low-complexity tasks can be routed to Haiku",
+                current_low_cost_share: `${haikuShare.toFixed(1)}%`,
+              },
+            ]
+          : [];
       return JSON.stringify(suggestions);
     }
 

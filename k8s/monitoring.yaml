@@ -1,246 +1,61 @@
-apiVersion: v1
-kind: ConfigMap
+# Requires the Prometheus Operator CRDs (ServiceMonitor, PrometheusRule) and kube-state-metrics.
+# NOT VERIFIED against a live Prometheus. Every increadible_* metric below is emitted by
+# src/server.ts; nothing else is referenced.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
 metadata:
-  name: prometheus-rules
+  name: increadible
   namespace: increadible
-data:
-  rules.yaml: |
-    groups:
-    - name: increadible
-      interval: 30s
-      rules:
-      # Cost Tracking Alerts
-      - alert: HighCostPerRequest
-        expr: cost_per_request > 0.001
-        for: 5m
-        labels:
-          severity: warning
-          component: cost-tracking
-        annotations:
-          summary: "High cost per request detected"
-          description: "Cost per request ({{ $value }}) exceeded threshold of 0.001"
-
-      # Performance Alerts
-      - alert: HighLatency
-        expr: histogram_quantile(0.99, rate(request_duration_ms[5m])) > 2500
-        for: 5m
-        labels:
-          severity: warning
-          component: performance
-        annotations:
-          summary: "P99 latency exceeding SLA"
-          description: "P99 latency ({{ $value }}ms) exceeds 2500ms threshold"
-
-      - alert: CriticalLatency
-        expr: histogram_quantile(0.99, rate(request_duration_ms[5m])) > 5000
-        for: 2m
-        labels:
-          severity: critical
-          component: performance
-        annotations:
-          summary: "CRITICAL: P99 latency severely elevated"
-          description: "P99 latency ({{ $value }}ms) exceeds 5000ms"
-
-      # Error Rate Alerts
-      - alert: HighErrorRate
-        expr: (rate(errors_total[5m]) / rate(requests_total[5m])) > 0.01
-        for: 5m
-        labels:
-          severity: warning
-          component: reliability
-        annotations:
-          summary: "Error rate exceeding threshold"
-          description: "Error rate ({{ $value }}) exceeds 1%"
-
-      - alert: CriticalErrorRate
-        expr: (rate(errors_total[5m]) / rate(requests_total[5m])) > 0.05
-        for: 2m
-        labels:
-          severity: critical
-          component: reliability
-        annotations:
-          summary: "CRITICAL: Error rate critical"
-          description: "Error rate ({{ $value }}) exceeds 5%"
-
-      # Cache Alerts
-      - alert: LowCacheHitRate
-        expr: cache_hit_rate < 0.60
-        for: 10m
-        labels:
-          severity: warning
-          component: cache
-        annotations:
-          summary: "Cache hit rate below target"
-          description: "Cache hit rate ({{ $value }}) is below 60%"
-
-      # Availability Alerts
-      - alert: ServiceDown
-        expr: up{job="increadible"} == 0
-        for: 1m
-        labels:
-          severity: critical
-          component: availability
-        annotations:
-          summary: "Increadible service is down"
-          description: "Increadible pod is not responding"
-
-      # Pod Alerts
-      - alert: PodRestartingFrequently
-        expr: rate(container_last_seen{pod=~"increadible.*"}[15m]) > 0
-        for: 5m
-        labels:
-          severity: warning
-          component: reliability
-        annotations:
-          summary: "Pod restarting frequently"
-          description: "Pod {{ $labels.pod }} is restarting frequently"
-
-      # Resource Alerts
-      - alert: HighMemoryUsage
-        expr: container_memory_usage_bytes{pod=~"increadible.*"} / container_spec_memory_limit_bytes > 0.85
-        for: 5m
-        labels:
-          severity: warning
-          component: resources
-        annotations:
-          summary: "High memory usage"
-          description: "Pod {{ $labels.pod }} memory usage ({{ $value | humanizePercentage }}) is high"
-
-      - alert: HighCPUUsage
-        expr: rate(container_cpu_usage_seconds_total{pod=~"increadible.*"}[5m]) * 1000 > 800
-        for: 5m
-        labels:
-          severity: warning
-          component: resources
-        annotations:
-          summary: "High CPU usage"
-          description: "Pod {{ $labels.pod }} CPU usage is high"
-
----
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: grafana-dashboard
-  namespace: increadible
-data:
-  increadible-dashboard.json: |
-    {
-      "dashboard": {
-        "title": "Increadible Monitoring",
-        "panels": [
-          {
-            "title": "Cost Per Request",
-            "targets": [
-              {
-                "expr": "cost_per_request"
-              }
-            ]
-          },
-          {
-            "title": "Request Latency (P99)",
-            "targets": [
-              {
-                "expr": "histogram_quantile(0.99, rate(request_duration_ms[5m]))"
-              }
-            ]
-          },
-          {
-            "title": "Error Rate",
-            "targets": [
-              {
-                "expr": "(rate(errors_total[5m]) / rate(requests_total[5m])) * 100"
-              }
-            ]
-          },
-          {
-            "title": "Cache Hit Rate",
-            "targets": [
-              {
-                "expr": "cache_hit_rate * 100"
-              }
-            ]
-          },
-          {
-            "title": "Provider Distribution",
-            "targets": [
-              {
-                "expr": "provider_requests_total"
-              }
-            ]
-          },
-          {
-            "title": "API Gateway Activity",
-            "targets": [
-              {
-                "expr": "api_calls_total"
-              }
-            ]
-          },
-          {
-            "title": "Active Experiments",
-            "targets": [
-              {
-                "expr": "active_experiments"
-              }
-            ]
-          },
-          {
-            "title": "Memory Usage",
-            "targets": [
-              {
-                "expr": "container_memory_usage_bytes{pod=~\"increadible.*\"}"
-              }
-            ]
-          }
-        ]
-      }
-    }
-
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: increadible-metrics
-  namespace: increadible
-  labels:
-    app: increadible
 spec:
-  ports:
-  - name: metrics
-    port: 9090
-    targetPort: 9090
   selector:
-    app: increadible
-
+    matchLabels:
+      app: increadible
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 30s
+      authorization:
+        type: Bearer
+        credentials:
+          name: increadible-secrets
+          key: auth-token
 ---
-apiVersion: v1
-kind: ConfigMap
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
 metadata:
-  name: alert-notification-config
+  name: increadible
   namespace: increadible
-data:
-  notification.yaml: |
-    # Alert Routing
-    alerts:
-      critical:
-        - channel: pagerduty
-          team: on-call
-      warning:
-        - channel: slack
-          room: "#increadible-alerts"
-      info:
-        - channel: email
-          recipients: ["increadible-team@example.com"]
-
-    # Escalation Policies
-    escalation:
-      5m: notify-lead
-      15m: notify-manager
-      30m: notify-director
-
-    # Runbook References
-    runbooks:
-      HighCostPerRequest: "https://docs.example.com/runbooks/high-cost"
-      HighLatency: "https://docs.example.com/runbooks/latency"
-      HighErrorRate: "https://docs.example.com/runbooks/errors"
-      ServiceDown: "https://docs.example.com/runbooks/service-down"
+spec:
+  groups:
+    - name: increadible
+      rules:
+        - alert: IncreadibleDown
+          expr: up{job="increadible", namespace="increadible"} == 0
+          for: 2m
+          labels:
+            severity: critical
+          annotations:
+            summary: Increadible is not being scraped or is down
+        - alert: IncreadibleToolErrorRate
+          expr: >-
+            sum(rate(increadible_tool_errors_total[5m]))
+            / clamp_min(sum(rate(increadible_tool_calls_total[5m])), 1e-9) > 0.05
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: More than 5% of tool calls are returning errors
+        - alert: IncreadibleProtocolErrors
+          expr: rate(increadible_rpc_errors_total[5m]) > 0.1
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: Clients are sending malformed or unknown JSON-RPC requests
+        - alert: IncreadiblePodRestarting
+          expr: >-
+            increase(kube_pod_container_status_restarts_total{namespace="increadible", container="increadible"}[30m]) > 2
+          labels:
+            severity: warning
+          annotations:
+            summary: Increadible container restarted more than twice in 30 minutes
