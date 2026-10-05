@@ -1,0 +1,48 @@
+# Dependabot version updates for the three ecosystems this repository uses.
+#
+# Dependabot reads this file from the repository's DEFAULT branch. Keep the default branch set to `main`,
+# otherwise none of this takes effect (the updates are aimed at `main` explicitly).
+#
+# Major versions are deliberately NOT proposed automatically for npm and for the Node base image:
+# the Node major must be one value across the Dockerfile, CI, @types/node and `engines` (a test enforces it),
+# and test-tooling majors (eslint, jest) need planned migrations. Raise those by hand.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: "/"
+    target-branch: main
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: Asia/Kolkata
+    open-pull-requests-limit: 5
+    groups:
+      npm-minor-and-patch:
+        update-types: [minor, patch]
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    target-branch: main
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: Asia/Kolkata
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: docker
+    directory: "/"
+    target-branch: main
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: Asia/Kolkata
+    open-pull-requests-limit: 3
+    ignore:
+      - dependency-name: node
+        update-types: ["version-update:semver-major"]

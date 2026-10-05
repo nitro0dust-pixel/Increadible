@@ -39,6 +39,18 @@ the same probe (`scripts/probe-image.sh`) against the pulled copy: non-root user
 auth behavior, A/B data surviving a container restart on a volume, and Docker's `HEALTHCHECK` reporting healthy.
 You can run the probe yourself against any image with `bash scripts/probe-image.sh <image-ref>` (needs Docker, curl and jq).
 
+### Software bill of materials
+
+- The `security` job runs `npm sbom --omit=dev --sbom-format cyclonedx`, fails if the result is not CycloneDX or lists no
+  component, and keeps it as the `sbom-npm` artifact of the run. It covers the production npm tree only (today: `yaml`).
+- The push step also asks BuildKit for an SBOM attestation (`sbom: true`), which covers the operating-system packages and
+  the Node runtime in the image as well. **NOT VERIFIED yet:** nothing has read it back. After the first push to `main`
+  with this change, from a machine logged in to GHCR, run
+  `docker buildx imagetools inspect ghcr.io/nitro0dust-pixel/increadible:latest --format '{{ json .SBOM }}'`
+  (command from Docker's attestation documentation) and check that it lists packages.
+- Dependabot (`.github/dependabot.yml`) proposes npm, GitHub Actions and Docker updates weekly, never npm or Node
+  major bumps. It reads that file from the repository's default branch, so it does nothing until the default branch is `main`.
+
 ## Kubernetes (staging verified locally only)
 
 Run this from a machine whose `kubectl` points at the cluster you intend (check `kubectl config current-context`).

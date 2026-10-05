@@ -211,6 +211,48 @@ describe(".github/workflows/ci-cd.yml", () => {
   it("does not mask failures with continue-on-error", () => {
     expect(read(".github/workflows/ci-cd.yml")).not.toContain("continue-on-error");
   });
+
+  it("generates a CycloneDX SBOM of the production dependency tree after npm ci, rejects an empty one, and keeps it", () => {
+    const steps: any[] = wf.jobs.security.steps;
+    const install = steps.findIndex((s) => s.run === "npm ci");
+    const generate = steps.findIndex((s) => /npm sbom --omit=dev --sbom-format cyclonedx/.test(s.run ?? ""));
+    expect(install).toBeGreaterThan(-1);
+    expect(generate).toBeGreaterThan(install);
+    expect(allRuns(wf.jobs.security)).toContain("bomFormat !== 'CycloneDX'");
+    const upload = steps.find((s) => /^actions\/upload-artifact@/.test(s.uses ?? "") && s.with?.name === "sbom-npm");
+    expect(upload).toBeDefined();
+    expect(upload.with["if-no-files-found"]).toBe("error");
+  });
+
+  it("attaches an SBOM attestation to the pushed image and does not disable provenance", () => {
+    const push = docker.steps.find((s: any) => s.name === "Push image");
+    expect(push.with.sbom).toBe(true);
+    expect([undefined, true, "true"].concat(["mode=min", "mode=max"])).toContain(push.with.provenance);
+  });
+});
+
+describe(".github/dependabot.yml", () => {
+  const cfg: any = yaml.parse(read(".github/dependabot.yml"));
+  const updates: any[] = cfg.updates;
+  const forEcosystem = (name: string) => updates.find((u) => u["package-ecosystem"] === name);
+
+  it("covers npm, github-actions and docker from the repository root and aims at main", () => {
+    expect(cfg.version).toBe(2);
+    expect(updates.map((u) => u["package-ecosystem"]).sort()).toEqual(["docker", "github-actions", "npm"]);
+    for (const u of updates) {
+      expect(u.directory).toBe("/");
+      expect(u["target-branch"]).toBe("main");
+    }
+    expect(fs.existsSync(path.join(root, "package.json"))).toBe(true);
+    expect(fs.existsSync(path.join(root, "Dockerfile"))).toBe(true);
+    expect(fs.existsSync(path.join(root, ".github/workflows"))).toBe(true);
+  });
+
+  it("never proposes major bumps of npm packages or of the Node base image (the Node major is pinned by a test)", () => {
+    const major = "version-update:semver-major";
+    expect(forEcosystem("npm").ignore).toContainEqual({ "dependency-name": "*", "update-types": [major] });
+    expect(forEcosystem("docker").ignore).toContainEqual({ "dependency-name": "node", "update-types": [major] });
+  });
 });
 
 describe("repository hygiene", () => {

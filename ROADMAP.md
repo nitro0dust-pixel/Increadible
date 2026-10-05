@@ -1,6 +1,6 @@
 # Roadmap and project status
 
-Last updated: 2026-10-05 20:18 UTC (6 Oct 2026, 01:48 IST), measured at `main` = `38865a3` plus the runtime upgrade in PR #8.
+Last updated: 2026-10-05 21:37 UTC (6 Oct 2026, 03:07 IST), measured at `main` = `685227b` (PR #8 merged) plus the SBOM and Dependabot change in PR #9.
 
 **Bottom line:** the in-repo code (Features #7-#9 and the server around them) is built, tested, containerised, and the
 image published to GHCR passes its probe. **Nothing is deployed anywhere beyond a local rehearsal**: the staging
@@ -18,9 +18,9 @@ Update this line when the owner confirms or changes it.
 | Item | Result | Evidence |
 |---|---|---|
 | CI on `main` | **green: all five jobs passed** on `ca6aa33` (type-check/lint/build/smoke, tests, dependency audit and secret scan, Docker build and probe, pull-by-digest verification of the pushed image). The Docker job waited about 5 minutes for a runner, which was queueing, not a failure | run 37360648274, finished 19:12 UTC |
-| CI on `38865a3` (the PR #7 merge) | **pending at the time of writing**: all three first-tier jobs were still queued for a runner after 10+ minutes. PR #7 itself was merged on local verification of its head, because its `Tests` job was cancelled twice in the runner queue (no step ever ran). The real Docker build and probe of that commit has not run yet | run 37367833379; PR #7 run 37363553659 |
-| Runtime | Node 24 LTS in the Dockerfile, CI and `@types/node`; `engines` is `>=22`. Node 20 reached end-of-life on 2026-04-30. Tested locally on Node 24.21.0 and 22.22.0. The `node:24-alpine` image has **not** been built or pulled yet (Docker Hub is blocked from the authoring sandbox), so CI's Docker job is the first real check | nodejs/Release `schedule.json` fetched 2026-10-05; PR #8 |
-| Tests | 91 pass, 6 todo | `npm test` |
+| CI on `685227b` (the PR #8 merge) | PR #8's own run on its head `491fea2` is **green: all four jobs passed**: type-check/lint/build/smoke, tests, dependency audit and secret scan, and Docker build and probe (the first real build of `node:24-alpine`, 21:34 UTC). Several jobs needed re-runs because GitHub cancelled them after exactly 15 minutes without a runner (no step ever ran in a cancelled job; cause is on GitHub's side, see the open decisions). The run on `main` for the merge commit was **in progress** at the time of writing. The earlier `main` run on `38865a3` ended red only because its `Tests` job was cancelled in that queue twice; it is superseded | PR #8 run 37370748176; `main` run 37376758416 (pending); superseded run 37367833379 |
+| Runtime | Node 24 LTS in the Dockerfile, CI and `@types/node`; `engines` is `>=22`. Node 20 reached end-of-life on 2026-04-30. Tested locally on Node 24.21.0 and 22.22.0, and **built and probed as an image in CI** (non-root, auth, restart persistence, HEALTHCHECK) on 2026-10-05 21:34 UTC. The pushed `main` image on Node 24 is verified by the `verify-published-image` job of the `main` run above, which was still pending | nodejs/Release `schedule.json` fetched 2026-10-05; PR #8 run 37370748176 |
+| Tests | 95 pass, 6 todo | `npm test` |
 | Coverage | 92% statements, 81% branches | `npx jest --coverage` |
 | Lint, type-check | clean | `npm run lint`, `npm run type-check` |
 | Dependency audit (prod deps) | 0 vulnerabilities | `npm audit --omit=dev` |
@@ -48,6 +48,8 @@ Update this line when the owner confirms or changes it.
 7. **[PR #7](https://github.com/nitro0dust-pixel/Increadible/pull/7), Windows-friendly local verification:** a cross-platform `build` clean step (`rm -rf` does not exist in `cmd.exe`), `.gitattributes` forcing LF line endings (CRLF breaks the shell scripts and some config tests), and one POSIX-permission test assertion skipped on Windows. Not yet run on a real Windows machine.
 8. **[PR #8](https://github.com/nitro0dust-pixel/Increadible/pull/8), runtime upgrade:** Node 20 (end-of-life) to Node 24 LTS in the Dockerfile and CI, `@types/node` 24, `engines` `>=22`, and a test that keeps one Node major across the image stages, every CI step and `@types/node`.
 
+9. **[PR #9](https://github.com/nitro0dust-pixel/Increadible/pull/9), SBOM and dependency updates:** CycloneDX SBOM of the production npm tree generated and validated in CI, an SBOM attestation attached to the pushed image, and a Dependabot config for npm, GitHub Actions and Docker.
+
 ## Roadmap by sprint
 
 Statuses: DONE, PARTIAL, NOT STARTED, BLOCKED, N/A. A DONE needs evidence (PR, commit, CI run or command).
@@ -68,7 +70,10 @@ Statuses: DONE, PARTIAL, NOT STARTED, BLOCKED, N/A. A DONE needs evidence (PR, c
 | Unit and integration tests, lint, type-check | PASS |
 | Dependency audit (production dependencies) | PASS |
 | Secret scan (verified secrets only) | PASS |
-| Container image vulnerability scan | NOT DONE |
+| SBOM of the production npm tree (CycloneDX) | generated and validated by the `security` job, kept as the `sbom-npm` artifact. Verified locally on Node 22 and 24 (1 component, `yaml@2.9.1`); **the CI run of this PR was pending when written** |
+| SBOM attestation on the published image (OS packages, Node runtime) | **NOT VERIFIED**: enabled with `sbom: true` on the push step; nothing has read it back yet (see `DEPLOYMENT.md`) |
+| Dependency update automation (Dependabot) | config added (`.github/dependabot.yml`: npm, GitHub Actions, Docker, majors excluded for npm and Node); **inactive until the default branch is `main`**, which it is not today |
+| Container image vulnerability scan | NOT DONE: needs a tool choice and approval (open decisions) |
 | Load and performance test | NOT DONE |
 | SOC2 / GDPR scans | NOT STARTED (no claim of compliance is made anywhere) |
 | Production deployment | NOT DONE; requires explicit owner approval |
@@ -79,7 +84,7 @@ Statuses: DONE, PARTIAL, NOT STARTED, BLOCKED, N/A. A DONE needs evidence (PR, c
 - **Handoff:** no `CLAUDE.md` or equivalent context file for future sessions.
 - **A/B module:** one metric decides the winner; two variants only; the log is never compacted and not fsynced.
 - **Observability:** no latency or cost metrics; no dashboard; Prometheus rules are untested against a live Prometheus.
-- **Container hardening:** no image signing or SBOM.
+- **Container hardening:** no image signing; the image SBOM attestation is unverified; no vulnerability scan; GitHub Actions are pinned by version tag, not by commit SHA.
 
 ## Open decisions (owner)
 
@@ -88,6 +93,9 @@ Statuses: DONE, PARTIAL, NOT STARTED, BLOCKED, N/A. A DONE needs evidence (PR, c
 - [ ] GHCR package visibility: keep private (pull secret) or make public.
 - [ ] Feature priority: real gateway APIs, wiring in a vendored feature (which one), or measuring real savings first.
 - [ ] Release: delete the stale local `v1.0.0` tag and retag after the first verified deploy.
+- [ ] Default branch: the repository's default branch is `claude/nice-keller-aoooos`, not `main`. Set it to `main` (Dependabot reads its config from the default branch).
+- [ ] Image vulnerability scanner: choose a tool (Trivy, Grype or Docker Scout) and approve looking up its upstream release and commit SHA so it can be pinned. Not added blind: the authoring sandbox cannot reach Docker Hub or other repositories to verify a version.
+- [ ] CI runners: GitHub-hosted jobs were cancelled after 15 minutes in the queue (12 jobs between 19:42 and 21:10 UTC on 2026-10-05, none of which ran a step). Keep retrying, merge several jobs into one, or register a self-hosted runner.
 
 ## How to keep this file honest
 
