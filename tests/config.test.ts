@@ -128,6 +128,15 @@ describe("Dockerfile and package.json", () => {
     expect(dockerfile).toMatch(/chown node:node \/data/);
   });
 
+  it("copies every script the build command runs into the image's builder stage", () => {
+    const referenced = [...pkg.scripts.build.matchAll(/scripts\/[\w.-]+/g)].map((m: RegExpMatchArray) => m[0]);
+    expect(referenced.length).toBeGreaterThan(0);
+    const builder = dockerfile.slice(dockerfile.indexOf("AS builder"), dockerfile.indexOf("# ---- runtime ----"));
+    for (const file of referenced) {
+      expect(builder).toMatch(new RegExp(`COPY\\s+${file.replace(/[.]/g, "\\.")}\\s`));
+    }
+  });
+
   it("uses a tracked lockfile for reproducible installs", () => {
     expect(fs.existsSync(path.join(root, "package-lock.json"))).toBe(true);
     expect(read(".gitignore")).not.toMatch(/^package-lock\.json$/m);
@@ -199,6 +208,16 @@ describe("repository hygiene", () => {
     for (const dir of fs.readdirSync(path.join(root, "features"))) {
       expect(fs.existsSync(path.join(root, "features", dir, "INTEGRATION_GUIDE.md"))).toBe(true);
     }
+  });
+
+  it("stays buildable and checkable on Windows (no rm, LF endings, tracked clean script)", () => {
+    expect(pkg.scripts.build).not.toMatch(/\brm\b/);
+    expect(pkg.scripts.build).toContain("scripts/clean.js");
+    expect(fs.existsSync(path.join(root, "scripts/clean.js"))).toBe(true);
+    expect(read(".gitignore")).toContain("!scripts/*.js");
+    const attrs = read(".gitattributes");
+    expect(attrs).toMatch(/\*\s+text=auto\s+eol=lf/);
+    expect(attrs).toMatch(/\*\.sh\s+text\s+eol=lf/);
   });
 
   it("keeps ROADMAP.md present, linked from the README, and listing owner decisions", () => {

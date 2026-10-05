@@ -1,0 +1,5 @@
+# Keep LF in the working tree on every OS: Git for Windows would otherwise check files out as CRLF,
+# which breaks the shell scripts and the config tests that match line ends.
+* text=auto eol=lf
+*.sh text eol=lf
+Dockerfile text eol=lf

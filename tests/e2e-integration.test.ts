@@ -345,7 +345,8 @@ describe("Feature #8: A/B data persistence", () => {
     const lines = fs.readFileSync(file, "utf-8").trimEnd().split("\n").map((l) => JSON.parse(l));
     expect(lines.map((l) => l.type)).toEqual(["experiment", "measurement"]);
     expect(lines[1]).toMatchObject({ experiment_id: "exp-1", variant_id: "A", metrics: { quality: 3.5 } });
-    expect(fs.statSync(file).mode & 0o777).toBe(0o600);
+    // Windows has no POSIX permission bits, so the mode can only be asserted elsewhere.
+    if (process.platform !== "win32") expect(fs.statSync(file).mode & 0o777).toBe(0o600);
   });
 
   it("is in-memory only when no data file is given", () => {

@@ -9,6 +9,7 @@ COPY src ./src
 COPY features/07-routing-plugins/src ./features/07-routing-plugins/src
 COPY features/08-ab-testing/src ./features/08-ab-testing/src
 COPY features/09-api-gateway/src ./features/09-api-gateway/src
+COPY scripts/clean.js ./scripts/clean.js
 RUN npm run build
 
 # ---- runtime ----
