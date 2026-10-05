@@ -39,16 +39,50 @@ You can run the probe yourself against any image with `bash scripts/probe-image.
 
 ## Kubernetes (unverified)
 
+Run this from a machine whose `kubectl` points at the cluster you intend (check `kubectl config current-context`).
+Do it in staging first.
+
 ```bash
-kubectl -n increadible-staging create namespace increadible-staging --dry-run=client -o yaml | kubectl apply -f -
-kubectl -n increadible-staging create secret generic increadible-secrets --from-literal=auth-token="$(openssl rand -hex 32)"
+NS=increadible-staging
+kubectl create namespace "$NS"
+kubectl -n "$NS" create secret generic increadible-secrets --from-literal=auth-token="$(openssl rand -hex 32)"
+# Only while the GHCR package is private (see "Pulling a private image" below):
+kubectl -n "$NS" create secret docker-registry ghcr-pull --docker-server=ghcr.io \
+  --docker-username=<github-user> --docker-password=<token-with-read:packages>
 kubectl apply -f k8s/staging-deployment.yaml
-kubectl -n increadible-staging rollout status deploy/increadible
-kubectl -n increadible-staging port-forward svc/increadible 8080:80   # then curl localhost:8080/health
+# Pin the exact image CI verified instead of the moving :latest tag:
+kubectl -n "$NS" set image deploy/increadible increadible=ghcr.io/nitro0dust-pixel/increadible@sha256:<digest>
+kubectl -n "$NS" rollout status deploy/increadible
+kubectl -n "$NS" port-forward svc/increadible 8080:80   # then: curl localhost:8080/health
 ```
 
-Production is the same with `k8s/production-deployment.yaml` and namespace `increadible`; pin the image to a
-`sha-<commit>` tag. Design choices to be aware of:
+Take `<digest>` from the `verify-published-image` job log (`DIGEST`), or from
+`docker buildx imagetools inspect ghcr.io/nitro0dust-pixel/increadible:sha-<commit> --format '{{json .Manifest}}' | jq -r .digest`.
+Pinning by digest matters: production uses `imagePullPolicy: IfNotPresent`, so a rollout that still says `:latest` would
+never pick up a newer image.
+
+To check that A/B data really persists on the cluster, call `create_experiment` and `record_metric` through
+`POST /mcp` (bearer token = the `auth-token` secret), run `kubectl -n "$NS" rollout restart deploy/increadible`, and
+confirm `get_experiment_results` still returns the data.
+
+### Pulling a private image
+
+The manifests list an optional `imagePullSecrets: [{name: ghcr-pull}]`. While the GHCR package is private, the cluster
+needs that secret or the pod stays in `ImagePullBackOff`:
+
+- Create it as shown above, with a GitHub token that can read packages (`read:packages`; check GitHub's current
+  documentation for which token types GHCR accepts) and your GitHub username. Use a dedicated token with nothing else
+  enabled, and set an expiry.
+- `ghcr-pull` is namespaced, so create it in every namespace you deploy to (`increadible-staging`, `increadible`).
+- If the secret does not exist, Kubernetes still starts the pod and attempts an anonymous pull (a warning event is
+  recorded), so the same manifests work unchanged once the package is made public. Making it public is the alternative to
+  keeping a pull secret: GitHub package settings, "Change visibility". That is a deliberate decision, since anyone could
+  then pull the image.
+- Rotate the token by deleting and recreating the secret; running pods are not affected until they next pull.
+- Check the result with `kubectl -n "$NS" describe pod -l app=increadible` (look at the Events for pull errors).
+
+Production is the same with `k8s/production-deployment.yaml` and namespace `increadible`, pinned to a digest the same
+way. Design choices to be aware of:
 
 - **One replica**, `Recreate` strategy: A/B data is appended to a file on a 1Gi `ReadWriteOnce` PersistentVolumeClaim
   (`increadible-data`, mounted at `/data`), which has a single writer. Do not add an HPA or more replicas.

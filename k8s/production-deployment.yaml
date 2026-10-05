@@ -9,6 +9,10 @@
 # Rules come from the ConfigMap and are read-only here: edit the ConfigMap and restart the pod
 # (the update_rules tool returns an error because the file is read-only).
 #
+# The image is pulled from GHCR. While that package is private, also create the `ghcr-pull`
+# registry secret (see DEPLOYMENT.md); if it does not exist the pod still starts and the pull is
+# attempted anonymously, which succeeds only for a public package.
+#
 # Create the auth secret first (never commit it):
 #   kubectl -n increadible create secret generic increadible-secrets \
 #     --from-literal=auth-token="$(openssl rand -hex 32)"
@@ -95,6 +99,8 @@ spec:
         app: increadible
     spec:
       serviceAccountName: increadible
+      imagePullSecrets:
+        - name: ghcr-pull   # optional: only needed while the GHCR package is private (see DEPLOYMENT.md)
       securityContext:
         runAsNonRoot: true
         runAsUser: 1000
