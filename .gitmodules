@@ -7,3 +7,6 @@
 [submodule "features/03-headroom/headroom"]
 	path = features/03-headroom/headroom
 	url = https://github.com/lea-blum/headroom-mini-token-optimizer.git
+[submodule "features/04-gstack/gstack"]
+	path = features/04-gstack/gstack
+	url = https://github.com/garrytan/gstack.git
