@@ -1,10 +1,66 @@
+# Increadible on Kubernetes (increadible-staging).
+# NOT VERIFIED against a live cluster: these manifests have only been parsed and
+# consistency-checked by tests/config.test.ts.
+#
+# One replica on purpose: A/B measurements and rule stats live in process memory, so more
+# replicas would each see a slice of the data and give wrong experiment results.
+# Rules come from the ConfigMap and are read-only here: edit the ConfigMap and restart the pod
+# (the update_rules tool returns an error because the file is read-only).
+#
+# Create the auth secret first (never commit it):
+#   kubectl -n increadible-staging create secret generic increadible-secrets \
+#     --from-literal=auth-token="$(openssl rand -hex 32)"
 apiVersion: v1
 kind: Namespace
 metadata:
   name: increadible-staging
-  labels:
-    environment: staging
-
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: increadible
+  namespace: increadible-staging
+automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: increadible-config
+  namespace: increadible-staging
+data:
+  routing-rules.yaml: |
+    metadata:
+      team: Engineering
+      version: "1.0"
+      last_updated: "2026-01-01T00:00:00Z"
+    rules:
+      - id: critical-tasks
+        name: Security & critical analysis
+        enabled: true
+        priority: 5
+        match:
+          priority: critical
+          task_type: [security, audit]
+        provider: claude-opus
+        fallback: [gpt-4]
+        reason: Opus required for critical decisions
+      - id: simple-tasks
+        name: Simple questions & summarization
+        enabled: true
+        priority: 10
+        match:
+          task_complexity: low
+          task_type: [qa, summary]
+        provider: claude-haiku
+        fallback: [claude-sonnet]
+        reason: Haiku is enough for low-complexity tasks
+      - id: default
+        name: Default rule
+        enabled: true
+        priority: 100
+        match: {}
+        provider: claude-sonnet
+        reason: Balanced default
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -13,102 +69,81 @@ metadata:
   namespace: increadible-staging
   labels:
     app: increadible
-    environment: staging
-    version: 1.0.0
 spec:
-  replicas: 2
-  strategy:
-    type: RollingUpdate
-    rollingUpdate:
-      maxSurge: 1
-      maxUnavailable: 0
+  replicas: 1
   selector:
     matchLabels:
       app: increadible
-      environment: staging
+  strategy:
+    type: Recreate
   template:
     metadata:
       labels:
         app: increadible
-        environment: staging
-        version: 1.0.0
     spec:
       serviceAccountName: increadible
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
       containers:
-      - name: increadible
-        image: increadible:latest
-        imagePullPolicy: Always
-        ports:
-        - name: http
-          containerPort: 3000
-          protocol: TCP
-
-        env:
-        - name: NODE_ENV
-          value: "staging"
-        - name: LOG_LEVEL
-          value: "debug"
-        - name: ENVIRONMENT
-          value: "staging"
-        - name: ANTHROPIC_API_KEY
-          valueFrom:
-            secretKeyRef:
-              name: increadible-secrets
-              key: anthropic-api-key
-
-        resources:
-          requests:
-            memory: "256Mi"
-            cpu: "250m"
-          limits:
-            memory: "512Mi"
-            cpu: "500m"
-
-        livenessProbe:
-          httpGet:
-            path: /health
-            port: 3000
-          initialDelaySeconds: 10
-          periodSeconds: 10
-          timeoutSeconds: 5
-          failureThreshold: 3
-
-        readinessProbe:
-          httpGet:
-            path: /ready
-            port: 3000
-          initialDelaySeconds: 5
-          periodSeconds: 5
-          timeoutSeconds: 3
-          failureThreshold: 2
-
-        volumeMounts:
-        - name: config
-          mountPath: /app/config
-          readOnly: true
-        - name: logs
-          mountPath: /app/logs
-
+        - name: increadible
+          # CI pushes :latest and :sha-<commit>; pin to a sha tag for real rollouts.
+          image: ghcr.io/nitro0dust-pixel/increadible:latest
+          imagePullPolicy: Always
+          ports:
+            - name: http
+              containerPort: 3000
+          env:
+            - name: PORT
+              value: "3000"
+            - name: HOST
+              value: "0.0.0.0"
+            - name: RULES_FILE
+              value: /config/routing-rules.yaml
+            - name: AUTH_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: increadible-secrets
+                  key: auth-token
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 15
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: http
+            initialDelaySeconds: 2
+            periodSeconds: 5
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - name: config
+              mountPath: /config
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
       volumes:
-      - name: config
-        configMap:
-          name: increadible-config
-      - name: logs
-        emptyDir: {}
-
-      affinity:
-        podAntiAffinity:
-          preferredDuringSchedulingIgnoredDuringExecution:
-          - weight: 100
-            podAffinityTerm:
-              labelSelector:
-                matchExpressions:
-                - key: app
-                  operator: In
-                  values:
-                  - increadible
-              topologyKey: kubernetes.io/hostname
-
+        - name: config
+          configMap:
+            name: increadible-config
+        - name: tmp
+          emptyDir: {}
 ---
 apiVersion: v1
 kind: Service
@@ -117,66 +152,11 @@ metadata:
   namespace: increadible-staging
   labels:
     app: increadible
-    environment: staging
 spec:
   type: ClusterIP
+  selector:
+    app: increadible
   ports:
-  - name: http
-    port: 80
-    targetPort: 3000
-    protocol: TCP
-  selector:
-    app: increadible
-    environment: staging
-
----
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: increadible
-  namespace: increadible-staging
-  labels:
-    app: increadible
-    environment: staging
-
----
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: increadible-config
-  namespace: increadible-staging
-  labels:
-    app: increadible
-    environment: staging
-data:
-  routing-rules.yaml: |
-    metadata:
-      team: Engineering
-      version: 1.0
-      environment: staging
-    rules:
-      - id: simple-tasks
-        match: { task_complexity: low }
-        provider: claude-haiku
-        reason: "Haiku optimal for low-complexity tasks"
-      - id: critical-tasks
-        match: { priority: critical }
-        provider: claude-opus
-        reason: "Opus required for critical decisions"
-      - id: default
-        match: {}
-        provider: claude-sonnet
-        reason: "Balanced default routing"
-
----
-apiVersion: policy/v1
-kind: PodDisruptionBudget
-metadata:
-  name: increadible
-  namespace: increadible-staging
-spec:
-  minAvailable: 1
-  selector:
-    matchLabels:
-      app: increadible
-      environment: staging
+    - name: http
+      port: 80
+      targetPort: http

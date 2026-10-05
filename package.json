@@ -1,7 +1,7 @@
 {
   "name": "increadible",
   "version": "1.0.0",
-  "description": "Premium feature collection for Claude Desktop - 99.98% cost optimization",
+  "description": "MCP server bundling routing rules, A/B testing and an API gateway, alongside vendored cost/context tooling for Claude Desktop",
   "main": "dist/src/index.js",
   "scripts": {
     "build": "rm -rf dist && tsc -p tsconfig.build.json",
@@ -12,7 +12,8 @@
     "type-check": "tsc --noEmit",
     "start": "node dist/src/index.js",
     "dev": "ts-node src/index.ts",
-    "verify": "bash verify-local-deployment.sh"
+    "verify": "bash scripts/verify.sh",
+    "smoke": "bash scripts/smoke.sh"
   },
   "keywords": [
     "claude",

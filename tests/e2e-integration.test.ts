@@ -486,11 +486,11 @@ describe("Tool dispatch (processToolCall), isolated from the working directory",
   });
 });
 
-describe("Features #1-#6 (external projects)", () => {
+describe("Vendored features #1-#4, #6 (git submodules, not exercised here)", () => {
   it.todo("#1 OmniRoute: runs as a separate service; needs a live-service integration test");
-  it.todo("#2 Claude-Mem: external submodule; no in-process test in this repo");
-  it.todo("#3 Token-Optimizer: external submodule; real compression ratio must be measured on real contexts");
-  it.todo("#4 gstack: external submodule; no in-process test in this repo");
-  it.todo("#5 Headroom: external submodule; no in-process test in this repo");
-  it.todo("#6 agentacct: external submodule; real cost savings must be measured from actual usage logs");
+  it.todo("#2 Claude-Mem: no in-process test in this repo");
+  it.todo("#3 Token-Optimizer: real compression ratio must be measured on real contexts");
+  it.todo("#3b Headroom: no in-process test in this repo");
+  it.todo("#4 gstack: installs as Claude Code skills; no in-process test in this repo");
+  it.todo("#6 agentacct: real cost savings must be measured from actual usage logs");
 });

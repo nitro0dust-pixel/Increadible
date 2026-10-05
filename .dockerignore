@@ -1,0 +1,15 @@
+.git
+.github
+node_modules
+dist
+coverage
+tests
+k8s
+docs
+*.md
+features/01-omniroute
+features/02-claude-mem
+features/03-token-optimizer
+features/03-headroom
+features/04-gstack
+features/06-agentacct
