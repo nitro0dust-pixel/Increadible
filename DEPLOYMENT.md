@@ -31,6 +31,12 @@ without the token) and `/mcp`, and pushes `ghcr.io/nitro0dust-pixel/increadible:
 pushes to `main`. The GHCR package is private by default; the cluster needs an image pull secret or the
 package must be made public.
 
+After each push to `main`, a second job (`verify-published-image`) logs in to GHCR, checks that `:latest` and
+`:sha-<commit>` both resolve to the digest that was just pushed, pulls the image **by that digest**, and runs
+the same probe (`scripts/probe-image.sh`) against the pulled copy: non-root user, command, architecture, HTTP and
+auth behavior, A/B data surviving a container restart on a volume, and Docker's `HEALTHCHECK` reporting healthy.
+You can run the probe yourself against any image with `bash scripts/probe-image.sh <image-ref>` (needs Docker, curl and jq).
+
 ## Kubernetes (unverified)
 
 ```bash
