@@ -10,3 +10,6 @@
 [submodule "features/04-gstack/gstack"]
 	path = features/04-gstack/gstack
 	url = https://github.com/garrytan/gstack.git
+[submodule "features/03-token-optimizer/token-optimizer-mcp"]
+	path = features/03-token-optimizer/token-optimizer-mcp
+	url = https://github.com/ooples/token-optimizer-mcp.git
