@@ -46,17 +46,55 @@ omniroute serve  # Starts at localhost:20128/v1
 
 ---
 
+### Feature #2: Claude-Mem — Persistent Memory & Context Management
+
+**Status**: 🟢 Ready for Integration  
+**Complexity**: Medium  
+**Value**: High (10x token savings + seamless continuity)
+
+[→ Full Integration Guide](./features/02-claude-mem/INTEGRATION_GUIDE.md)
+
+**What it does**:
+- Captures agent activities across sessions
+- Compresses context with AI (10x token savings)
+- Automatically retrieves relevant memory when needed
+- Natural language search through project history
+- Privacy controls with `<private>` tags
+- Progressive Disclosure: retrieve only needed context
+
+**Quick setup**:
+```bash
+cd features/02-claude-mem/claude-mem
+# Install dependencies
+bun install
+# Configure MCP server in Claude Desktop
+# Enable lifecycle hooks
+```
+
+**Use it for**:
+- Long-running projects (remember decisions across weeks)
+- Multi-session debugging (context persists between breaks)
+- Cost reduction (10x token savings via compression)
+- Research & documentation (progressive knowledge building)
+- Team handoffs (seamless context sharing between agents)
+
+**Synergy with Feature #1 (OmniRoute)**:
+- OmniRoute selects best provider → Claude-Mem provides context
+- Result: Right provider + full context + lower costs
+
+---
+
 ## 🚀 Upcoming Features (Roadmap)
 
 | # | Feature | Status | ETA | Value |
 |---|---------|--------|-----|-------|
-| 2 | Custom Routing Plugins | 🔵 Planned | Q4 2026 | Build team-specific AI routing rules |
-| 3 | Cost Analytics Dashboard | 🔵 Planned | Q4 2026 | Visualize savings, track spending |
-| 4 | A/B Testing Framework | 🔵 Planned | Q1 2027 | Compare provider quality & speed |
-| 5 | Local Model Marketplace | 🔵 Planned | Q1 2027 | Discover & integrate Ollama models |
-| 6 | Prompt Caching Plugin | 🔵 In Design | Q1 2027 | Reduce latency by 5-10x |
-| 7 | Multi-Provider Streaming | 🔵 In Design | Q2 2027 | Stream from fastest provider |
-| 8 | Team Collaboration Hub | 🔵 In Design | Q2 2027 | Share models, routing, analytics |
+| 3 | Custom Routing Plugins | 🔵 Planned | Q4 2026 | Build team-specific AI routing rules |
+| 4 | Cost Analytics Dashboard | 🔵 Planned | Q4 2026 | Visualize savings + memory compression |
+| 5 | A/B Testing Framework | 🔵 Planned | Q1 2027 | Compare provider quality & speed |
+| 6 | Local Model Marketplace | 🔵 Planned | Q1 2027 | Discover & integrate Ollama models |
+| 7 | Prompt Caching Plugin | 🔵 In Design | Q1 2027 | Reduce latency by 5-10x |
+| 8 | Multi-Provider Streaming | 🔵 In Design | Q2 2027 | Stream from fastest provider |
+| 9 | Team Collaboration Hub | 🔵 In Design | Q2 2027 | Share models, routing, memory, analytics |
 
 ---
 
@@ -71,11 +109,16 @@ Increadible/
 │   │   ├── OmniRoute/                  (Cloned upstream repo)
 │   │   ├── INTEGRATION_GUIDE.md        (Setup + usage guide)
 │   │   └── examples/                   (Usage examples)
-│   ├── 02-routing-plugins/             (Coming soon)
-│   ├── 03-analytics-dashboard/         (Coming soon)
+│   ├── 02-claude-mem/
+│   │   ├── claude-mem/                 (Cloned upstream repo)
+│   │   ├── INTEGRATION_GUIDE.md        (Setup + usage guide)
+│   │   └── examples/                   (Usage examples)
+│   ├── 03-routing-plugins/             (Coming soon)
+│   ├── 04-analytics-dashboard/         (Coming soon)
 │   └── ...
 ├── plugins/                            (Claude Desktop plugins)
-│   └── omniroute-plugin.ts             (Plugin hooks)
+│   ├── omniroute-plugin.ts
+│   └── claude-mem-plugin.ts
 ├── docs/
 │   ├── ARCHITECTURE.md                 (System design)
 │   ├── API_REFERENCE.md                (All features)
@@ -109,33 +152,65 @@ Increadible/
 
 ## 🔧 Using Multiple Features Together
 
-**Example workflow** combining future features:
+**Dual Feature Workflow** (Features #1 + #2):
 
 ```
 Claude Desktop App
     ↓
-[Feature #1] OmniRoute Gateway
-    ↓ (routes intelligently)
-[Feature #2] Custom Routing Plugin (team rules)
+Session Starts
+    ├─ [Feature #2] Claude-Mem loads relevant context
+    │  ├─ Retrieves past decisions
+    │  └─ Injects into system prompt (~200 tokens, pre-compressed)
     ↓
-[Feature #3] Cost Analytics (track savings)
+User Query
+    ├─ Full context available (from memory)
+    └─ No need to re-explain what you're doing
     ↓
-[Feature #4] A/B Testing (compare providers)
+[Feature #1] OmniRoute Decides:
+    ├─ Route to: Claude Opus (complex reasoning)
+    ├─ Token count: 400 (not 2500 without memory)
+    └─ Provider selection: Best for this type of task
     ↓
-Best response delivered to you
+Intelligent Response
+    ├─ Right provider (via OmniRoute)
+    ├─ Full context (via Claude-Mem)
+    └─ Lower cost (token compression savings)
+    ↓
+Session Ends
+    └─ [Feature #2] Compresses & stores activities for next session
+```
+
+**Future Integration** (with Features #3, #4, #5):
+
+```
+Claude Desktop App
+    ↓
+[Feature #2] Claude-Mem (context)
+    ↓
+[Feature #1] OmniRoute (routing)
+    ↓
+[Feature #3] Cost Analytics (track savings from compression)
+    ↓
+[Feature #4] A/B Testing (compare provider quality)
+    ↓
+[Feature #5] Local Models (use Ollama with context)
+    ↓
+Optimized, documented, intelligent response
 ```
 
 ---
 
 ## 📊 Benefits Summary
 
-| Metric | Without Increadible | With Increadible |
-|--------|-------------------|------------------|
-| **Cost per session** | ~$0.50 | ~$0.05-0.10 (80-90% savings) |
-| **API uptime** | ~99.5% | ~99.95% (auto-failover) |
-| **Time to integrate** | — | 10-15 minutes (OmniRoute) |
-| **Providers available** | 1 (Claude) | 357+ |
-| **Token efficiency** | Baseline | +89% compression |
+| Metric | Without Increadible | With Feature #1 | With Features #1+#2 |
+|--------|-------------------|-----------------|-------------------|
+| **Cost per session** | ~$0.50 | ~$0.05-0.10 (80-90%) | ~$0.02-0.05 (90-95%) |
+| **API uptime** | ~99.5% | ~99.95% (auto-failover) | ~99.95% + context continuity |
+| **Context retention** | Lost per session | — | Persistent across sessions |
+| **Providers available** | 1 (Claude) | 357+ | 357+ with intelligent selection |
+| **Token efficiency** | Baseline | 89% compression (routing) | 89% + 10x (memory layers) |
+| **Session continuity** | Fresh start every time | — | Seamless memory handoff |
+| **Setup time** | — | 10-15 min | 20-25 min (both features) |
 
 ---
 
