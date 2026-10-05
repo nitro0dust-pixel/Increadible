@@ -1,0 +1,3 @@
+[submodule "features/01-omniroute/OmniRoute"]
+	path = features/01-omniroute/OmniRoute
+	url = https://github.com/diegosouzapw/OmniRoute.git
