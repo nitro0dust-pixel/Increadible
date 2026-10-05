@@ -4,3 +4,6 @@
 [submodule "features/02-claude-mem/claude-mem"]
 	path = features/02-claude-mem/claude-mem
 	url = https://github.com/thedotmack/claude-mem.git
+[submodule "features/03-headroom/headroom"]
+	path = features/03-headroom/headroom
+	url = https://github.com/lea-blum/headroom-mini-token-optimizer.git
