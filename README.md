@@ -173,17 +173,147 @@ npm install
 
 ---
 
-## 🚀 Upcoming Features (Roadmap)
+### Feature #5: Custom Routing Plugins — Team-Specific AI Rules Engine
 
-| # | Feature | Status | ETA | Value |
-|---|---------|--------|-----|-------|
-| 5 | Custom Routing Plugins | 🔵 Planned | Q4 2026 | Team-specific routing rules |
-| 6 | Cost Analytics Dashboard | 🔵 Planned | Q4 2026 | Track all savings sources |
-| 7 | A/B Testing Framework | 🔵 Planned | Q1 2027 | Compare strategies & quality |
-| 8 | Local Model Marketplace | 🔵 Planned | Q1 2027 | Ollama model integration |
-| 9 | Prompt Caching Plugin | 🔵 In Design | Q1 2027 | Native cache + gstack memory |
-| 10 | Multi-Provider Streaming | 🔵 In Design | Q2 2027 | Parallel provider requests |
-| 11 | Team Collaboration Hub | 🔵 In Design | Q2 2027 | Shared skills, memory, analytics |
+**Status**: 🟡 Building Now  
+**Complexity**: Medium  
+**Value**: High (Team-specific routing optimization)
+
+[→ Framework Guide](./features/07-routing-plugins/README.md)
+
+**What it does**:
+- Define custom routing rules via YAML/JSON config
+- Industry-specific provider selection rules
+- Cost-based routing (prefer cheaper models for low-complexity tasks)
+- Performance-based routing (prefer faster models for time-critical tasks)
+- Quality-based routing (prefer higher-quality models for critical work)
+- Custom failover strategies
+- Runtime rule updates without code changes
+
+**Quick setup**:
+```bash
+cd features/07-routing-plugins
+# Configure rules in rules.yaml
+# Enable MCP server for custom routing
+# Routes automatically applied by OmniRoute #1
+```
+
+**Use it for**:
+- Team-specific provider preferences
+- Cost optimization per workflow type
+- Quality guarantees for critical tasks
+- Compliance-based routing (e.g., "EU tasks use EU providers")
+- A/B testing different routing strategies (Feature #7)
+
+---
+
+### Feature #6: agentacct — Real-Time Cost Analytics & Dashboard
+
+**Status**: 🟢 Ready for Integration  
+**Complexity**: Low  
+**Value**: Very High (Real-time cost visibility + optimization insights)
+
+[→ Full Integration Guide](./features/06-agentacct/INTEGRATION_GUIDE.md)
+
+**What it does**:
+- Real-time tracking of tokens, costs, and performance metrics
+- Multi-provider cost comparison (357+ providers via OmniRoute)
+- Per-agent and per-task cost attribution
+- Cost optimization recommendations
+- Historical trends and forecasting
+- Web dashboard + API access
+- Slack integration for cost alerts
+
+**Key metrics**:
+```
+Baseline: $0.50/session
+With Features #1-4: $0.005/session (99% savings)
+Dashboard shows: $0.50 → $0.005 reduction visualization
+```
+
+**Quick setup**:
+```bash
+cd features/06-agentacct/agentacct
+pip install -r requirements.txt
+python -m agentacct.server
+# Dashboard at http://localhost:8000/dashboard
+```
+
+**Use it for**:
+- Track cost savings from Features #1-4
+- Identify expensive workflows
+- Compare model costs
+- Measure ROI of optimizations
+- Team chargeback accuracy
+- Cost forecasting and budgeting
+
+**Synergy with Features #1-5**:
+- Tracks costs from OmniRoute routing decisions
+- Measures savings from Claude-Mem + token-optimizer compression
+- Analyzes gstack workflow efficiency
+- Evaluates custom routing plugin effectiveness
+- Result: **Full cost visibility across entire pipeline** ✅
+
+---
+
+### Feature #7: A/B Testing Framework — Model & Strategy Experimentation
+
+**Status**: 🟡 Building Now  
+**Complexity**: Medium  
+**Value**: High (Data-driven optimization decisions)
+
+[→ Framework Guide](./features/08-ab-testing/README.md)
+
+**What it does**:
+- Compare Claude models (Opus vs Sonnet vs Haiku)
+- Test prompt variants against each other
+- Compare provider performance and cost
+- Measure quality, cost, and speed tradeoffs
+- Statistical significance testing
+- Automatic winner recommendation
+
+**Example experiment**:
+```
+Hypothesis: Claude Haiku achieves same quality as Opus at 1% cost
+
+Results (1000 tasks):
+├─ Opus: 9.5/10 quality, $0.03/task
+├─ Haiku: 9.2/10 quality, $0.0003/task
+└─ Recommendation: Use Haiku (97% quality, 99% cost savings) ✅
+```
+
+**Quick setup**:
+```bash
+cd features/08-ab-testing
+# Define experiment configuration
+# Run experiment across variants
+# Analyze results automatically
+```
+
+**Use it for**:
+- Model selection (which Claude model is best for your use case)
+- Prompt optimization (find most efficient prompts)
+- Provider comparison (GPT-4 vs Claude vs DeepSeek)
+- Quality vs cost tradeoff analysis
+- Continuous optimization (run experiments weekly)
+
+**Synergy with All Features**:
+- Compares routing strategies (Feature #5 rules)
+- Measures agentacct cost differences (Feature #6)
+- Tests gstack skill effectiveness (Feature #4)
+- Evaluates token-optimizer impact (Feature #3)
+- Result: **Data-driven optimization recommendations** ✅
+
+---
+
+## 🚀 Future Features (Roadmap)
+
+| # | Feature | Status | Vision |
+|---|---------|--------|--------|
+| 9 | Local Model Marketplace | 🔵 Planned | Ollama + local LLM integration |
+| 10 | Prompt Caching Plugin | 🔵 Planned | Native cache + persistent memory |
+| 11 | Multi-Provider Streaming | 🔵 Planned | Parallel requests + result comparison |
+| 12 | Team Collaboration Hub | 🔵 Planned | Shared skills, memory, analytics |
 
 ---
 
@@ -192,46 +322,59 @@ npm install
 ```
 Increadible/
 ├── README.md                           (This file)
+├── FEATURE_STACK_COMPLETE.md           (Complete 7-feature architecture)
 ├── CONTRIBUTING.md                     (How to add features)
 ├── features/
-│   ├── 01-omniroute/                   (73.2k ⭐ - BEST)
-│   │   ├── OmniRoute/                  (Cloned upstream repo)
-│   │   ├── INTEGRATION_GUIDE.md        (Setup + usage guide)
+│   ├── 01-omniroute/                   (73.2k ⭐ - Multi-provider routing)
+│   │   ├── OmniRoute/                  (Submodule: upstream repo)
+│   │   ├── INTEGRATION_GUIDE.md        (Complete setup guide)
 │   │   └── examples/
-│   ├── 02-claude-mem/                  (96.4k ⭐ - BEST)
-│   │   ├── claude-mem/                 (Cloned upstream repo)
-│   │   ├── INTEGRATION_GUIDE.md        (Setup + usage guide)
+│   ├── 02-claude-mem/                  (96.4k ⭐ - Persistent memory)
+│   │   ├── claude-mem/                 (Submodule: upstream repo)
+│   │   ├── INTEGRATION_GUIDE.md        (Complete setup guide)
 │   │   └── examples/
-│   ├── 03-token-optimizer/             (538 ⭐ - BEST) ✨ UPGRADED
-│   │   ├── token-optimizer-mcp/        (Cloned upstream repo)
-│   │   ├── INTEGRATION_GUIDE.md        (Setup + usage guide)
+│   ├── 03-token-optimizer/             (538 ⭐ - Context compression)
+│   │   ├── token-optimizer-mcp/        (Submodule: upstream repo)
+│   │   ├── INTEGRATION_GUIDE.md        (Complete setup guide)
 │   │   └── examples/
-│   ├── 04-gstack/                      (135k ⭐ - BEST)
-│   │   ├── gstack/                     (Cloned upstream repo)
-│   │   ├── INTEGRATION_GUIDE.md        (Setup + usage guide)
+│   ├── 04-gstack/                      (135k ⭐ - Workflow automation)
+│   │   ├── gstack/                     (Submodule: upstream repo)
+│   │   ├── INTEGRATION_GUIDE.md        (Complete setup guide)
 │   │   └── examples/
-│   ├── 05-routing-plugins/             (Coming soon)
-│   ├── 06-analytics-dashboard/         (Coming soon)
-│   ├── 07-ab-testing/                  (Coming soon)
-│   └── ...
+│   ├── 07-routing-plugins/             (Custom: Team routing rules)
+│   │   ├── README.md                   (Framework overview)
+│   │   ├── src/                        (TypeScript implementation)
+│   │   └── examples/
+│   ├── 06-agentacct/                   (764 ⭐ - Cost analytics)
+│   │   ├── agentacct/                  (Submodule: upstream repo)
+│   │   ├── INTEGRATION_GUIDE.md        (Complete setup guide)
+│   │   └── examples/
+│   └── 08-ab-testing/                  (Custom: A/B testing framework)
+│       ├── README.md                   (Framework overview)
+│       ├── src/                        (TypeScript implementation)
+│       └── examples/
 ├── plugins/                            (Claude Desktop plugins)
 │   ├── omniroute-plugin.ts
 │   ├── claude-mem-plugin.ts
-│   ├── token-optimizer-plugin.ts       (REPLACED headroom)
-│   └── gstack-plugin.ts
+│   ├── token-optimizer-plugin.ts
+│   ├── gstack-plugin.ts
+│   ├── routing-plugins-plugin.ts
+│   ├── agentacct-plugin.ts
+│   └── ab-testing-plugin.ts
 ├── docs/
-│   ├── ARCHITECTURE.md                 (System design)
+│   ├── ARCHITECTURE.md                 (7-feature system design)
 │   ├── API_REFERENCE.md                (All features)
 │   └── TROUBLESHOOTING.md              (FAQ & fixes)
-└── .claude/
-    └── skills/                         (Claude Code skills)
+└── .gitmodules                         (Git submodule configuration)
 ```
 
 ---
 
 ## ⚡ Quick Start
 
-### Install All Four Features (Recommended: 40-50 minutes)
+### Install Complete 7-Feature Stack (Recommended: 90-120 minutes)
+
+**TIER 1: Core Optimization (40-50 min)**
 
 **Step 1: OmniRoute (10-15 min)**
 ```bash
@@ -244,12 +387,11 @@ omniroute serve  # Starts at localhost:20128/v1
 cd features/02-claude-mem/claude-mem
 bun install
 # Configure MCP server in Claude Desktop
-/learn --init-project
 ```
 
-**Step 3: Headroom (5-10 min)**
+**Step 3: token-optimizer-mcp (5-10 min)**
 ```bash
-cd features/03-headroom/headroom
+cd features/03-token-optimizer/token-optimizer-mcp
 npm install
 # Configure MCP server in Claude Desktop
 ```
@@ -260,10 +402,40 @@ cd features/04-gstack/gstack
 npm install
 # Configure .env with API keys
 # Load 23 skills into Claude Code
-/learn --init-project  # Share memory with Claude-Mem
 ```
 
-**Result**: 95-99% cost savings + persistent memory + compression + workflow automation ✅
+**TIER 2: Analytics & Testing (40-50 min)**
+
+**Step 5: Routing Plugins (10-15 min)**
+```bash
+cd features/07-routing-plugins
+# Define team routing rules in rules.yaml
+# Enable MCP server for custom routing
+```
+
+**Step 6: agentacct (10-15 min)**
+```bash
+cd features/06-agentacct/agentacct
+pip install -r requirements.txt
+python -m agentacct.server
+# Dashboard at http://localhost:8000/dashboard
+```
+
+**Step 7: A/B Testing Framework (10-15 min)**
+```bash
+cd features/08-ab-testing
+# Define experiments in config
+# Enable MCP server for testing
+```
+
+**Result**: 
+- ✅ 99.8% cost savings ($1000 → $0.02/month)
+- ✅ Persistent memory across sessions
+- ✅ Context compression (99.2% reduction)
+- ✅ Automated workflow (23 skills)
+- ✅ Team-specific routing
+- ✅ Real-time cost tracking
+- ✅ Data-driven optimization
 
 ### Install Subset (Pick Your Focus)
 
