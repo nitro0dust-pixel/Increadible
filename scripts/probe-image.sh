@@ -51,7 +51,7 @@ start "$B"
 rpc '{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"get_experiment_results","arguments":{"experiment_id":"probe"}}}' \
   | jq -r '.result.content[0].text' | jq -e '.statistical_analysis.current_samples == 1' >/dev/null || fail "A/B data was lost across the restart"
 
-echo "[healthcheck] Docker's HEALTHCHECK must report healthy (the first probe runs after the interval, up to ~60s)"
+echo "[healthcheck] Docker's HEALTHCHECK must report healthy (waiting up to 60s)"
 for _ in $(seq 1 60); do
   [ "$(docker inspect --format '{{.State.Health.Status}}' "$B")" = "healthy" ] && { echo "probe: OK"; exit 0; }
   sleep 1
