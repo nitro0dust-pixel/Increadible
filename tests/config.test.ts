@@ -137,6 +137,49 @@ describe("Dockerfile and package.json", () => {
   });
 });
 
+describe(".github/workflows/ci-cd.yml", () => {
+  const wf: any = yaml.parse(read(".github/workflows/ci-cd.yml"));
+  const docker = wf.jobs.docker;
+  const verify = wf.jobs["verify-published-image"];
+  const allRuns = (job: any) => job.steps.map((s: any) => s.run ?? "").join("\n");
+
+  it("only references scripts that exist", () => {
+    const refs = [...JSON.stringify(wf).matchAll(/scripts\/[a-z-]+\.sh/g)].map((m) => m[0]);
+    expect(refs.length).toBeGreaterThan(0);
+    for (const r of new Set(refs)) expect(fs.existsSync(path.join(root, r))).toBe(true);
+  });
+
+  it("probes the locally built image before anything is pushed", () => {
+    const names = docker.steps.map((s: any) => s.name ?? s.uses);
+    const probe = names.findIndex((n: string) => /Probe the image/.test(n));
+    const push = names.findIndex((n: string) => n === "Push image");
+    expect(probe).toBeGreaterThan(-1);
+    expect(probe).toBeLessThan(push);
+    expect(allRuns(docker)).toContain("scripts/probe-image.sh increadible:ci");
+  });
+
+  it("hands the pushed digest from the push step to the verify job", () => {
+    const pushStep = docker.steps.find((s: any) => s.name === "Push image");
+    expect(pushStep.id).toBe("push");
+    expect(docker.outputs.digest).toBe("${{ steps.push.outputs.digest }}");
+    expect(verify.needs).toBe("docker");
+    expect(verify.env.DIGEST).toBe("${{ needs.docker.outputs.digest }}");
+  });
+
+  it("verifies the published image by digest, only on pushes to main, with read-only package access", () => {
+    expect(verify.if).toBe("github.event_name == 'push' && github.ref == 'refs/heads/main'");
+    expect(verify.permissions).toEqual({ contents: "read", packages: "read" });
+    const runs = allRuns(verify);
+    expect(runs).toContain('docker pull "$IMAGE@$DIGEST"');
+    expect(runs).toContain('scripts/probe-image.sh "$IMAGE@$DIGEST"');
+    expect(runs).toContain("imagetools inspect");
+  });
+
+  it("does not mask failures with continue-on-error", () => {
+    expect(read(".github/workflows/ci-cd.yml")).not.toContain("continue-on-error");
+  });
+});
+
 describe("repository hygiene", () => {
   it("declares every submodule path in .gitmodules and has the directory", () => {
     const paths = [...read(".gitmodules").matchAll(/path = (.+)/g)].map((m) => m[1]);
