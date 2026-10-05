@@ -201,6 +201,16 @@ describe("repository hygiene", () => {
     }
   });
 
+  it("stays buildable and checkable on Windows (no rm, LF endings, tracked clean script)", () => {
+    expect(pkg.scripts.build).not.toMatch(/\brm\b/);
+    expect(pkg.scripts.build).toContain("scripts/clean.js");
+    expect(fs.existsSync(path.join(root, "scripts/clean.js"))).toBe(true);
+    expect(read(".gitignore")).toContain("!scripts/*.js");
+    const attrs = read(".gitattributes");
+    expect(attrs).toMatch(/\*\s+text=auto\s+eol=lf/);
+    expect(attrs).toMatch(/\*\.sh\s+text\s+eol=lf/);
+  });
+
   it("keeps ROADMAP.md present, linked from the README, and listing owner decisions", () => {
     expect(fs.existsSync(path.join(root, "ROADMAP.md"))).toBe(true);
     expect(read("README.md")).toContain("(ROADMAP.md)");

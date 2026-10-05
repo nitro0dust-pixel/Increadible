@@ -137,6 +137,10 @@ currently returns **generated mock data**; it makes no network calls. Results ar
 | `npm run build` | Compile to `dist/` (tests excluded) |
 | `npm run verify` | Type-check, lint, tests, build, and a stdio smoke test |
 
+**Windows:** `type-check`, `lint`, `test` and `build` work from PowerShell. `npm run smoke`, `npm run verify` and the `scripts/*.sh`
+probes are bash scripts: run them from Git Bash or WSL (not yet verified on Windows). The repo forces LF line endings
+(`.gitattributes`); if you cloned before that landed, re-clone or run `git add --renormalize .`.
+
 Layout: `src/` (server + transports), `features/07..09/*/src/` (our modules), `tests/`,
 `k8s/` (example manifests), `Dockerfile`.
 

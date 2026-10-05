@@ -11,6 +11,7 @@ out/
 *.js
 *.d.ts
 !jest.config.js
+!scripts/*.js
 !.github/**/*.js
 
 # IDE

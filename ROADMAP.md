@@ -1,6 +1,6 @@
 # Roadmap and project status
 
-Last updated: 2026-10-05 18:50 UTC (6 Oct 2026, 00:20 IST), at `main` = `b786ef7`.
+Last updated: 2026-10-05 19:20 UTC (6 Oct 2026, 00:50 IST), measured at `main` = `ca6aa33`.
 
 **Bottom line:** the in-repo code (Features #7-#9 and the server around them) is built, tested, containerised, and the
 image published to GHCR passes its probe. **Nothing is deployed anywhere**, the Kubernetes manifests have never been
@@ -16,13 +16,14 @@ Update this line when the owner confirms or changes it.
 
 | Item | Result | Evidence |
 |---|---|---|
-| CI on `main` | green, including the pull-by-digest check | run 37358545891 |
-| Tests | 87 pass, 6 todo | `npm test` |
+| CI on `main` | **green: all five jobs passed** on `ca6aa33` (type-check/lint/build/smoke, tests, dependency audit and secret scan, Docker build and probe, pull-by-digest verification of the pushed image). The Docker job waited about 5 minutes for a runner, which was queueing, not a failure | run 37360648274, finished 19:12 UTC |
+| Tests | 88 pass, 6 todo | `npm test` |
 | Coverage | 92% statements, 81% branches | `npx jest --coverage` |
 | Lint, type-check | clean | `npm run lint`, `npm run type-check` |
 | Dependency audit (prod deps) | 0 vulnerabilities | `npm audit --omit=dev` |
 | Published image | pushed to GHCR, pulled by digest and probed in CI; package is private | `verify-published-image` job |
 | Kubernetes manifests, Prometheus rules | **NOT VERIFIED** (no cluster available) | parsed and consistency-tested only |
+| Local run on the owner's Windows PC | **NOT VERIFIED**, pending the owner running the local verification steps | Windows portability fixes were made without access to a Windows machine |
 | Cost savings and quality figures | **never measured** | the old headline percentages were removed |
 | Release tag `v1.0.0` | exists locally only, on an old commit; never pushed | `git ls-remote --tags origin` is empty |
 
@@ -38,6 +39,8 @@ Update this line when the owner confirms or changes it.
 3. **[PR #3](https://github.com/nitro0dust-pixel/Increadible/pull/3), A/B persistence:** append-only log (`AB_DATA_FILE`) with crash recovery, a persistent volume in Kubernetes.
 4. **[PR #4](https://github.com/nitro0dust-pixel/Increadible/pull/4), image verification:** CI pulls the pushed image back by digest and probes that copy.
 5. **[PR #5](https://github.com/nitro0dust-pixel/Increadible/pull/5), private-image deployment:** optional `ghcr-pull` secret and a deployment runbook.
+6. **[PR #6](https://github.com/nitro0dust-pixel/Increadible/pull/6), this roadmap.**
+7. **Windows-friendly local verification:** a cross-platform `build` clean step (`rm -rf` does not exist in `cmd.exe`), `.gitattributes` forcing LF line endings (CRLF breaks the shell scripts and some config tests), and one POSIX-permission test assertion skipped on Windows. Not yet run on a real Windows machine.
 
 ## Roadmap by sprint
 
