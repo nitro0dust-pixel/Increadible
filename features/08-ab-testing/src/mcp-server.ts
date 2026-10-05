@@ -131,6 +131,7 @@ class ABTestingFramework {
           message: `Need ${100 - expMeasurements.length} more samples`,
           current_samples: expMeasurements.length,
         },
+        confidence: 0,
       };
     }
 
