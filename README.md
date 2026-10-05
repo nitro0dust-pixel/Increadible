@@ -173,15 +173,23 @@ npm install
 
 ---
 
-### Feature #5: Custom Routing Plugins — Team-Specific AI Rules Engine
+### Feature #7: Custom Routing Plugins — Team-Specific AI Rules Engine
 
-**Status**: 🟡 Building Now  
+**Status**: 🟢 Ready for Integration  
 **Complexity**: Medium  
-**Value**: High (Team-specific routing optimization)
+**Value**: High (Team-specific routing optimization + 70-90% cost savings)
 
-[→ Framework Guide](./features/07-routing-plugins/README.md)
+[→ Full Integration Guide](./features/07-routing-plugins/INTEGRATION_GUIDE.md)
 
 **What it does**:
+- **Cost-based routing**: Route simple tasks to Haiku (99% cheaper), complex to Opus
+- **Quality-based routing**: Guarantee quality on critical paths (security, audits)
+- **Performance-based routing**: Use fastest providers when SLA matters
+- **Compliance-based routing**: Auto-enforce regulatory requirements (GDPR, etc.)
+- **Custom failover chains**: Define provider fallback strategies
+- **Zero-code rule updates**: Change rules via YAML config, no redeployment
+
+**Example workflow**:
 - Define custom routing rules via YAML/JSON config
 - Industry-specific provider selection rules
 - Cost-based routing (prefer cheaper models for low-complexity tasks)
@@ -256,13 +264,13 @@ python -m agentacct.server
 
 ---
 
-### Feature #7: A/B Testing Framework — Model & Strategy Experimentation
+### Feature #8: A/B Testing Framework — Model & Strategy Experimentation
 
-**Status**: 🟡 Building Now  
+**Status**: 🟢 Ready for Integration  
 **Complexity**: Medium  
-**Value**: High (Data-driven optimization decisions)
+**Value**: High (Data-driven optimization + statistical confidence)
 
-[→ Framework Guide](./features/08-ab-testing/README.md)
+[→ Full Integration Guide](./features/08-ab-testing/INTEGRATION_GUIDE.md)
 
 **What it does**:
 - Compare Claude models (Opus vs Sonnet vs Haiku)
