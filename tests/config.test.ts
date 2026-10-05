@@ -42,6 +42,14 @@ describe.each(["k8s/staging-deployment.yaml", "k8s/production-deployment.yaml"])
     expect(deployment.spec.template.spec.securityContext.fsGroup).toBe(deployment.spec.template.spec.securityContext.runAsUser);
   });
 
+  it("can pull a private GHCR image through an optional ghcr-pull secret that DEPLOYMENT.md tells you to create", () => {
+    expect(deployment.spec.template.spec.imagePullSecrets).toEqual([{ name: "ghcr-pull" }]);
+    const doc = read("DEPLOYMENT.md");
+    expect(doc).toContain("create secret docker-registry ghcr-pull --docker-server=ghcr.io");
+    expect(doc).toContain("imagePullSecrets");
+    expect(container.image.startsWith("ghcr.io/")).toBe(true);
+  });
+
   it("probes endpoints the server actually serves, on the named container port", () => {
     expect(container.livenessProbe.httpGet).toEqual({ path: "/health", port: "http" });
     expect(container.readinessProbe.httpGet).toEqual({ path: "/ready", port: "http" });
