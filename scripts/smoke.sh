@@ -26,6 +26,27 @@ printf '%s\n' \
     assert.strictEqual(JSON.parse(msgs[2].result.content[0].text).provider, "claude-haiku");
   '
 
+echo "[persistence] A/B data must survive a process restart (AB_DATA_FILE)"
+export AB_DATA_FILE="$TMP/ab-data.jsonl"
+EXP='{"id":"smoke","name":"n","hypothesis":"h","metrics":[{"id":"q","name":"q","type":"c","aggregation":"mean"}],"variants":[{"id":"A","name":"a","config":{}},{"id":"B","name":"b","config":{}}]}'
+{
+  printf '%s\n' "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{\"name\":\"create_experiment\",\"arguments\":$EXP}}"
+  for i in $(seq 1 60); do
+    printf '%s\n' "{\"jsonrpc\":\"2.0\",\"id\":$((i+1)),\"method\":\"tools/call\",\"params\":{\"name\":\"record_metric\",\"arguments\":{\"experiment_id\":\"smoke\",\"variant_id\":\"A\",\"metrics\":{\"q\":$((10 + i % 3))}}}}"
+    printf '%s\n' "{\"jsonrpc\":\"2.0\",\"id\":$((i+100)),\"method\":\"tools/call\",\"params\":{\"name\":\"record_metric\",\"arguments\":{\"experiment_id\":\"smoke\",\"variant_id\":\"B\",\"metrics\":{\"q\":$((5 + i % 3))}}}}"
+  done
+} | node dist/src/index.js 2>/dev/null >/dev/null
+echo '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_experiment_results","arguments":{"experiment_id":"smoke"}}}' \
+  | node dist/src/index.js 2>/dev/null \
+  | node -e '
+    const r = JSON.parse(JSON.parse(require("fs").readFileSync(0, "utf8")).result.content[0].text);
+    const assert = require("assert");
+    assert.strictEqual(r.status, "complete", "results lost across restart: " + JSON.stringify(r));
+    assert.strictEqual(r.winner, "A");
+    assert.strictEqual(r.variant_results.A.metrics.q.sample_size, 60);
+  '
+unset AB_DATA_FILE
+
 PORT=${SMOKE_PORT:-3199}
 echo "[http] port $PORT: health, auth, /mcp, /metrics"
 PORT=$PORT HOST=127.0.0.1 AUTH_TOKEN=smoke-token node dist/src/index.js 2>"$TMP/http.err" &

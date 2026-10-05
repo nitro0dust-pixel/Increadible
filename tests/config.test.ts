@@ -29,6 +29,19 @@ describe.each(["k8s/staging-deployment.yaml", "k8s/production-deployment.yaml"])
     expect(env.AUTH_TOKEN.secretKeyRef).toEqual({ name: "increadible-secrets", key: "auth-token" });
   });
 
+  it("persists A/B data on a PersistentVolumeClaim mounted where AB_DATA_FILE points", () => {
+    const dataPath = container.env.find((e: any) => e.name === "AB_DATA_FILE").value;
+    const mount = container.volumeMounts.find((m: any) => dataPath.startsWith(m.mountPath + "/"));
+    expect(mount).toBeDefined();
+    expect(mount.readOnly).toBeUndefined();
+    const vol = deployment.spec.template.spec.volumes.find((v: any) => v.name === mount.name);
+    const pvc = kind("PersistentVolumeClaim");
+    expect(vol.persistentVolumeClaim.claimName).toBe(pvc.metadata.name);
+    expect(pvc.spec.accessModes).toEqual(["ReadWriteOnce"]);
+    expect(deployment.spec.strategy.type).toBe("Recreate"); // an RWO volume cannot be attached to two pods
+    expect(deployment.spec.template.spec.securityContext.fsGroup).toBe(deployment.spec.template.spec.securityContext.runAsUser);
+  });
+
   it("probes endpoints the server actually serves, on the named container port", () => {
     expect(container.livenessProbe.httpGet).toEqual({ path: "/health", port: "http" });
     expect(container.readinessProbe.httpGet).toEqual({ path: "/ready", port: "http" });
@@ -100,6 +113,11 @@ describe("Dockerfile and package.json", () => {
     expect(pkg.main).toBe("dist/src/index.js");
     expect(dockerfile).toContain('CMD ["node", "dist/src/index.js"]');
     expect(read("tsconfig.build.json")).toContain("src/**/*.ts");
+  });
+
+  it("persists A/B data under the writable /data volume in the image", () => {
+    expect(dockerfile).toMatch(/AB_DATA_FILE=\/data\/ab-data\.jsonl/);
+    expect(dockerfile).toMatch(/chown node:node \/data/);
   });
 
   it("uses a tracked lockfile for reproducible installs", () => {

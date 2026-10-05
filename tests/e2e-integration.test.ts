@@ -296,6 +296,135 @@ describe("Feature #8: A/B Testing Framework", () => {
   });
 });
 
+describe("Feature #8: A/B data persistence", () => {
+  beforeAll(() => {
+    jest.spyOn(console, "error").mockImplementation(() => undefined);
+  });
+  afterAll(() => {
+    jest.restoreAllMocks();
+  });
+
+  const dataFile = (name: string) => tmpFile(`persist-${name}.jsonl`);
+  const open = (file: string, yamlFile = tmpFile("persist-missing.yaml")) => new ABTestingFramework(yamlFile, file);
+  const seed = (ab: ABTestingFramework, n = 40) => {
+    ab.createExperiment(makeExperiment());
+    recordSamples(ab, "exp-1", "A", n, normalSampler(10, 1, 61));
+    recordSamples(ab, "exp-1", "B", n, normalSampler(5, 1, 62));
+  };
+
+  it("restores experiments and measurements after a restart with identical results", () => {
+    const file = dataFile("restart");
+    const before = open(file);
+    seed(before, 60);
+    const expected = before.getExperimentResults("exp-1");
+
+    const after = open(file);
+    expect(after.listExperiments().map((e) => e.id)).toEqual(["exp-1"]);
+    expect(after.getExperimentResults("exp-1")).toEqual(expected);
+    expect(expected!.status).toBe("complete");
+  });
+
+  it("keeps accumulating across several restarts", () => {
+    const file = dataFile("accumulate");
+    seed(open(file), 20); // 40 samples: incomplete
+    expect(open(file).getExperimentResults("exp-1")!.status).toBe("incomplete");
+    const second = open(file);
+    recordSamples(second, "exp-1", "A", 30, normalSampler(10, 1, 71));
+    recordSamples(second, "exp-1", "B", 30, normalSampler(5, 1, 72));
+    const third = open(file).getExperimentResults("exp-1")!;
+    expect(third.status).toBe("complete");
+    expect(third.variant_results.A.metrics.quality.sample_size).toBe(50);
+    expect(third.variant_results.B.metrics.quality.sample_size).toBe(50);
+  });
+
+  it("writes one JSON line per event with owner-only permissions", () => {
+    const file = dataFile("format");
+    const ab = open(file);
+    ab.createExperiment(makeExperiment());
+    ab.recordMetric("exp-1", "A", { quality: 3.5 });
+    const lines = fs.readFileSync(file, "utf-8").trimEnd().split("\n").map((l) => JSON.parse(l));
+    expect(lines.map((l) => l.type)).toEqual(["experiment", "measurement"]);
+    expect(lines[1]).toMatchObject({ experiment_id: "exp-1", variant_id: "A", metrics: { quality: 3.5 } });
+    expect(fs.statSync(file).mode & 0o777).toBe(0o600);
+  });
+
+  it("is in-memory only when no data file is given", () => {
+    const before = fs.readdirSync(tmpDir).length;
+    const ab = new ABTestingFramework(tmpFile("persist-missing.yaml"));
+    ab.createExperiment(makeExperiment());
+    ab.recordMetric("exp-1", "A", { quality: 1 });
+    expect(fs.readdirSync(tmpDir).length).toBe(before);
+  });
+
+  it("recovers from a line torn by a crash and keeps appending cleanly", () => {
+    const file = dataFile("torn");
+    const ab = open(file);
+    seed(ab, 10);
+    fs.appendFileSync(file, '{"type":"measurement","experiment_id":"exp-1","varia'); // crash mid-write, no newline
+
+    const restarted = open(file);
+    expect(restarted.getExperimentResults("exp-1")!.statistical_analysis.current_samples).toBe(20);
+    restarted.recordMetric("exp-1", "A", { quality: 9 });
+
+    const again = open(file);
+    expect(again.getExperimentResults("exp-1")!.statistical_analysis.current_samples).toBe(21);
+  });
+
+  it("skips a corrupt line in the middle and drops measurements of unknown experiments", () => {
+    const file = dataFile("corrupt");
+    seed(open(file), 5);
+    fs.appendFileSync(file, "not json at all\n");
+    fs.appendFileSync(file, JSON.stringify({ type: "measurement", experiment_id: "ghost", variant_id: "A", metrics: { quality: 1 }, timestamp: "t" }) + "\n");
+    fs.appendFileSync(file, JSON.stringify({ type: "measurement", experiment_id: "exp-1", variant_id: "A", metrics: { quality: "x" }, timestamp: "t" }) + "\n");
+    fs.appendFileSync(file, JSON.stringify({ type: "mystery" }) + "\n");
+    const ab = open(file);
+    expect(ab.getExperimentResults("exp-1")!.statistical_analysis.current_samples).toBe(10);
+    expect(ab.listExperiments()).toHaveLength(1);
+  });
+
+  it("rejects a duplicate experiment id instead of mixing data, including after a restart", () => {
+    const file = dataFile("dup");
+    const ab = open(file);
+    ab.createExperiment(makeExperiment());
+    expect(() => ab.createExperiment(makeExperiment())).toThrow("Experiment already exists");
+    expect(() => open(file).createExperiment(makeExperiment())).toThrow("Experiment already exists");
+  });
+
+  it("treats the YAML definition as authoritative over a logged experiment with the same id", () => {
+    const file = dataFile("yaml-wins");
+    const yamlFile = tmpFile("persist-defs.yaml");
+    seed(open(file), 60);
+    const def = makeExperiment({ name: "From YAML" });
+    fs.writeFileSync(yamlFile, JSON.stringify({ experiments: [def] })); // JSON is valid YAML
+    const ab = open(file, yamlFile);
+    expect(ab.listExperiments().find((e) => e.id === "exp-1")!.name).toBe("From YAML");
+    expect(ab.getExperimentResults("exp-1")!.variant_results.A.metrics.quality.sample_size).toBe(60);
+  });
+
+  it("fails fast with a clear error when the data file cannot be used", () => {
+    const blocker = tmpFile("persist-blocker");
+    fs.writeFileSync(blocker, "a file, not a directory");
+    expect(() => open(path.join(blocker, "ab.jsonl"))).toThrow(/Cannot use A\/B data file .*ab\.jsonl/);
+  });
+
+  it("does not apply a change in memory when the disk write fails", () => {
+    const ab = open(dataFile("write-fail"));
+    ab.createExperiment(makeExperiment());
+    const realFs = require("fs");
+    const spy = jest.spyOn(realFs, "appendFileSync").mockImplementation(() => {
+      throw new Error("ENOSPC: no space left on device");
+    });
+    expect(() => ab.recordMetric("exp-1", "A", { quality: 1 })).toThrow("ENOSPC");
+    expect(() => ab.createExperiment(makeExperiment({ id: "exp-2" }))).toThrow("ENOSPC");
+    spy.mockRestore();
+    expect(ab.listExperiments().map((e) => e.id)).toEqual(["exp-1"]);
+    ab.recordMetric("exp-1", "A", { quality: 2 });
+    recordSamples(ab, "exp-1", "B", 99, () => 1);
+    expect(ab.getExperimentResults("exp-1")!.status).not.toBe(undefined);
+    expect(open(dataFile("write-fail")).getExperimentResults("exp-1")!.statistical_analysis.current_samples).toBe(100);
+  });
+});
+
 describe("Feature #9: Universal API Gateway", () => {
   let gw: UniversalAPIGateway;
 

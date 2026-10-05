@@ -99,6 +99,22 @@ jobs:
             -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' localhost:3000/mcp | grep -q apply_routing_rules
           docker logs inc
           docker rm -f inc
+      - name: A/B data survives a container restart (named volume, non-root)
+        run: |
+          rpc() { curl -fs -H 'Authorization: Bearer ci-token' -d "$1" localhost:3001/mcp; }
+          wait_up() { for i in $(seq 1 30); do curl -fs localhost:3001/health >/dev/null && return 0; sleep 1; done; return 1; }
+          docker volume create inc-data
+          docker run -d --name inc-a -p 3001:3000 -v inc-data:/data -e AUTH_TOKEN=ci-token increadible:ci
+          wait_up
+          rpc '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"create_experiment","arguments":{"id":"ci","name":"n","hypothesis":"h","metrics":[{"id":"q","name":"q","type":"c","aggregation":"mean"}],"variants":[{"id":"A","name":"a","config":{}},{"id":"B","name":"b","config":{}}]}}}' | jq -e '.result.isError == false'
+          rpc '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"record_metric","arguments":{"experiment_id":"ci","variant_id":"A","metrics":{"q":1}}}}' | jq -e '.result.isError == false'
+          docker rm -f inc-a
+          docker run -d --name inc-b -p 3001:3000 -v inc-data:/data -e AUTH_TOKEN=ci-token increadible:ci
+          wait_up
+          rpc '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"get_experiment_results","arguments":{"experiment_id":"ci"}}}' \
+            | jq -r '.result.content[0].text' | jq -e '.statistical_analysis.current_samples == 1'
+          docker logs inc-b
+          docker rm -f inc-b
       - name: Log in to GHCR
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: docker/login-action@v4

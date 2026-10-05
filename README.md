@@ -44,7 +44,8 @@ npm run build
       "args": ["/absolute/path/to/Increadible/dist/src/index.js"],
       "env": {
         "RULES_FILE": "/absolute/path/to/rules.yaml",
-        "EXPERIMENTS_FILE": "/absolute/path/to/experiments.yaml"
+        "EXPERIMENTS_FILE": "/absolute/path/to/experiments.yaml",
+        "AB_DATA_FILE": "/absolute/path/to/ab-data.jsonl"
       }
     }
   }
@@ -112,7 +113,14 @@ First enabled rule whose `match` fits wins; an empty `match` matches everything.
 - Significance: Welch's t-test (normal approximation of t), two-sided, alpha = 0.05, on the
   **first** metric; higher mean is treated as better. `confidence = 1 - p`. A winner is named
   only if p < 0.05. Per-metric Cohen's d and a 95% CI of the mean are reported.
-- Measurements are held **in memory** and are lost on restart.
+- **Persistence:** set `AB_DATA_FILE` to keep experiments and measurements across restarts. Every
+  `create_experiment` and `record_metric` is appended to that JSONL file *before* it takes effect (if the write
+  fails, the call returns an error and nothing is recorded), and the file is replayed on startup.
+  Unset, data lives in memory only (the Docker image and `k8s/` manifests set it to `/data/ab-data.jsonl`).
+  Details: one process per file; the file is created `0600`; unreadable or torn lines are skipped with a note on
+  stderr; creating an experiment with an existing id is rejected; definitions in `EXPERIMENTS_FILE` win over a
+  logged experiment with the same id; the file grows by roughly 150 bytes per measurement and is not compacted;
+  appends are not fsynced, so an OS crash or power loss can drop the last few writes.
 
 **API gateway:** the registry has 9 APIs (weather, finance, news, reference, sports). `call_api`
 currently returns **generated mock data**; it makes no network calls. Results are cached for 5 minutes.
@@ -136,4 +144,4 @@ Layout: `src/` (server + transports), `features/07..09/*/src/` (our modules), `t
   measure real savings, run agentacct (#6) against real usage and compare to a baseline.
 - No `k8s/` manifest has been applied to a cluster and the Docker image has not been built in CI here.
 - Features #1-#6 are not exercised by this repo's tests (see the `todo` list in `tests/e2e-integration.test.ts`).
-- `call_api` is mock-only; A/B measurements are not persisted.
+- `call_api` is mock-only. A/B persistence needs `AB_DATA_FILE`, is single-writer and never compacted.
