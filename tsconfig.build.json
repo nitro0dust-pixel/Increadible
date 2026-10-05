@@ -1,0 +1,10 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": { "declaration": false, "sourceMap": false },
+  "include": [
+    "src/**/*.ts",
+    "features/07-routing-plugins/src/**/*.ts",
+    "features/08-ab-testing/src/**/*.ts",
+    "features/09-api-gateway/src/**/*.ts"
+  ]
+}

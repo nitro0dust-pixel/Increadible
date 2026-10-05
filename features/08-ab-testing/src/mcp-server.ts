@@ -1,4 +1,3 @@
-import Anthropic from "@anthropic-ai/sdk";
 import * as fs from "fs";
 import * as yaml from "yaml";
 
@@ -24,20 +23,80 @@ interface Experiment {
   results?: ExperimentResults;
 }
 
-interface MetricResult {
-  variant_id: string;
-  metric_id: string;
-  mean: number;
-  std_dev: number;
-  sample_size: number;
-}
-
 interface ExperimentResults {
   status: "incomplete" | "complete";
   variant_results: Record<string, any>;
   statistical_analysis: Record<string, any>;
   winner?: string;
   confidence: number;
+}
+
+// FNV-1a + murmur3 finalizer, mapped to [0, 1) so a given user always lands in the same bucket.
+function bucket(key: string): number {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < key.length; i++) {
+    h ^= key.charCodeAt(i);
+    h = Math.imul(h, 0x01000193) >>> 0;
+  }
+  // murmur3 finalizer: FNV alone mixes the high bits poorly for sequential ids.
+  h ^= h >>> 16;
+  h = Math.imul(h, 0x85ebca6b) >>> 0;
+  h ^= h >>> 13;
+  h = Math.imul(h, 0xc2b2ae35) >>> 0;
+  h ^= h >>> 16;
+  return (h >>> 0) / 4294967296;
+}
+
+const MIN_TOTAL_SAMPLES = 100;
+const MIN_SAMPLES_PER_VARIANT = 30;
+const SIGNIFICANCE_LEVEL = 0.05;
+
+// Complementary error function (Numerical Recipes erfcc, relative error < 1.2e-7).
+function erfc(x: number): number {
+  const z = Math.abs(x);
+  const t = 1 / (1 + 0.5 * z);
+  const r =
+    t *
+    Math.exp(
+      -z * z -
+        1.26551223 +
+        t *
+          (1.00002368 +
+            t *
+              (0.37409196 +
+                t *
+                  (0.09678418 +
+                    t *
+                      (-0.18628806 +
+                        t *
+                          (0.27886807 +
+                            t *
+                              (-1.13520398 +
+                                t * (1.48851587 + t * (-0.82215223 + t * 0.17087277))))))))
+    );
+  return x >= 0 ? r : 2 - r;
+}
+
+// Two-sided p-value for a t statistic. Converts t to an approximate z score
+// (accurate for df >= ~25, which the per-variant sample minimum guarantees).
+function twoSidedPValue(t: number, df: number): number {
+  if (!isFinite(t)) return 0;
+  const z = (Math.abs(t) * (1 - 1 / (4 * df))) / Math.sqrt(1 + (t * t) / (2 * df));
+  return Math.min(1, erfc(z / Math.SQRT2));
+}
+
+// Approximate two-sided 95% t critical value.
+function tCritical95(df: number): number {
+  const z = 1.96;
+  return z + (z * z * z + z) / (4 * df);
+}
+
+function sampleStats(values: number[]) {
+  const n = values.length;
+  const mean = values.reduce((a, b) => a + b, 0) / n;
+  const variance =
+    n > 1 ? values.reduce((sum, v) => sum + (v - mean) ** 2, 0) / (n - 1) : 0;
+  return { n, mean, variance, std: Math.sqrt(variance) };
 }
 
 class ABTestingFramework {
@@ -62,16 +121,41 @@ class ABTestingFramework {
         const config = yaml.parse(content);
 
         for (const exp of config.experiments || []) {
-          this.experiments.set(exp.id, exp);
+          try {
+            this.validateExperiment(exp);
+            this.experiments.set(exp.id, exp);
+          } catch (error: any) {
+            console.error(`Skipping invalid experiment: ${error.message}`);
+          }
         }
-        console.log(`Loaded ${this.experiments.size} experiments`);
+        console.error(`Loaded ${this.experiments.size} experiments`);
       }
     } catch (error) {
       console.error("Error loading experiments:", error);
     }
   }
 
+  private validateExperiment(experiment: Experiment): void {
+    if (!experiment || typeof experiment.id !== "string") {
+      throw new Error("Experiment must have a string id");
+    }
+    if (!experiment.variants || experiment.variants.length !== 2) {
+      throw new Error("Experiment must have exactly 2 variants");
+    }
+    if (
+      typeof experiment.traffic_split !== "number" ||
+      experiment.traffic_split < 0 ||
+      experiment.traffic_split > 1
+    ) {
+      throw new Error("traffic_split must be a number between 0 and 1");
+    }
+    if (!Array.isArray(experiment.metrics)) {
+      throw new Error("Experiment must define a metrics array");
+    }
+  }
+
   public createExperiment(experiment: Experiment): void {
+    this.validateExperiment(experiment);
     this.experiments.set(experiment.id, {
       ...experiment,
       status: "setup",
@@ -80,7 +164,7 @@ class ABTestingFramework {
 
   public assignVariant(
     experimentId: string,
-    _userId?: string
+    userId?: string
   ): {
     variant_id: string;
     experiment_id: string;
@@ -90,9 +174,12 @@ class ABTestingFramework {
       throw new Error(`Experiment not found: ${experimentId}`);
     }
 
-    // Simple random assignment based on traffic split
-    const variantIndex =
-      Math.random() < experiment.traffic_split ? 0 : 1;
+    // Sticky per user when a user id is given, random otherwise.
+    const draw =
+      userId !== undefined && userId !== ""
+        ? bucket(`${experimentId}:${userId}`)
+        : Math.random();
+    const variantIndex = draw < experiment.traffic_split ? 0 : 1;
     const selectedVariant = experiment.variants[variantIndex];
 
     return {
@@ -106,6 +193,18 @@ class ABTestingFramework {
     variantId: string,
     metrics: Record<string, number>
   ): void {
+    const experiment = this.experiments.get(experimentId);
+    if (!experiment) {
+      throw new Error(`Experiment not found: ${experimentId}`);
+    }
+    if (!experiment.variants.some((v) => v.id === variantId)) {
+      throw new Error(`Variant ${variantId} is not part of experiment ${experimentId}`);
+    }
+    for (const [key, value] of Object.entries(metrics ?? {})) {
+      if (typeof value !== "number" || !Number.isFinite(value)) {
+        throw new Error(`Metric ${key} must be a finite number`);
+      }
+    }
     this.measurements.push({
       experiment_id: experimentId,
       variant_id: variantId,
@@ -123,103 +222,107 @@ class ABTestingFramework {
       (m) => m.experiment_id === experimentId
     );
 
-    if (expMeasurements.length < 100) {
+    if (expMeasurements.length < MIN_TOTAL_SAMPLES) {
       return {
         status: "incomplete",
         variant_results: {},
         statistical_analysis: {
-          message: `Need ${100 - expMeasurements.length} more samples`,
+          message: `Need ${MIN_TOTAL_SAMPLES - expMeasurements.length} more samples`,
           current_samples: expMeasurements.length,
         },
         confidence: 0,
       };
     }
 
-    // Calculate statistics by variant
-    const variantStats: Record<string, any> = {};
-
-    for (const variant of experiment.variants) {
-      const variantMeasurements = expMeasurements.filter(
-        (m) => m.variant_id === variant.id
-      );
-
-      const metricStats: Record<string, any> = {};
-
-      for (const metric of experiment.metrics) {
-        const values = variantMeasurements
-          .map((m) => m.metrics[metric.id])
-          .filter((v) => v !== undefined);
-
-        if (values.length > 0) {
-          const mean = values.reduce((a, b) => a + b, 0) / values.length;
-          const variance =
-            values.reduce((sum, val) => sum + Math.pow(val - mean, 2), 0) /
-            values.length;
-          const stdDev = Math.sqrt(variance);
-
-          metricStats[metric.id] = {
-            mean: parseFloat(mean.toFixed(4)),
-            std_dev: parseFloat(stdDev.toFixed(4)),
-            ci_95: [
-              parseFloat((mean - 1.96 * stdDev).toFixed(4)),
-              parseFloat((mean + 1.96 * stdDev).toFixed(4)),
-            ],
-            sample_size: values.length,
-          };
-        }
-      }
-
-      variantStats[variant.id] = {
-        name: variant.name,
-        metrics: metricStats,
+    const perVariant = experiment.variants.map(
+      (v) => expMeasurements.filter((m) => m.variant_id === v.id).length
+    );
+    if (perVariant.some((n) => n < MIN_SAMPLES_PER_VARIANT)) {
+      return {
+        status: "incomplete",
+        variant_results: {},
+        statistical_analysis: {
+          message: `Need at least ${MIN_SAMPLES_PER_VARIANT} samples per variant`,
+          current_samples: expMeasurements.length,
+          samples_per_variant: Object.fromEntries(
+            experiment.variants.map((v, i) => [v.id, perVariant[i]])
+          ),
+        },
+        confidence: 0,
       };
     }
 
-    // Perform statistical tests
+    const [vA, vB] = experiment.variants;
+    const variantStats: Record<string, any> = {};
     const pValues: Record<string, number> = {};
     const effectSizes: Record<string, number> = {};
+    const meansByMetric: Record<string, [number, number]> = {};
 
-    if (experiment.variants.length === 2) {
-      const variant1Data = variantStats[experiment.variants[0].id];
-      const variant2Data = variantStats[experiment.variants[1].id];
-
-      // Simple t-test approximation (for demonstration)
-      for (const metric of experiment.metrics) {
-        const m1 = variant1Data.metrics[metric.id];
-        const m2 = variant2Data.metrics[metric.id];
-
-        if (m1 && m2) {
-          // Cohen's d
-          const pooledStd = Math.sqrt((m1.std_dev + m2.std_dev) / 2);
-          const d = (m1.mean - m2.mean) / pooledStd;
-          effectSizes[metric.id] = parseFloat(d.toFixed(2));
-
-          // Approximate p-value
-          const t = (m1.mean - m2.mean) / Math.sqrt(m1.std_dev + m2.std_dev);
-          pValues[metric.id] = Math.min(
-            1,
-            Math.abs(t) > 1.96 ? 0.01 : 0.05
-          );
-        }
-      }
+    for (const variant of experiment.variants) {
+      variantStats[variant.id] = { name: variant.name, metrics: {} };
     }
 
-    // Determine winner
-    let winner: string | undefined;
-    const firstMetric = experiment.metrics[0];
-    if (firstMetric) {
-      const variant1Value = variantStats[experiment.variants[0].id].metrics[
-        firstMetric.id
-      ]?.mean;
-      const variant2Value = variantStats[experiment.variants[1].id]?.metrics[
-        firstMetric.id
-      ]?.mean;
+    for (const metric of experiment.metrics) {
+      const groups = [vA, vB].map((v) =>
+        sampleStats(
+          expMeasurements
+            .filter((m) => m.variant_id === v.id)
+            .map((m) => m.metrics[metric.id])
+            .filter((x) => x !== undefined)
+        )
+      );
 
-      if (variant1Value && variant2Value) {
-        winner =
-          variant1Value > variant2Value
-            ? experiment.variants[0].id
-            : experiment.variants[1].id;
+      [vA, vB].forEach((v, i) => {
+        const g = groups[i];
+        if (g.n === 0) return;
+        const half = g.n > 1 ? (tCritical95(g.n - 1) * g.std) / Math.sqrt(g.n) : 0;
+        variantStats[v.id].metrics[metric.id] = {
+          mean: parseFloat(g.mean.toFixed(4)),
+          std_dev: parseFloat(g.std.toFixed(4)),
+          ci_95: [
+            parseFloat((g.mean - half).toFixed(4)),
+            parseFloat((g.mean + half).toFixed(4)),
+          ],
+          sample_size: g.n,
+        };
+      });
+
+      const [g1, g2] = groups;
+      if (g1.n < 2 || g2.n < 2) continue;
+
+      meansByMetric[metric.id] = [g1.mean, g2.mean];
+      const diff = g1.mean - g2.mean;
+      const se2 = g1.variance / g1.n + g2.variance / g2.n;
+
+      // Welch's t-test
+      if (se2 === 0) {
+        pValues[metric.id] = diff === 0 ? 1 : 0;
+      } else {
+        const df =
+          (se2 * se2) /
+          ((g1.variance / g1.n) ** 2 / (g1.n - 1) +
+            (g2.variance / g2.n) ** 2 / (g2.n - 1));
+        pValues[metric.id] = parseFloat(twoSidedPValue(diff / Math.sqrt(se2), df).toPrecision(4));
+      }
+
+      // Cohen's d with pooled standard deviation
+      const pooled = Math.sqrt(
+        ((g1.n - 1) * g1.variance + (g2.n - 1) * g2.variance) / (g1.n + g2.n - 2)
+      );
+      if (pooled > 0) effectSizes[metric.id] = parseFloat((diff / pooled).toFixed(2));
+      else if (diff === 0) effectSizes[metric.id] = 0;
+    }
+
+    // Winner: first metric only, higher mean is better, and only if significant.
+    let winner: string | undefined;
+    let confidence = 0;
+    const primary = experiment.metrics[0];
+    if (primary && pValues[primary.id] !== undefined) {
+      const p = pValues[primary.id];
+      confidence = parseFloat((1 - p).toFixed(4));
+      const [m1, m2] = meansByMetric[primary.id];
+      if (p < SIGNIFICANCE_LEVEL && m1 !== m2) {
+        winner = m1 > m2 ? vA.id : vB.id;
       }
     }
 
@@ -227,12 +330,13 @@ class ABTestingFramework {
       status: "complete",
       variant_results: variantStats,
       statistical_analysis: {
+        test: "Welch t-test (normal approximation of t, two-sided)",
         p_values: pValues,
         effect_sizes: effectSizes,
-        significance_level: 0.05,
+        significance_level: SIGNIFICANCE_LEVEL,
       },
       winner,
-      confidence: 0.95,
+      confidence,
     };
   }
 
@@ -345,9 +449,23 @@ export async function processToolCall(
   toolName: string,
   toolInput: Record<string, any>
 ): Promise<string> {
+  try {
+    return await dispatchToolCall(toolName, toolInput);
+  } catch (error: any) {
+    return JSON.stringify({ error: error.message });
+  }
+}
+
+async function dispatchToolCall(
+  toolName: string,
+  toolInput: Record<string, any>
+): Promise<string> {
   switch (toolName) {
     case "create_experiment":
-      abTesting.createExperiment(toolInput as Experiment);
+      abTesting.createExperiment({
+        traffic_split: 0.5,
+        ...toolInput,
+      } as Experiment);
       return JSON.stringify({ status: "success", experiment_id: toolInput.id });
 
     case "assign_variant":

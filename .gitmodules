@@ -14,5 +14,5 @@
 	path = features/03-token-optimizer/token-optimizer-mcp
 	url = https://github.com/ooples/token-optimizer-mcp.git
 [submodule "features/06-agentacct"]
-	path = features/06-agentacct
+	path = features/06-agentacct/agentacct
 	url = https://github.com/mikehasa/agentacct.git

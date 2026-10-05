@@ -1,7 +1,3 @@
-import Anthropic from "@anthropic-ai/sdk";
-import * as fs from "fs";
-import * as path from "path";
-
 interface APIDefinition {
   id: string;
   name: string;
@@ -64,7 +60,7 @@ class UniversalAPIGateway {
 
       // Finance
       {
-        id: "coinagecko",
+        id: "coingecko",
         name: "CoinGecko",
         category: "finance",
         endpoint: "https://api.coingecko.com/api/v3",
@@ -148,7 +144,7 @@ class UniversalAPIGateway {
       this.apis.set(api.id, api);
     }
 
-    console.log(`Initialized ${this.apis.size} core APIs`);
+    console.error(`Initialized ${this.apis.size} core APIs`);
   }
 
   public discoverAPIs(query?: string): APIDefinition[] {
@@ -222,7 +218,7 @@ class UniversalAPIGateway {
   ): any {
     // Generate realistic mock data based on API type
     switch (apiId) {
-      case "coinagecko":
+      case "coingecko":
         return {
           bitcoin: {
             usd: 43250.5,
