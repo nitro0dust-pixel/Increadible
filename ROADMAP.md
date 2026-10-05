@@ -1,6 +1,6 @@
 # Roadmap and project status
 
-Last updated: 2026-10-05 21:37 UTC (6 Oct 2026, 03:07 IST), measured at `main` = `685227b` (PR #8 merged) plus the SBOM and Dependabot change in PR #9.
+Last updated: 2026-10-05 21:39 UTC (6 Oct 2026, 03:09 IST), measured at `main` = `685227b` (PR #8 merged) plus the SBOM and Dependabot change in PR #9.
 
 **Bottom line:** the in-repo code (Features #7-#9 and the server around them) is built, tested, containerised, and the
 image published to GHCR passes its probe. **Nothing is deployed anywhere beyond a local rehearsal**: the staging
@@ -17,14 +17,13 @@ Update this line when the owner confirms or changes it.
 
 | Item | Result | Evidence |
 |---|---|---|
-| CI on `main` | **green: all five jobs passed** on `ca6aa33` (type-check/lint/build/smoke, tests, dependency audit and secret scan, Docker build and probe, pull-by-digest verification of the pushed image). The Docker job waited about 5 minutes for a runner, which was queueing, not a failure | run 37360648274, finished 19:12 UTC |
-| CI on `685227b` (the PR #8 merge) | PR #8's own run on its head `491fea2` is **green: all four jobs passed**: type-check/lint/build/smoke, tests, dependency audit and secret scan, and Docker build and probe (the first real build of `node:24-alpine`, 21:34 UTC). Several jobs needed re-runs because GitHub cancelled them after exactly 15 minutes without a runner (no step ever ran in a cancelled job; cause is on GitHub's side, see the open decisions). The run on `main` for the merge commit was **in progress** at the time of writing. The earlier `main` run on `38865a3` ended red only because its `Tests` job was cancelled in that queue twice; it is superseded | PR #8 run 37370748176; `main` run 37376758416 (pending); superseded run 37367833379 |
-| Runtime | Node 24 LTS in the Dockerfile, CI and `@types/node`; `engines` is `>=22`. Node 20 reached end-of-life on 2026-04-30. Tested locally on Node 24.21.0 and 22.22.0, and **built and probed as an image in CI** (non-root, auth, restart persistence, HEALTHCHECK) on 2026-10-05 21:34 UTC. The pushed `main` image on Node 24 is verified by the `verify-published-image` job of the `main` run above, which was still pending | nodejs/Release `schedule.json` fetched 2026-10-05; PR #8 run 37370748176 |
+| CI on `main` | **green: all five jobs passed** on `685227b` (the PR #8 merge): type-check/lint/build/smoke, tests, dependency audit and secret scan, Docker build and probe, and pull-by-digest verification of the pushed image, which is the first image on Node 24. Finished 2026-10-05 21:39 UTC; every job got a runner within seconds. Earlier that evening GitHub cancelled queued jobs after 15 minutes without a runner (none of them ran a step), which is why the runs on `38865a3` and on PR #7 and #8 needed re-runs; the run on `38865a3` ended red only for that reason and is superseded | run 37376758416; PR #8 run 37370748176; superseded run 37367833379 |
+| Runtime | Node 24 LTS in the Dockerfile, CI and `@types/node`; `engines` is `>=22`. Node 20 reached end-of-life on 2026-04-30. Tested locally on Node 24.21.0 and 22.22.0; **built, probed, pushed to GHCR, pulled back by digest and probed again** in CI on `685227b` (non-root, auth, restart persistence, HEALTHCHECK) | nodejs/Release `schedule.json` fetched 2026-10-05; `main` run 37376758416 |
 | Tests | 95 pass, 6 todo | `npm test` |
 | Coverage | 92% statements, 81% branches | `npx jest --coverage` |
 | Lint, type-check | clean | `npm run lint`, `npm run type-check` |
 | Dependency audit (prod deps) | 0 vulnerabilities | `npm audit --omit=dev` |
-| Published image | pushed to GHCR, pulled by digest and probed in CI; package is private | `verify-published-image` job |
+| Published image | pushed to GHCR (Node 24), pulled by digest and probed in CI on `685227b`; package is private | `verify-published-image` job, run 37376758416 |
 | Staging manifest (`k8s/staging-deployment.yaml`) | **verified on a local Docker Desktop cluster** (kind-based, Kubernetes v1.36.1), 2026-10-05 ~20:20 UTC: all six objects applied, PVC bound, pod Ready, `/health` and `/ready` ok, `/metrics` and `/mcp` 401 without the token, 13 tools, ConfigMap rules loaded, A/B data survived `kubectl rollout restart` (file on the PVC unchanged in the new pod) | run with the locally built image (`increadible:local`, `imagePullPolicy: IfNotPresent`) because the GHCR package is private; the GHCR pull path was **not** exercised |
 | Production manifest (`k8s/production-deployment.yaml`) | **NOT VERIFIED** (not applied) | differs from staging only in namespace and `imagePullPolicy: IfNotPresent` (`git diff --no-index`); structurally covered by the staging run, but never applied |
 | Prometheus rules (`k8s/monitoring.yaml`) | **NOT VERIFIED** | needs Prometheus Operator CRDs and kube-state-metrics; none installed |
