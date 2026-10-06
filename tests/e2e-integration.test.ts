@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll, afterEach, jest } from "@jest/globals";
+import { spawn, spawnSync } from "child_process";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
@@ -305,7 +306,18 @@ describe("Feature #8: A/B data persistence", () => {
   });
 
   const dataFile = (name: string) => tmpFile(`persist-${name}.jsonl`);
-  const open = (file: string, yamlFile = tmpFile("persist-missing.yaml")) => new ABTestingFramework(yamlFile, file);
+  // A data file has one writer, so reopening one means the previous process is gone: close its instance first.
+  const live = new Map<string, ABTestingFramework>();
+  const open = (file: string, yamlFile = tmpFile("persist-missing.yaml")) => {
+    live.get(file)?.close();
+    const ab = new ABTestingFramework(yamlFile, file);
+    live.set(file, ab);
+    return ab;
+  };
+  afterEach(() => {
+    for (const ab of live.values()) ab.close();
+    live.clear();
+  });
   const seed = (ab: ABTestingFramework, n = 40) => {
     ab.createExperiment(makeExperiment());
     recordSamples(ab, "exp-1", "A", n, normalSampler(10, 1, 61));
@@ -423,6 +435,243 @@ describe("Feature #8: A/B data persistence", () => {
     recordSamples(ab, "exp-1", "B", 99, () => 1);
     expect(ab.getExperimentResults("exp-1")!.status).not.toBe(undefined);
     expect(open(dataFile("write-fail")).getExperimentResults("exp-1")!.statistical_analysis.current_samples).toBe(100);
+  });
+});
+
+describe("Feature #8: A/B data file lock, fsync and growth warning", () => {
+  let errorSpy: ReturnType<typeof jest.spyOn>;
+  beforeAll(() => {
+    errorSpy = jest.spyOn(console, "error").mockImplementation(() => undefined);
+  });
+  afterAll(() => {
+    jest.restoreAllMocks();
+  });
+
+  const tracked: ABTestingFramework[] = [];
+  afterEach(() => {
+    for (const ab of tracked.splice(0)) ab.close();
+  });
+
+  const dataFile = (name: string) => tmpFile(`lock-${name}.jsonl`);
+  const lockOf = (file: string) => `${file}.lock`;
+  const open = (file: string, options?: ConstructorParameters<typeof ABTestingFramework>[2]) => {
+    const ab = new ABTestingFramework(tmpFile("lock-missing.yaml"), file, options);
+    tracked.push(ab);
+    return ab;
+  };
+  const samples = (ab: ABTestingFramework) => ab.getExperimentResults("exp-1")!.statistical_analysis.current_samples;
+  /** Plant a lock as another process would have left it, last refreshed `ageMs` ago. */
+  const plantLock = (file: string, info: { pid: number; host: string }, ageMs: number) => {
+    fs.writeFileSync(lockOf(file), JSON.stringify({ ...info, started: "earlier", token: "someone-else" }));
+    const t = new Date(Date.now() - ageMs);
+    fs.utimesSync(lockOf(file), t, t);
+  };
+  const deadPid = () => spawnSync(process.execPath, ["-e", "0"]).pid!;
+
+  describe("single writer", () => {
+    it("holds a lock file while open and removes it on close", () => {
+      const file = dataFile("basic");
+      const ab = open(file);
+      expect(fs.existsSync(lockOf(file))).toBe(true);
+      expect(JSON.parse(fs.readFileSync(lockOf(file), "utf-8"))).toMatchObject({ pid: process.pid, host: os.hostname() });
+      ab.close();
+      ab.close(); // idempotent
+      expect(fs.existsSync(lockOf(file))).toBe(false);
+    });
+
+    it("refuses a second instance on the same file and hands the file over after close", () => {
+      const file = dataFile("handover");
+      const first = open(file);
+      first.createExperiment(makeExperiment());
+      first.recordMetric("exp-1", "A", { quality: 1 });
+      expect(() => open(file)).toThrow(/Cannot use A\/B data file .*already open in this process/);
+      first.close();
+      const second = open(file);
+      expect(samples(second)).toBe(1);
+    });
+
+    it("fails at once when the lock belongs to a live process on this machine", () => {
+      const file = dataFile("live-holder");
+      const holder = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" });
+      try {
+        plantLock(file, { pid: holder.pid!, host: os.hostname() }, 0);
+        const started = Date.now();
+        expect(() => open(file)).toThrow(new RegExp(`in use by pid ${holder.pid} on ${os.hostname()}`));
+        expect(Date.now() - started).toBeLessThan(2_000); // no waiting when the holder is verifiably alive
+        expect(fs.existsSync(file)).toBe(false); // and nothing was created or read
+      } finally {
+        holder.kill();
+      }
+    });
+
+    it("takes over the lock of a crashed process on this machine, and keeps its data", () => {
+      const file = dataFile("crashed");
+      const before = open(file);
+      before.createExperiment(makeExperiment());
+      before.recordMetric("exp-1", "A", { quality: 1 });
+      before.close();
+      plantLock(file, { pid: deadPid(), host: os.hostname() }, 10_000);
+      const after = open(file);
+      expect(samples(after)).toBe(1);
+      expect(JSON.parse(fs.readFileSync(lockOf(file), "utf-8")).token).not.toBe("someone-else");
+    });
+
+    it("waits out a very recent lock of a dead process instead of racing it, then takes it over", () => {
+      const file = dataFile("just-crashed");
+      plantLock(file, { pid: deadPid(), host: os.hostname() }, 5_500); // not yet old enough to be sure
+      const started = Date.now();
+      open(file);
+      expect(Date.now() - started).toBeGreaterThanOrEqual(400);
+      expect(Date.now() - started).toBeLessThan(8_000);
+    });
+
+    it("takes over a lock that stopped being refreshed, whichever machine wrote it", () => {
+      const file = dataFile("abandoned");
+      plantLock(file, { pid: 1, host: "some-other-pod" }, 60_000);
+      expect(() => open(file)).not.toThrow();
+    });
+
+    it("treats a lock naming its own pid as the leftover of a previous run (a restarted container is pid 1 again)", () => {
+      const file = dataFile("own-pid");
+      plantLock(file, { pid: process.pid, host: os.hostname() }, 0);
+      expect(() => open(file)).not.toThrow();
+    });
+
+    it("waits, then fails clearly, for a fresh lock from another machine it cannot check", () => {
+      const file = dataFile("elsewhere");
+      plantLock(file, { pid: 1, host: "some-other-pod" }, 0);
+      const started = Date.now();
+      expect(() => open(file, { lockWaitMs: 600 })).toThrow(/held by pid 1 on some-other-pod.*could not be checked from here/);
+      expect(Date.now() - started).toBeGreaterThanOrEqual(500);
+    });
+
+    it("treats an unreadable lock like one from a machine it cannot check", () => {
+      const file = dataFile("garbage-lock");
+      fs.writeFileSync(lockOf(file), "not json");
+      expect(() => open(file, { lockWaitMs: 300 })).toThrow(/an unknown process/);
+    });
+
+    it("leaves no lock behind when the data file cannot be opened", () => {
+      const file = dataFile("unopenable");
+      fs.mkdirSync(file); // a directory where the file should be
+      expect(() => open(file)).toThrow(/Cannot use A\/B data file/);
+      expect(fs.existsSync(lockOf(file))).toBe(false);
+    });
+
+    it("keeps refreshing its lock while it runs", () => {
+      jest.useFakeTimers();
+      try {
+        const file = dataFile("heartbeat");
+        open(file);
+        const before = fs.statSync(lockOf(file)).mtimeMs;
+        jest.advanceTimersByTime(3_100);
+        expect(fs.statSync(lockOf(file)).mtimeMs).toBeGreaterThan(before + 2_000);
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
+    it("refuses to write once another process has taken the lock over, and does not delete that lock", () => {
+      const file = dataFile("lost");
+      const ab = open(file);
+      ab.createExperiment(makeExperiment());
+      const logged = fs.readFileSync(file, "utf-8");
+      fs.writeFileSync(lockOf(file), JSON.stringify({ pid: 1, host: "x", started: "t", token: "someone-else" }));
+      expect(() => ab.recordMetric("exp-1", "A", { quality: 1 })).toThrow(/lock was lost/);
+      expect(() => ab.createExperiment(makeExperiment({ id: "exp-2" }))).toThrow(/lock was lost/);
+      expect(fs.readFileSync(file, "utf-8")).toBe(logged);
+      ab.close();
+      expect(JSON.parse(fs.readFileSync(lockOf(file), "utf-8")).token).toBe("someone-else");
+    });
+
+    it("refuses to write after close", () => {
+      const ab = open(dataFile("closed"));
+      ab.createExperiment(makeExperiment());
+      ab.close();
+      expect(() => ab.recordMetric("exp-1", "A", { quality: 1 })).toThrow("closed");
+    });
+  });
+
+  describe("fsync", () => {
+    const realFs = require("fs");
+
+    it("flushes every append to disk when enabled", () => {
+      const spy = jest.spyOn(realFs, "fsyncSync");
+      try {
+        const ab = open(dataFile("fsync-on"), { fsync: true });
+        spy.mockClear();
+        ab.createExperiment(makeExperiment());
+        ab.recordMetric("exp-1", "A", { quality: 1 });
+        ab.recordMetric("exp-1", "B", { quality: 2 });
+        expect(spy).toHaveBeenCalledTimes(3);
+      } finally {
+        spy.mockRestore();
+      }
+    });
+
+    it("does not flush when disabled (the default)", () => {
+      const spy = jest.spyOn(realFs, "fsyncSync");
+      try {
+        const ab = open(dataFile("fsync-off"));
+        ab.createExperiment(makeExperiment());
+        ab.recordMetric("exp-1", "A", { quality: 1 });
+        expect(spy).not.toHaveBeenCalled();
+      } finally {
+        spy.mockRestore();
+      }
+    });
+
+    it("fails the call when the flush fails, without applying the change in memory", () => {
+      const file = dataFile("fsync-fail");
+      const ab = open(file, { fsync: true });
+      ab.createExperiment(makeExperiment());
+      const spy = jest.spyOn(realFs, "fsyncSync").mockImplementation(() => {
+        throw new Error("EIO: input/output error");
+      });
+      try {
+        expect(() => ab.recordMetric("exp-1", "A", { quality: 1 })).toThrow("EIO");
+      } finally {
+        spy.mockRestore();
+      }
+      expect(samples(ab)).toBe(0);
+      // The line was appended before the flush failed, so it may well be on disk: the caller got an error,
+      // and a restart will show the measurement. Documented in DEPLOYMENT.md.
+      ab.close();
+      expect(samples(open(file))).toBe(1);
+    });
+  });
+
+  describe("growth warning", () => {
+    const growthWarnings = () =>
+      errorSpy.mock.calls.filter((c: unknown[]) => String(c[0]).includes("never compacted")).length;
+
+    it("warns once when the file passes the size limit", () => {
+      // The experiment line is 351 bytes, so the first measurement (127) is what crosses 400.
+      const ab = open(dataFile("grow"), { warnBytes: 400 });
+      ab.createExperiment(makeExperiment());
+      errorSpy.mockClear();
+      for (let i = 0; i < 10; i++) ab.recordMetric("exp-1", "A", { quality: i });
+      expect(growthWarnings()).toBe(1);
+    });
+
+    it("warns at startup when the existing file is already over the limit", () => {
+      const file = dataFile("grown");
+      const first = open(file);
+      first.createExperiment(makeExperiment());
+      for (let i = 0; i < 10; i++) first.recordMetric("exp-1", "A", { quality: i });
+      first.close();
+      errorSpy.mockClear();
+      open(file, { warnBytes: 300 });
+      expect(growthWarnings()).toBe(1);
+    });
+
+    it("stays quiet below the limit", () => {
+      const ab = open(dataFile("small"));
+      ab.createExperiment(makeExperiment());
+      errorSpy.mockClear();
+      ab.recordMetric("exp-1", "A", { quality: 1 });
+      expect(growthWarnings()).toBe(0);
+    });
   });
 });
 

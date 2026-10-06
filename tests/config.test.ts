@@ -153,6 +153,26 @@ describe("Dockerfile and package.json", () => {
     expect(major).toBeGreaterThanOrEqual(Number(/(\d+)/.exec(pkg.engines.node)![1]));
   });
 
+  it("documents every A/B data file env var the code reads, and the lock", () => {
+    const code = read("features/08-ab-testing/src/mcp-server.ts");
+    const deployment = read("DEPLOYMENT.md");
+    for (const name of ["AB_DATA_FILE", "AB_FSYNC", "AB_DATA_WARN_BYTES"]) {
+      expect(code).toContain(`process.env.${name}`);
+      expect(deployment).toContain(name);
+      expect(read("README.md")).toContain(name);
+    }
+    expect(deployment).toContain(".lock");
+    expect(read("src/index.ts")).toMatch(/process\.on\("SIGTERM"/); // stdio mode must release the lock on SIGTERM too
+  });
+
+  it("probes the A/B data file lock in a real container: hard kill with fsync on, and a second container refused", () => {
+    const probe = read("scripts/probe-image.sh");
+    expect(probe).toContain("-e AB_FSYNC=1");
+    expect(probe).toContain('docker wait "$C"');
+    expect(probe).toMatch(/in use by pid\|could not be checked from here/);
+    expect(read("scripts/smoke.sh")).toContain("kill -KILL");
+  });
+
   it("uses a tracked lockfile for reproducible installs", () => {
     expect(fs.existsSync(path.join(root, "package-lock.json"))).toBe(true);
     expect(read(".gitignore")).not.toMatch(/^package-lock\.json$/m);

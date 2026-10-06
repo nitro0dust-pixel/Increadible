@@ -119,10 +119,15 @@ First enabled rule whose `match` fits wins; an empty `match` matches everything.
   `create_experiment` and `record_metric` is appended to that JSONL file *before* it takes effect (if the write
   fails, the call returns an error and nothing is recorded), and the file is replayed on startup.
   Unset, data lives in memory only (the Docker image and `k8s/` manifests set it to `/data/ab-data.jsonl`).
-  Details: one process per file; the file is created `0600`; unreadable or torn lines are skipped with a note on
-  stderr; creating an experiment with an existing id is rejected; definitions in `EXPERIMENTS_FILE` win over a
-  logged experiment with the same id; the file grows by roughly 150 bytes per measurement and is not compacted;
-  appends are not fsynced, so an OS crash or power loss can drop the last few writes.
+  Details: the file is created `0600`; unreadable or torn lines are skipped with a note on stderr; creating an
+  experiment with an existing id is rejected; definitions in `EXPERIMENTS_FILE` win over a logged experiment with the
+  same id; the file grows by roughly 150 bytes per measurement and is never compacted (a warning is logged once it passes
+  `AB_DATA_WARN_BYTES`, default 100 MB).
+  - **One writer:** a second process on the same file is refused at startup, naming the process that holds it
+    (`<file>.lock`, refreshed every 3 s, removed on clean exit and on SIGTERM/SIGINT; the lock of a crashed process is
+    taken over; every write re-checks it and fails if it was lost). Details and limits: `DEPLOYMENT.md`.
+  - **Durability:** by default an append is handed to the OS, which survives a process crash but not an OS crash or power
+    loss. Set `AB_FSYNC=1` to flush each append to disk first (slower: one flush per write, cost not yet measured).
 
 **API gateway:** the registry has 9 APIs (weather, finance, news, reference, sports). `call_api`
 currently returns **generated mock data**; it makes no network calls. Results are cached for 5 minutes.
@@ -151,4 +156,4 @@ Layout: `src/` (server + transports), `features/07..09/*/src/` (our modules), `t
 - Only `k8s/staging-deployment.yaml` has been applied to a cluster (a local Docker Desktop one, with a locally built image).
   The production and monitoring manifests have not been applied, and the GHCR pull path has not been exercised on a cluster.
 - Features #1-#6 are not exercised by this repo's tests (see the `todo` list in `tests/e2e-integration.test.ts`).
-- `call_api` is mock-only. A/B persistence needs `AB_DATA_FILE`, is single-writer and never compacted.
+- `call_api` is mock-only. A/B persistence needs `AB_DATA_FILE`, is single-writer (enforced with a lock file), flushes to disk only with `AB_FSYNC=1`, and is never compacted.

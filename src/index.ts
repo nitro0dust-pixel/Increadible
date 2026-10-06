@@ -101,6 +101,9 @@ if (require.main === module) {
     process.on("SIGTERM", shutdown);
     process.on("SIGINT", shutdown);
   } else {
+    // Exiting through process.exit runs the 'exit' hook that releases the A/B data file lock.
+    process.on("SIGTERM", () => process.exit(0));
+    process.on("SIGINT", () => process.exit(0));
     serveStdio(process.stdin, process.stdout).then(() => process.exit(0));
   }
 }
