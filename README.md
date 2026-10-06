@@ -128,7 +128,7 @@ First enabled rule whose `match` fits wins; an empty `match` matches everything.
   experiment with an existing id is rejected; definitions in `EXPERIMENTS_FILE` win over a logged experiment with the
   same id; the file grows by about 120 bytes per measurement (measured) and is never compacted. **Memory does not grow with it**: the module
   keeps only counts and a running mean and variance per variant and metric (the raw values stay in the file), so a results call takes the same time at any size, and
-  startup replays the file in chunks (about 1.1 microseconds per measurement: 9 s for 8 million, measured). A warning is logged once the file passes
+  startup replays the file in chunks (about 1.1 microseconds per measurement at a full core, 2.6 at half a core: 10 s and 20 s for 8 million, measured). A warning is logged once the file passes
   `AB_DATA_WARN_BYTES` (default 100 MB, which the `k8s/` manifests also set: 10% of their 1Gi volume). Numbers and limits: [PERFORMANCE.md](PERFORMANCE.md).
   - **One writer:** a second process on the same file is refused at startup, naming the process that holds it
     (`<file>.lock`, refreshed every 3 s, removed on clean exit and on SIGTERM/SIGINT; the lock of a crashed process is

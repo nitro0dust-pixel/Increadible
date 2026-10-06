@@ -145,6 +145,16 @@ spec:
                 secretKeyRef:
                   name: increadible-secrets
                   key: auth-token
+          # Startup replays the whole A/B data file before the HTTP port opens: about 2.6 microseconds per measurement at the 0.5 CPU limit
+          # below (measured in PERFORMANCE.md), so about 23 s for a full 1Gi volume. Without this probe the liveness probe below restarts the
+          # pod about 35 s after it starts, which is too close to that. The liveness and readiness probes do not run until this one succeeds.
+          # 36 x 5 s = 180 s is 8 times the replay of a full volume; a test keeps it at least 4 times, so growing the volume means widening it.
+          startupProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 5
+            failureThreshold: 36
           livenessProbe:
             httpGet:
               path: /health

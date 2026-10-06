@@ -92,9 +92,10 @@ Verification and limits:
 - **Growth and memory.** The log is never compacted (about 120 bytes per measurement on disk). Memory does not grow with it: the module keeps
   counts and a running mean and variance per variant and metric, so the server idled at 67 MiB with 8 000 000 measurements, as it does with 50 000
   (measured, Node 24), and `get_experiment_results` takes about 0.05 ms at any size. Startup replays the file in chunks at about 1.1 microseconds
-  per measurement (9 s for 8 million, with a full core) **before the HTTP port opens**. The manifests' 1Gi volume holds about 8.9 million measurements,
-  and the liveness probe restarts a pod that does not answer `/health` about 35 s after it starts, so the margin shrinks on a slower CPU or volume
-  (the 0.5 CPU limit and a network volume are not measured; a `startupProbe` would remove the risk). A warning goes to stderr once the file passes
+  per measurement at a full core (about 2.6 at half a core, the manifests' limit: 10 s and 20 s for 8 million) **before the HTTP port opens**. The manifests' 1Gi
+  volume holds about 8.9 million measurements, which is about 23 s of replay at 0.5 CPU, and a liveness probe alone restarts a pod that has not answered `/health` about
+  35 s after it starts. The manifests therefore carry a `startupProbe` (180 s, held in a test at 4 times the full-volume replay at the CPU limit): **widen it if you grow the
+  volume or lower the CPU limit**. A network volume was not measured. A warning goes to stderr once the file passes
   `AB_DATA_WARN_BYTES` (code default and manifests: 100 MiB). Rolling up or rotating the file is still an open decision in `ROADMAP.md`; numbers in
   `PERFORMANCE.md`. (Before step 9 every measurement was also held in memory, about 440 to 500 bytes each, which reached the 256Mi limit at roughly
   400 000 to 460 000 measurements.)
