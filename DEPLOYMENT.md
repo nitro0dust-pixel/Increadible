@@ -89,15 +89,18 @@ Verification and limits:
   3 500 per second (`PERFORMANCE.md`; a network volume will cost more, not measured). It stays off by default in the image and the
   manifests until the owner decides; the recommendation from the measurements is to turn it on. If a
   flush fails the call returns an error, but the line may already be in the file and then shows up after a restart.
-- **Growth and memory.** The log is never compacted (about 120 bytes per measurement on disk) and **every measurement is also held in
-  memory (about 500 bytes each, on top of about 85 MiB)**, so the 256Mi limit in the manifests is reached near 360 000 measurements, a
-  41 MiB file. A warning goes to stderr once the file passes `AB_DATA_WARN_BYTES` (code default 100 MiB, far too late for that limit;
-  the manifests set 16 MiB, and a test keeps the two consistent). `get_experiment_results` costs time proportional to the number of
-  samples (about 1.2 ms at 10 000, 98 ms at 500 000) and blocks the server while it runs. Size your memory limit from the formula in
-  `PERFORMANCE.md`. Real size control needs a rollup design (keep count, sum and sum of squares per variant and metric
-  instead of raw values), which is a data-model change and an open decision in `ROADMAP.md`.
+- **Growth and memory.** The log is never compacted (about 120 bytes per measurement on disk). Memory does not grow with it: the module keeps
+  counts and a running mean and variance per variant and metric, so the server idled at 67 MiB with 8 000 000 measurements, as it does with 50 000
+  (measured, Node 24), and `get_experiment_results` takes about 0.05 ms at any size. Startup replays the file in chunks at about 1.1 microseconds
+  per measurement (9 s for 8 million, with a full core) **before the HTTP port opens**. The manifests' 1Gi volume holds about 8.9 million measurements,
+  and the liveness probe restarts a pod that does not answer `/health` about 35 s after it starts, so the margin shrinks on a slower CPU or volume
+  (the 0.5 CPU limit and a network volume are not measured; a `startupProbe` would remove the risk). A warning goes to stderr once the file passes
+  `AB_DATA_WARN_BYTES` (code default and manifests: 100 MiB). Rolling up or rotating the file is still an open decision in `ROADMAP.md`; numbers in
+  `PERFORMANCE.md`. (Before step 9 every measurement was also held in memory, about 440 to 500 bytes each, which reached the 256Mi limit at roughly
+  400 000 to 460 000 measurements.)
 - `scripts/smoke.sh` checks all of this with real processes (clean exit, second writer refused, SIGTERM, SIGKILL takeover), and
-  `scripts/probe-image.sh` checks it in a real container with `AB_FSYNC=1` (hard-killed container, second container refused).
+  `scripts/probe-image.sh` checks it in a real container with `AB_FSYNC=1` (hard-killed container, second container refused), and that a data file of
+  500 000 measurements starts and answers inside the 256 MiB memory limit (smoke does the same with a capped Node heap).
 
 ### Software bill of materials
 

@@ -126,11 +126,12 @@ spec:
               value: /config/routing-rules.yaml
             - name: AB_DATA_FILE
               value: /data/ab-data.jsonl
-            # The A/B module keeps every measurement in memory (about 500 bytes each, 120 on disk), so the 256Mi limit below is
-            # reached near 360 000 measurements (a 41 MiB file), long before the default warning at 100 MiB. 16 MiB leaves the
-            # live data at about 60% of the limit. Measured in PERFORMANCE.md; a test keeps this consistent with the limit.
+            # The A/B data file is never compacted (about 120 bytes per measurement) and lives on the 1Gi volume below. Memory does
+            # not grow with it (the module keeps running aggregates, PERFORMANCE.md), so what runs out is the volume: a warning at
+            # 100 MiB (10% of it, about 870 000 measurements) leaves time to plan a rollup or a bigger volume. A test keeps the
+            # warning well below the volume size.
             - name: AB_DATA_WARN_BYTES
-              value: "16777216"
+              value: "104857600"
             # Graceful shutdown: keep serving 5 s with /ready answering 503 (time for the endpoint removal to propagate),
             # then give in-flight requests 10 s before the remaining connections are cut. 5 + 10 must stay below
             # terminationGracePeriodSeconds, or the kubelet's SIGKILL leaves the A/B data file lock behind.

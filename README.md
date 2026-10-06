@@ -126,14 +126,15 @@ First enabled rule whose `match` fits wins; an empty `match` matches everything.
   Unset, data lives in memory only (the Docker image and `k8s/` manifests set it to `/data/ab-data.jsonl`).
   Details: the file is created `0600`; unreadable or torn lines are skipped with a note on stderr; creating an
   experiment with an existing id is rejected; definitions in `EXPERIMENTS_FILE` win over a logged experiment with the
-  same id; the file grows by about 120 bytes per measurement (measured) and is never compacted, and **every measurement is also held in memory
-  (about 500 bytes each)**: a warning is logged once the file passes `AB_DATA_WARN_BYTES` (default 100 MB; the `k8s/` manifests set 16 MiB so
-  the warning arrives before the 256Mi memory limit is a problem). Numbers and limits: [PERFORMANCE.md](PERFORMANCE.md).
+  same id; the file grows by about 120 bytes per measurement (measured) and is never compacted. **Memory does not grow with it**: the module
+  keeps only counts and a running mean and variance per variant and metric (the raw values stay in the file), so a results call takes the same time at any size, and
+  startup replays the file in chunks (about 1.1 microseconds per measurement: 9 s for 8 million, measured). A warning is logged once the file passes
+  `AB_DATA_WARN_BYTES` (default 100 MB, which the `k8s/` manifests also set: 10% of their 1Gi volume). Numbers and limits: [PERFORMANCE.md](PERFORMANCE.md).
   - **One writer:** a second process on the same file is refused at startup, naming the process that holds it
     (`<file>.lock`, refreshed every 3 s, removed on clean exit and on SIGTERM/SIGINT; the lock of a crashed process is
     taken over; every write re-checks it and fails if it was lost). Details and limits: `DEPLOYMENT.md`.
   - **Durability:** by default an append is handed to the OS, which survives a process crash but not an OS crash or power
-    loss. Set `AB_FSYNC=1` to flush each append to disk first (slower: one flush per write, cost not yet measured).
+    loss. Set `AB_FSYNC=1` to flush each append to disk first (slower: one flush per write, about 0.2 ms on a local disk; see [PERFORMANCE.md](PERFORMANCE.md)).
 
 **API gateway:** the registry has 9 APIs (weather, finance, news, reference, sports). `call_api`
 currently returns **generated mock data**; it makes no network calls. Results are cached for 5 minutes.
@@ -162,4 +163,4 @@ Layout: `src/` (server + transports), `features/07..09/*/src/` (our modules), `t
 - Only `k8s/staging-deployment.yaml` has been applied to a cluster (a local Docker Desktop one, with a locally built image).
   The production and monitoring manifests have not been applied, and the GHCR pull path has not been exercised on a cluster.
 - Features #1-#6 are not exercised by this repo's tests (see the `todo` list in `tests/e2e-integration.test.ts`).
-- `call_api` is mock-only. A/B persistence needs `AB_DATA_FILE`, is single-writer (enforced with a lock file), flushes to disk only with `AB_FSYNC=1`, is never compacted, and keeps every measurement in memory (memory and query time grow linearly with the data; see [PERFORMANCE.md](PERFORMANCE.md)).
+- `call_api` is mock-only. A/B persistence needs `AB_DATA_FILE`, is single-writer (enforced with a lock file), flushes to disk only with `AB_FSYNC=1`, and is never compacted (memory and query time do not grow with the data: it keeps running aggregates; see [PERFORMANCE.md](PERFORMANCE.md)).
