@@ -170,6 +170,13 @@ depend on the figure.
 about 870 000 measurements), which leaves time to plan a rollup or a bigger volume; a config test keeps it well below the volume size. Step 8 had set it to 16 MiB to protect the
 memory limit, a reason that no longer exists.
 
+### The event-loop delay metric (step 11)
+
+`increadible_event_loop_delay_seconds` is a histogram of how late a 10 ms timer ran. It exists because the per-call latency histogram cannot show the failure the capacity test found: while a slow query held the
+event loop, `/health` took seconds, yet the tool histogram showed only the milliseconds the query itself took, because a request's handler starts only after the block. **Cost, measured** (Node 24, routing scenario, 16
+connections, closed loop, old and new build alternating twice): 18 142 and 18 211 requests per second without it, 18 680 and 17 865 with it, server mean 0.0032 ms against 0.0030 and 0.0033 ms: no difference beyond run-to-run noise.
+**What it shows** (smoke and the container probe both do this): freezing the process for 1.3 s (`SIGSTOP`, `docker pause`) and resuming it puts a tick in the buckets above 1 s, which is what the new alert counts.
+
 ## 3. What this means for the open decisions
 
 These are recommendations from the evidence. The decisions stay with the owner (`ROADMAP.md`).

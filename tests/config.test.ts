@@ -148,14 +148,8 @@ describe.each(["k8s/staging-deployment.yaml", "k8s/production-deployment.yaml"])
 
 describe("k8s/monitoring.yaml", () => {
   const all = docs("k8s/monitoring.yaml");
-  const emitted = read("src/server.ts");
 
-  it("only references increadible_* metrics that the server emits", () => {
-    const exprs = JSON.stringify(all.find((d) => d.kind === "PrometheusRule"));
-    const used = new Set(exprs.match(/increadible_[a-z_]+/g));
-    expect(used.size).toBeGreaterThan(0);
-    for (const metric of used) expect(emitted).toContain(metric);
-  });
+  // That every increadible_* metric the rules use is really emitted is checked against the rendered /metrics output in tests/server.test.ts.
 
   it("has a firing case and a quiet case in the promtool unit tests for every alert, and none for a rule that is gone", () => {
     const rule = all.find((d) => d.kind === "PrometheusRule");
@@ -258,10 +252,14 @@ describe("Dockerfile and package.json", () => {
     expect(smoke).toContain("deadline passed");
     expect(smoke).toContain("increadible_tool_call_duration_seconds_count");
     expect(smoke).toContain('reason="unauthorized"');
+    expect(smoke).toContain("increadible_event_loop_delay_seconds_count");
+    expect(smoke).toContain('kill -STOP "$PID"'); // a stalled process must show as a late tick
     const probe = read("scripts/probe-image.sh");
     expect(probe).toContain('"name":"discover_apis","arguments":{"query":123}');
     expect(probe).toContain("Refusing to listen");
     expect(probe).toContain('docker stop -t 20 "$B"');
+    expect(probe).toContain('docker pause "$A"'); // a stalled container must show as a late tick
+    expect(probe).toContain("increadible_event_loop_delay_seconds_count");
     expect(probe).toContain("increadible_tool_call_duration_seconds_count");
     expect(probe).toContain("ab-data.jsonl.lock");
   });

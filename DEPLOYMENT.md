@@ -180,6 +180,7 @@ namespace. Alerts use only metrics the server emits plus kube-state-metrics rest
 | `increadible_tool_calls_total{tool}` | counter | tool calls by tool |
 | `increadible_tool_errors_total{tool}` | counter | tool calls that returned an error |
 | `increadible_tool_call_duration_seconds{tool}` | histogram | time to handle a tool call, 1 ms to 10 s buckets; includes calls that failed. One series set per real tool (13), never per request input |
+| `increadible_event_loop_delay_seconds` | histogram | how much later than due the event loop ran a 10 ms timer, same buckets (HTTP mode only). While a synchronous task holds the loop, nothing is read and no probe is answered, and no timer inside a handler can see it: this is where it shows. An idle server is almost entirely in the first bucket |
 | `increadible_rpc_errors_total` | counter | JSON-RPC protocol errors |
 | `increadible_http_rejected_total{reason}` | counter | requests refused before the handler: `unauthorized` (401), `rate_limited` (429), `payload_too_large` (413) |
 | `increadible_uptime_seconds` | gauge | seconds since start |
@@ -190,11 +191,12 @@ namespace. Alerts use only metrics the server emits plus kube-state-metrics rest
 | `IncreadibleToolErrorRate` | more than 5% of tool calls return errors for 10 minutes | warning |
 | `IncreadibleProtocolErrors` | more than 0.1 protocol errors per second for 10 minutes | warning |
 | `IncreadibleSlowToolCalls` | the 95th percentile tool call latency is above 1 s for 10 minutes | warning, **provisional threshold**: no baseline exists (tool calls take well under a millisecond today); revisit with the load test and when the gateway makes real external calls |
+| `IncreadibleEventLoopBlocked` | at least one tick of the event loop ran more than 1 s late in the last 5 minutes (probes fail while it is blocked) | warning. 1 s is the kubelet's default probe timeout, so the threshold is not arbitrary |
 | `IncreadiblePodRestarting` | more than 2 container restarts in 30 minutes | warning |
 
 **What is verified.** `scripts/check-prometheus.sh` extracts the rules from the `PrometheusRule` and runs `promtool check rules` and
 `promtool test rules` against `monitoring/alerts.test.yaml`: every alert has a case that must fire and one that must stay quiet
-(for example 6% errors fires and 4% does not), and each of seven deliberate breakages of the rules is caught. CI runs it as the
+(for example 6% errors fires and 4% does not), and each of seven deliberate breakages of the rules is caught (four more for `IncreadibleEventLoopBlocked`: a wrong bucket, a wrong threshold, a missing `ignoring(le)` and a flipped sign). CI runs it as the
 `prometheus` job. `scripts/install-promtool.sh <dir>` builds the promtool for it from one pinned Prometheus release (module
 `v0.315.0`), checked against the Go checksum database and an `h1:` hash pinned in the script; it needs Go and `jq` (both on the
 GitHub runner image) and takes about 70 seconds from a cold build cache on four cores and 2 minutes 37 seconds on the GitHub-hosted runner (first CI run), which makes this job the longest of the run. It leaves out the cloud service-discovery code (`-tags remove_all_sd`), which the two checks do not use, so `promtool check config` is not available from that build.

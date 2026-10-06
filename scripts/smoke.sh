@@ -101,6 +101,20 @@ grep -q 'increadible_tool_call_duration_seconds_bucket{tool="get_api_stats",le="
   || { echo "metrics missing the +Inf latency bucket" >&2; exit 1; }
 grep -q 'increadible_http_rejected_total{reason="unauthorized"} 1' <<<"$METRICS" \
   || { echo "metrics did not count the unauthorized /metrics request" >&2; exit 1; }
+echo "[event loop] a stalled process must show as a late tick on /metrics (SIGSTOP for 1.3 s, then SIGCONT)"
+LOOP=$(sed -n 's/^increadible_event_loop_delay_seconds_count //p' <<<"$METRICS")
+[ -n "$LOOP" ] || { echo "metrics missing the event loop delay histogram: the monitor did not start" >&2; exit 1; }
+kill -STOP "$PID"; sleep 1.3; kill -CONT "$PID"
+COUNT=""; UNDER=""
+for _ in $(seq 1 30); do # the late tick is recorded as soon as the loop runs again
+  METRICS=$(curl -s "${AUTH[@]}" "http://127.0.0.1:$PORT/metrics" || true)
+  COUNT=$(sed -n 's/^increadible_event_loop_delay_seconds_count //p' <<<"$METRICS")
+  UNDER=$(sed -n 's/^increadible_event_loop_delay_seconds_bucket{le="1"} //p' <<<"$METRICS")
+  [ -n "$COUNT" ] && [ -n "$UNDER" ] && [ "$COUNT" -gt "$UNDER" ] && break
+  sleep 0.1
+done
+[ -n "$COUNT" ] && [ -n "$UNDER" ] && [ "$COUNT" -gt "$UNDER" ] \
+  || { echo "a 1.3 s stall was not visible: ticks=$COUNT, ticks at most 1 s late=$UNDER" >&2; exit 1; }
 echo "[hardening] a tool input that throws must not kill the server (HTTP and stdio)"
 BAD='{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"discover_apis","arguments":{"query":123}}}'
 RES=$(curl -s "${AUTH[@]}" -d "$BAD" "http://127.0.0.1:$PORT/mcp" || true) # a dead server must reach the message below, not abort on curl's exit code

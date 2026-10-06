@@ -54,21 +54,67 @@ interface Histogram {
   count: number;
 }
 
+const newHistogram = (): Histogram => ({ counts: LATENCY_BUCKETS_SECONDS.map(() => 0), sum: 0, count: 0 });
+
+function observe(h: Histogram, seconds: number): void {
+  const bucket = LATENCY_BUCKETS_SECONDS.findIndex((upper) => seconds <= upper);
+  if (bucket >= 0) h.counts[bucket]++;
+  h.sum += seconds;
+  h.count++;
+}
+
 export const metrics = {
   started_at: Date.now(),
   tool_calls: {} as Record<string, number>,
   tool_errors: {} as Record<string, number>,
   tool_latency: {} as Record<string, Histogram>,
+  /** How late the event loop ran a 10 ms timer: a synchronous task that blocks the loop shows up here, and in no per-call timer. */
+  event_loop_delay: newHistogram(),
   rpc_errors: 0,
   http_rejected: {} as Record<string, number>,
 };
 
 export function observeToolLatency(tool: string, seconds: number): void {
-  const h = (metrics.tool_latency[tool] ??= { counts: LATENCY_BUCKETS_SECONDS.map(() => 0), sum: 0, count: 0 });
-  const bucket = LATENCY_BUCKETS_SECONDS.findIndex((upper) => seconds <= upper);
-  if (bucket >= 0) h.counts[bucket]++;
-  h.sum += seconds;
-  h.count++;
+  observe((metrics.tool_latency[tool] ??= newHistogram()), seconds);
+}
+
+const LOOP_TICK_MS = 10;
+let loopTimer: NodeJS.Timeout | undefined;
+
+/**
+ * Measure event-loop delay: a 10 ms interval records how much later than due it ran. While a synchronous task holds the loop, no
+ * request is read, no handler starts and no /health probe is answered, and nothing inside a handler can see that wait (a handler
+ * only starts after the block), so a per-call or per-request timer misses it. Cumulative histogram, no resets. The timer is unref'd.
+ */
+export function startEventLoopMonitor(): void {
+  if (loopTimer) return;
+  let due = performance.now() + LOOP_TICK_MS;
+  loopTimer = setInterval(() => {
+    const now = performance.now();
+    observe(metrics.event_loop_delay, Math.max(0, now - due) / 1000);
+    due = now + LOOP_TICK_MS;
+  }, LOOP_TICK_MS);
+  loopTimer.unref();
+}
+
+export function stopEventLoopMonitor(): void {
+  if (loopTimer) clearInterval(loopTimer);
+  loopTimer = undefined;
+}
+
+function renderHistogram(name: string, label: string | undefined, h: Histogram): string[] {
+  const l = label ? `${label},` : "";
+  const plain = label ? `{${label}}` : "";
+  let cumulative = 0;
+  return [
+    ...LATENCY_BUCKETS_SECONDS.map((upper, i) => {
+      cumulative += h.counts[i];
+      return `${name}_bucket{${l}le="${upper}"} ${cumulative}`;
+    }),
+    `${name}_bucket{${l}le="+Inf"} ${h.count}`,
+    `${name}_sum${plain} ${h.sum}`,
+    `${name}_count${plain} ${h.count}`,
+  ];
 }
 
 export interface JsonRpcRequest {
@@ -171,18 +217,12 @@ export function renderPrometheusMetrics(): string {
     ...Object.entries(metrics.tool_errors).map(([t, n]) => `increadible_tool_errors_total{tool="${t}"} ${n}`),
     "# HELP increadible_tool_call_duration_seconds Time to handle a tool call, by tool (includes calls that failed)",
     "# TYPE increadible_tool_call_duration_seconds histogram",
-    ...Object.entries(metrics.tool_latency).flatMap(([tool, h]) => {
-      let cumulative = 0;
-      return [
-        ...LATENCY_BUCKETS_SECONDS.map((upper, i) => {
-          cumulative += h.counts[i];
-          return `increadible_tool_call_duration_seconds_bucket{tool="${tool}",le="${upper}"} ${cumulative}`;
-        }),
-        `increadible_tool_call_duration_seconds_bucket{tool="${tool}",le="+Inf"} ${h.count}`,
-        `increadible_tool_call_duration_seconds_sum{tool="${tool}"} ${h.sum}`,
-        `increadible_tool_call_duration_seconds_count{tool="${tool}"} ${h.count}`,
-      ];
-    }),
+    ...Object.entries(metrics.tool_latency).flatMap(([tool, h]) =>
+      renderHistogram("increadible_tool_call_duration_seconds", `tool="${tool}"`, h)
+    ),
+    "# HELP increadible_event_loop_delay_seconds How much later than due the event loop ran a 10 ms timer (a synchronous task that blocks the loop shows up here)",
+    "# TYPE increadible_event_loop_delay_seconds histogram",
+    ...(metrics.event_loop_delay.count > 0 ? renderHistogram("increadible_event_loop_delay_seconds", undefined, metrics.event_loop_delay) : []),
     "# HELP increadible_rpc_errors_total JSON-RPC protocol errors",
     "# TYPE increadible_rpc_errors_total counter",
     `increadible_rpc_errors_total ${metrics.rpc_errors}`,

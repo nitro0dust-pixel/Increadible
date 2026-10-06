@@ -2,7 +2,7 @@ import * as crypto from "crypto";
 import * as http from "http";
 import * as readline from "readline";
 import { Readable, Writable } from "stream";
-import { handleMessage, internalError, metrics, renderPrometheusMetrics, JsonRpcResponse } from "./server";
+import { handleMessage, internalError, metrics, renderPrometheusMetrics, startEventLoopMonitor, JsonRpcResponse } from "./server";
 
 const MAX_BODY_BYTES = 1_000_000;
 // Time allowed to *receive* a request (not to handle it). Node's own defaults are 60 s and 300 s, which lets one slow client hold a socket for 5 minutes.
@@ -233,6 +233,7 @@ if (require.main === module) {
     if (!token && !LOOPBACK_HOST.test(host.trim())) {
       console.error(`WARNING: serving on ${host} without authentication (ALLOW_UNAUTHENTICATED is set)`);
     }
+    startEventLoopMonitor(); // exposed on /metrics: a synchronous task that blocks the loop also blocks the probes
     const server = createHttpServer(token, {
       headersTimeoutMs: envInt("HTTP_HEADERS_TIMEOUT_MS", DEFAULT_HEADERS_TIMEOUT_MS),
       requestTimeoutMs: envInt("HTTP_REQUEST_TIMEOUT_MS", DEFAULT_REQUEST_TIMEOUT_MS),

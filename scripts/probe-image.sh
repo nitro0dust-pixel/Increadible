@@ -5,7 +5,8 @@
 # Docker's own health status, that A/B data survives a hard-killed container on a named volume (with AB_FSYNC on,
 # and the dead container's data file lock taken over), that a second container on the same volume is refused,
 # that a bad tool input does not kill the server, that the image (HOST=0.0.0.0) refuses to start without AUTH_TOKEN,
-# that `docker stop` ends the server cleanly (exit 0) and releases the data file lock, and that a data file of 500 000
+# that a 1.3 s freeze of the container (docker pause) shows on /metrics as a late event-loop tick, that `docker stop` ends the server
+# cleanly (exit 0) and releases the data file lock, and that a data file of 500 000
 # measurements (58 MiB) still starts and answers inside a 256 MiB memory limit, the limit the Kubernetes manifests set.
 set -euo pipefail
 IMAGE=${1:?usage: probe-image.sh <image-ref>}
@@ -56,6 +57,18 @@ grep -q 'increadible_tool_call_duration_seconds_count{tool="apply_routing_rules"
 rpc '{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"discover_apis","arguments":{"query":123}}}' \
   | jq -e '.result.isError == true' >/dev/null || fail "a bad tool input was not reported as a tool error"
 curl -fs "localhost:$PORT/health" >/dev/null || fail "the server died on a bad tool input"
+
+echo "[event loop] a stalled container must show as a late tick on /metrics (docker pause for 1.3 s)"
+docker pause "$A" >/dev/null; sleep 1.3; docker unpause "$A" >/dev/null
+late=""; count=""; under=""
+for _ in $(seq 1 30); do # the late tick is recorded as soon as the loop runs again
+  metrics=$(curl -fs -H "Authorization: Bearer $TOKEN" "localhost:$PORT/metrics" || true)
+  count=$(sed -n 's/^increadible_event_loop_delay_seconds_count //p' <<<"$metrics")
+  under=$(sed -n 's/^increadible_event_loop_delay_seconds_bucket{le="1"} //p' <<<"$metrics")
+  if [ -n "$count" ] && [ -n "$under" ] && [ "$count" -gt "$under" ]; then late=yes; break; fi
+  sleep 0.2
+done
+[ -n "$late" ] || fail "a 1.3 s stall of the container was not visible in the event loop delay histogram (ticks=$count, ticks at most 1 s late=$under)"
 
 echo "[exposure] the image binds 0.0.0.0, so it must refuse to start without AUTH_TOKEN"
 docker run -d --name "$D" "$IMAGE" >/dev/null
