@@ -23,5 +23,7 @@ got=$(jq -r .Sum <<<"$info")
 dir=$(jq -r .Dir <<<"$info")
 
 mkdir -p "$DEST"
-( cd "$dir" && go build -trimpath -o "$DEST/promtool" ./cmd/promtool )
+# remove_all_sd leaves out the cloud service-discovery code, which `check rules` and `test rules` do not use: the build takes
+# about 70 s from a cold cache on four cores instead of about 160 s, and the binary is a third smaller.
+( cd "$dir" && go build -trimpath -tags remove_all_sd -o "$DEST/promtool" ./cmd/promtool )
 echo "promtool built from github.com/prometheus/prometheus@$VERSION ($SUM) in $DEST"

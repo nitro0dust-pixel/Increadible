@@ -187,7 +187,7 @@ namespace. Alerts use only metrics the server emits plus kube-state-metrics rest
 (for example 6% errors fires and 4% does not), and each of seven deliberate breakages of the rules is caught. CI runs it as the
 `prometheus` job. `scripts/install-promtool.sh <dir>` builds the promtool for it from one pinned Prometheus release (module
 `v0.315.0`), checked against the Go checksum database and an `h1:` hash pinned in the script; it needs Go and `jq` (both on the
-GitHub runner image) and takes about three minutes on four cores.
+GitHub runner image) and takes about 70 seconds from a cold build cache on four cores (not yet measured on a runner). It leaves out the cloud service-discovery code (`-tags remove_all_sd`), which the two checks do not use, so `promtool check config` is not available from that build.
 
 **What is not.** The rules have not run against a live Prometheus (none is available here), the `ServiceMonitor` has not scraped
 anything, and there is no dashboard and no cost metric.
