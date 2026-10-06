@@ -10,6 +10,9 @@ Entries marked **behaviour change** can affect an existing deployment.
 ## [Unreleased]
 
 ### Added
+- `increadible_event_loop_delay_seconds` (histogram of how late the event loop ran a 10 ms timer, HTTP mode) and an `IncreadibleEventLoopBlocked` alert (a tick more than 1 s late in 5 minutes; 1 s is
+  the kubelet's default probe timeout). A synchronous task that blocks the loop delays every probe and shows in no per-call timer, so this is the signal for the failure the capacity test found. Smoke and the container
+  probe freeze the process for 1.3 s and require the late tick; the alert has a firing and a quiet promtool case. No measurable overhead. ([#17](https://github.com/nitro0dust-pixel/Increadible/pull/17))
 - `startupProbe` in both Kubernetes manifests (`/health`, every 5 s, 36 failures = 180 s), because startup replays the whole A/B data file before the port opens and a full 1Gi volume takes
   about 23 s at the 0.5 CPU limit, against a roughly 35 s liveness window; a config test ties the window to the volume size and the CPU limit. Replay time was measured at one core and at about
   half a core (`PERFORMANCE.md`). **Behaviour change:** liveness and readiness probes now start only after the startup probe succeeds. Not applied to a cluster. ([#16](https://github.com/nitro0dust-pixel/Increadible/pull/16))

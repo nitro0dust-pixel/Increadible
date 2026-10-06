@@ -63,6 +63,15 @@ spec:
             severity: warning
           annotations:
             summary: 95th percentile tool call latency is above 1 second (provisional threshold)
+        - alert: IncreadibleEventLoopBlocked
+          # A 10 ms timer ran more than 1 s late at least once in the last 5 minutes. 1 s is the kubelet's default probe timeout: while
+          # the event loop is blocked nothing answers /health or /ready. The 0.5 allows for the rounding of increase() on a single event.
+          expr: >-
+            increase(increadible_event_loop_delay_seconds_count[5m]) - ignoring(le) increase(increadible_event_loop_delay_seconds_bucket{le="1"}[5m]) > 0.5
+          labels:
+            severity: warning
+          annotations:
+            summary: The Increadible event loop was blocked for more than 1 second in the last 5 minutes (probes fail while it is)
         - alert: IncreadiblePodRestarting
           expr: >-
             increase(kube_pod_container_status_restarts_total{namespace="increadible", container="increadible"}[30m]) > 2

@@ -5,6 +5,7 @@ import * as net from "net";
 import * as os from "os";
 import * as path from "path";
 import { PassThrough } from "stream";
+import * as yaml from "yaml";
 
 type ServerModule = typeof import("../src/server");
 type IndexModule = typeof import("../src/index");
@@ -624,5 +625,96 @@ describe("rejected-request counter", () => {
     } finally {
       srv.close();
     }
+  });
+});
+
+describe("event-loop delay", () => {
+  const fresh = (): ServerModule => {
+    let isolated!: ServerModule;
+    jest.isolateModules(() => {
+      isolated = require("../src/server");
+    });
+    return isolated;
+  };
+  const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+  const block = (ms: number) => {
+    const until = Date.now() + ms;
+    while (Date.now() < until) {
+      /* a synchronous task: nothing else on this thread runs */
+    }
+  };
+  const cumulative = (text: string, le: string): number =>
+    Number(new RegExp(`increadible_event_loop_delay_seconds_bucket\\{le="${le.replace("+", "\\+")}"\\} (\\d+)`).exec(text)![1]);
+
+  it("exposes nothing until the monitor runs, then a cumulative histogram", async () => {
+    const s = fresh();
+    expect(s.renderPrometheusMetrics()).not.toContain("increadible_event_loop_delay_seconds_count");
+    s.startEventLoopMonitor();
+    try {
+      await wait(120);
+      const text = s.renderPrometheusMetrics();
+      const counts = s.LATENCY_BUCKETS_SECONDS.map((le) => cumulative(text, String(le)));
+      expect(counts).toEqual([...counts].sort((a, b) => a - b));
+      expect(cumulative(text, "+Inf")).toBeGreaterThan(3);
+      expect(text).toMatch(/increadible_event_loop_delay_seconds_count [1-9]/);
+      expect(text).toContain("# TYPE increadible_event_loop_delay_seconds histogram");
+      // An idle loop runs its timer on time: most ticks are under 25 ms late (a delay that grows while idle is a measurement bug).
+      expect(cumulative(text, "0.025")).toBeGreaterThanOrEqual(Math.floor(s.metrics.event_loop_delay.count / 2));
+      expect(s.metrics.event_loop_delay.sum / s.metrics.event_loop_delay.count).toBeLessThan(0.05);
+    } finally {
+      s.stopEventLoopMonitor();
+    }
+  });
+
+  it("sees a synchronous task that blocks the loop, which no timer inside a handler can", async () => {
+    const s = fresh();
+    s.startEventLoopMonitor();
+    try {
+      await wait(60);
+      const delay = s.metrics.event_loop_delay;
+      const sumBefore = delay.sum;
+      const slowBefore = delay.count - cumulative(s.renderPrometheusMetrics(), "0.1");
+      block(300);
+      await wait(60); // the late tick is recorded when the loop gets to run it
+      expect(delay.sum - sumBefore).toBeGreaterThan(0.2);
+      expect(delay.count - cumulative(s.renderPrometheusMetrics(), "0.1") - slowBefore).toBeGreaterThanOrEqual(1);
+      expect(cumulative(s.renderPrometheusMetrics(), "0.25")).toBeLessThan(delay.count); // slower than 0.25 s
+    } finally {
+      s.stopEventLoopMonitor();
+    }
+  });
+
+  it("starting twice does not double the ticks, and stopping ends them", async () => {
+    const s = fresh();
+    s.startEventLoopMonitor();
+    s.startEventLoopMonitor();
+    await wait(200);
+    expect(s.metrics.event_loop_delay.count).toBeLessThanOrEqual(30); // one timer: at most 20 ticks of 10 ms; two would give about 40
+    s.stopEventLoopMonitor();
+    const stopped = s.metrics.event_loop_delay.count;
+    await wait(60);
+    expect(s.metrics.event_loop_delay.count).toBe(stopped);
+  });
+});
+
+describe("the alert rules", () => {
+  it("only reference increadible_* metrics that the rendered /metrics output really contains", async () => {
+    let s!: ServerModule;
+    jest.isolateModules(() => {
+      s = require("../src/server");
+    });
+    // Produce one of everything the rules look at: a tool call, a refused request, and some event-loop ticks.
+    await s.handleMessage({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "get_api_stats", arguments: {} } });
+    s.metrics.http_rejected.unauthorized = 1;
+    s.metrics.tool_errors.get_api_stats = 1;
+    s.startEventLoopMonitor();
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    s.stopEventLoopMonitor();
+    const text = s.renderPrometheusMetrics();
+    const docs = yaml.parseAllDocuments(fs.readFileSync(path.join(__dirname, "..", "k8s", "monitoring.yaml"), "utf8")).map((d) => d.toJS());
+    const used = new Set(JSON.stringify(docs.find((d) => d?.kind === "PrometheusRule")).match(/increadible_[a-z_]+/g));
+    expect(used.size).toBeGreaterThan(3);
+    const missing = [...used].filter((name) => !new RegExp(`^${name}[{ ]`, "m").test(text));
+    expect(missing).toEqual([]);
   });
 });

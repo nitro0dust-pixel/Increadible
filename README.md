@@ -73,6 +73,7 @@ refuses to start otherwise, unless `ALLOW_UNAUTHENTICATED=1` says something in f
 `SHUTDOWN_TIMEOUT_MS`; see "HTTP hardening" in `DEPLOYMENT.md`.
 Emitted metrics: `increadible_uptime_seconds`, `increadible_tool_calls_total{tool}`,
 `increadible_tool_errors_total{tool}`, `increadible_tool_call_duration_seconds{tool}` (histogram),
+`increadible_event_loop_delay_seconds` (histogram: how late the event loop ran a 10 ms timer; HTTP mode),
 `increadible_rpc_errors_total`, `increadible_http_rejected_total{reason}`.
 
 ## Tools (13)
