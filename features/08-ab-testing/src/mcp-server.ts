@@ -94,12 +94,35 @@ function tCritical95(df: number): number {
   return z + (z * z * z + z) / (4 * df);
 }
 
-function sampleStats(values: number[]) {
-  const n = values.length;
-  const mean = values.reduce((a, b) => a + b, 0) / n;
-  const variance =
-    n > 1 ? values.reduce((sum, v) => sum + (v - mean) ** 2, 0) / (n - 1) : 0;
-  return { n, mean, variance, std: Math.sqrt(variance) };
+/**
+ * Running aggregates that give the sample statistics of a series without keeping it, so memory does not grow with the
+ * number of measurements. `sum` is added up in arrival order, so `sum / n` is the same number a left-to-right sum of
+ * the stored values would give (it matters: results are rounded, and a mean can sit exactly on a rounding boundary).
+ * `m2` is Welford's running sum of squared deviations, which is steadier than summing squares afterwards.
+ */
+interface Running {
+  n: number;
+  sum: number;
+  welfordMean: number;
+  m2: number;
+}
+
+function addValue(r: Running, x: number): void {
+  r.n += 1;
+  r.sum += x;
+  const delta = x - r.welfordMean;
+  r.welfordMean += delta / r.n;
+  r.m2 += delta * (x - r.welfordMean);
+}
+
+function sampleStats(r: Running | undefined) {
+  if (!r || r.n === 0) return { n: 0, mean: NaN, variance: 0, std: 0 };
+  const variance = r.n > 1 ? Math.max(0, r.m2) / (r.n - 1) : 0;
+  // m2 is exactly 0 only when every value is identical, and then the running mean is that value exactly. `sum / n` can be
+  // off by a rounding error (59 times 0.1 is not 5.9), which would make two identical constant series look different:
+  // zero variance and a difference of 1e-17 is a certain win for one of them.
+  const mean = r.m2 === 0 ? r.welfordMean : r.sum / r.n;
+  return { n: r.n, mean, variance, std: Math.sqrt(variance) };
 }
 
 interface Measurement {
@@ -112,6 +135,23 @@ interface Measurement {
 type LogEntry =
   | { type: "experiment"; experiment: Experiment }
   | ({ type: "measurement" } & Measurement);
+
+/**
+ * What the module keeps in memory about an experiment's measurements: counts, and a running mean and variance per
+ * variant and metric. The raw values stay in the data file only, so memory and the cost of a results call no longer
+ * grow with the number of measurements.
+ */
+interface VariantTally {
+  count: number;
+  metrics: Map<string, Running>;
+}
+
+interface ExperimentTally {
+  total: number;
+  /** The metric ids the experiment defines (values for other keys are not used by any statistic). */
+  metricIds: string[];
+  variants: Map<string, VariantTally>;
+}
 
 // ---- single-writer lock for the data file -------------------------------------------------------
 //
@@ -282,11 +322,62 @@ export interface ABDataOptions {
   warnBytes?: number;
   /** How long startup waits for a lock that might belong to a crashed holder on another machine. */
   lockWaitMs?: number;
+  /** Size of the reads used to replay the data file at startup (default 1 MiB). Only tests change it. */
+  replayChunkBytes?: number;
+}
+
+const DEFAULT_REPLAY_CHUNK_BYTES = 1024 * 1024;
+
+/**
+ * Calls `onLine` for every line of the file (split on "\n") reading `chunkBytes` at a time, so replaying a large data
+ * file does not need the file in memory. Lines are decoded one by one: a newline byte never occurs inside a multi-byte
+ * UTF-8 sequence, so a character split across two reads is joined before it is decoded. A last line without a
+ * newline (a torn write) is passed on like any other.
+ */
+function forEachLine(
+  file: string,
+  chunkBytes: number,
+  onLine: (line: string) => void
+): { bytes: number; endsWithNewline: boolean } {
+  const fd = fs.openSync(file, "r");
+  try {
+    const buf = Buffer.allocUnsafe(Math.max(1, chunkBytes));
+    let carry: Buffer[] = []; // the start of a line that continues in the next read
+    let carried = 0;
+    let bytes = 0;
+    let lastByte = -1;
+    for (;;) {
+      const got = fs.readSync(fd, buf, 0, buf.length, null);
+      if (got === 0) break;
+      bytes += got;
+      lastByte = buf[got - 1];
+      const view = buf.subarray(0, got); // indexOf must not look at stale bytes after `got`
+      let start = 0;
+      while (start < got) {
+        const nl = view.indexOf(0x0a, start);
+        if (nl === -1) {
+          carry.push(Buffer.from(view.subarray(start))); // copy: `buf` is reused by the next read
+          carried += got - start;
+          break;
+        }
+        const piece = view.subarray(start, nl);
+        onLine((carried > 0 ? Buffer.concat([...carry, piece]) : piece).toString("utf8"));
+        carry = [];
+        carried = 0;
+        start = nl + 1;
+      }
+    }
+    if (carried > 0) onLine(Buffer.concat(carry).toString("utf8"));
+    return { bytes, endsWithNewline: lastByte === 0x0a };
+  } finally {
+    fs.closeSync(fd);
+  }
 }
 
 class ABTestingFramework {
   private experiments: Map<string, Experiment> = new Map();
-  private measurements: Measurement[] = [];
+  private tallies: Map<string, ExperimentTally> = new Map();
+  private replayChunkBytes: number;
   private experimentsFile: string;
   private dataFile?: string;
   private lock?: HeldLock;
@@ -308,6 +399,7 @@ class ABTestingFramework {
     this.fsync = options.fsync === true;
     this.warnBytes = options.warnBytes && options.warnBytes > 0 ? options.warnBytes : DEFAULT_WARN_BYTES;
     this.lockWaitMs = options.lockWaitMs ?? LOCK_STALE_MS + 2_000;
+    this.replayChunkBytes = options.replayChunkBytes && options.replayChunkBytes > 0 ? options.replayChunkBytes : DEFAULT_REPLAY_CHUNK_BYTES;
     this.loadExperiments();
     if (dataFile) {
       this.dataFile = dataFile;
@@ -348,29 +440,26 @@ class ABTestingFramework {
         }
         return;
       }
-      const content = fs.readFileSync(file, "utf-8");
-      this.size = Buffer.byteLength(content);
-      this.noteGrowth(0);
       let experiments = 0;
       let measurements = 0;
       let skipped = 0;
       let dropped = 0;
 
-      for (const line of content.split("\n")) {
-        if (!line.trim()) continue;
+      const { bytes, endsWithNewline } = forEachLine(file, this.replayChunkBytes, (line) => {
+        if (!line.trim()) return;
         let entry: LogEntry;
         try {
           entry = JSON.parse(line);
         } catch {
           skipped++; // e.g. a line torn by a crash mid-write
-          continue;
+          return;
         }
         if (entry?.type === "experiment") {
           try {
             this.validateExperiment(entry.experiment);
           } catch {
             skipped++;
-            continue;
+            return;
           }
           // Definitions from the YAML file are authoritative.
           if (!this.experiments.has(entry.experiment.id)) {
@@ -385,23 +474,20 @@ class ABTestingFramework {
             Object.values(entry.metrics ?? {}).every((v) => typeof v === "number" && Number.isFinite(v));
           if (!valid) {
             dropped++;
-            continue;
+            return;
           }
-          this.measurements.push({
-            experiment_id: entry.experiment_id,
-            variant_id: entry.variant_id,
-            metrics: entry.metrics,
-            timestamp: entry.timestamp,
-          });
+          this.tally(exp, entry.variant_id, entry.metrics);
           measurements++;
         } else {
           skipped++;
         }
-      }
+      });
+      this.size = bytes;
+      this.noteGrowth(0);
 
       // A crash can leave the last line without a newline; terminate it so the next append
       // starts on its own line instead of being glued to the torn one.
-      if (content.length > 0 && !content.endsWith("\n")) {
+      if (bytes > 0 && !endsWithNewline) {
         fs.appendFileSync(file, "\n");
         this.size += 1;
       }
@@ -508,6 +594,35 @@ class ABTestingFramework {
     };
   }
 
+  /** Fold one measurement into the running aggregates of its experiment (the raw values live in the data file). */
+  private tally(experiment: Experiment, variantId: string, metrics: Record<string, number> | undefined): void {
+    let t = this.tallies.get(experiment.id);
+    if (!t) {
+      const ids = new Set<string>();
+      for (const m of experiment.metrics) if (m?.id !== undefined) ids.add(m.id);
+      t = { total: 0, metricIds: [...ids], variants: new Map() };
+      this.tallies.set(experiment.id, t);
+    }
+    let v = t.variants.get(variantId);
+    if (!v) {
+      v = { count: 0, metrics: new Map() };
+      t.variants.set(variantId, v);
+    }
+    t.total += 1;
+    v.count += 1;
+    if (!metrics || typeof metrics !== "object") return; // counts as a sample, carries no values
+    for (const id of t.metricIds) {
+      const x = Object.prototype.hasOwnProperty.call(metrics, id) ? metrics[id] : undefined;
+      if (typeof x !== "number") continue;
+      let r = v.metrics.get(id);
+      if (!r) {
+        r = { n: 0, sum: 0, welfordMean: 0, m2: 0 };
+        v.metrics.set(id, r);
+      }
+      addValue(r, x);
+    }
+  }
+
   public recordMetric(
     experimentId: string,
     variantId: string,
@@ -532,40 +647,36 @@ class ABTestingFramework {
       timestamp: new Date().toISOString(),
     };
     this.persist({ type: "measurement", ...measurement });
-    this.measurements.push(measurement);
+    this.tally(experiment, variantId, metrics);
   }
 
   public getExperimentResults(experimentId: string): ExperimentResults | null {
     const experiment = this.experiments.get(experimentId);
     if (!experiment) return null;
 
-    // Filter measurements for this experiment
-    const expMeasurements = this.measurements.filter(
-      (m) => m.experiment_id === experimentId
-    );
+    const tally = this.tallies.get(experimentId);
+    const total = tally?.total ?? 0;
 
-    if (expMeasurements.length < MIN_TOTAL_SAMPLES) {
+    if (total < MIN_TOTAL_SAMPLES) {
       return {
         status: "incomplete",
         variant_results: {},
         statistical_analysis: {
-          message: `Need ${MIN_TOTAL_SAMPLES - expMeasurements.length} more samples`,
-          current_samples: expMeasurements.length,
+          message: `Need ${MIN_TOTAL_SAMPLES - total} more samples`,
+          current_samples: total,
         },
         confidence: 0,
       };
     }
 
-    const perVariant = experiment.variants.map(
-      (v) => expMeasurements.filter((m) => m.variant_id === v.id).length
-    );
+    const perVariant = experiment.variants.map((v) => tally?.variants.get(v.id)?.count ?? 0);
     if (perVariant.some((n) => n < MIN_SAMPLES_PER_VARIANT)) {
       return {
         status: "incomplete",
         variant_results: {},
         statistical_analysis: {
           message: `Need at least ${MIN_SAMPLES_PER_VARIANT} samples per variant`,
-          current_samples: expMeasurements.length,
+          current_samples: total,
           samples_per_variant: Object.fromEntries(
             experiment.variants.map((v, i) => [v.id, perVariant[i]])
           ),
@@ -585,14 +696,7 @@ class ABTestingFramework {
     }
 
     for (const metric of experiment.metrics) {
-      const groups = [vA, vB].map((v) =>
-        sampleStats(
-          expMeasurements
-            .filter((m) => m.variant_id === v.id)
-            .map((m) => m.metrics[metric.id])
-            .filter((x) => x !== undefined)
-        )
-      );
+      const groups = [vA, vB].map((v) => sampleStats(tally?.variants.get(v.id)?.metrics.get(metric.id)));
 
       [vA, vB].forEach((v, i) => {
         const g = groups[i];
@@ -681,9 +785,7 @@ class ABTestingFramework {
       id: exp.id,
       name: exp.name,
       status: exp.status,
-      sample_count: this.measurements.filter(
-        (m) => m.experiment_id === exp.id
-      ).length,
+      sample_count: this.tallies.get(exp.id)?.total ?? 0,
     }));
   }
 }

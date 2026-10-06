@@ -171,6 +171,26 @@ wait_exit 5
 kill "$STALL" 2>/dev/null || true
 [ "$RC" = 1 ] || { echo "a stalled client must be cut at the deadline (exit 1), got $RC" >&2; exit 1; }
 grep -q "deadline passed" "$TMP/srv-$P4.err" || { echo "no deadline message: $(head -3 "$TMP/srv-$P4.err")" >&2; exit 1; }
+echo "[memory] a large A/B data file must replay and answer in a small heap (it used to be held in memory: about 450 bytes per measurement)"
+node scripts/make-ab-data.js --file "$TMP/big-ab.jsonl" --measurements 400000 2>/dev/null \
+  || { echo "scripts/make-ab-data.js failed" >&2; exit 1; }
+# 400 000 measurements are a 46 MiB file. The previous implementation needed more than 96 MiB of heap for them and died with
+# "JavaScript heap out of memory"; the aggregates need about 10 MiB. 48 MiB leaves room for Node's own differences.
+MEM_REPLY=$(echo '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_experiment_results","arguments":{"experiment_id":"cap"}}}' \
+  | AB_DATA_FILE="$TMP/big-ab.jsonl" NODE_OPTIONS=--max-old-space-size=48 timeout 120 node dist/src/index.js 2>"$TMP/mem.err") \
+  || { echo "the server could not replay 400000 measurements within a 48 MiB heap: $(grep -m1 -i 'heap\|error' "$TMP/mem.err")" >&2; exit 1; }
+MEM_ERR=$(cat "$TMP/mem.err")
+[[ "$MEM_ERR" == *"Restored 1 experiments and 400000 measurements"* ]] \
+  || { echo "the replay did not report 400000 measurements: $MEM_ERR" >&2; exit 1; }
+node -e '
+  const assert = require("assert");
+  const r = JSON.parse(JSON.parse(process.argv[1]).result.content[0].text);
+  assert.strictEqual(r.status, "complete", JSON.stringify(r));
+  assert.strictEqual(r.variant_results.A.metrics.q.sample_size, 200000);
+  assert.strictEqual(r.variant_results.B.metrics.q.sample_size, 200000);
+' "$MEM_REPLY" || { echo "wrong results for the large data file: $MEM_REPLY" >&2; exit 1; }
+rm -f "$TMP/big-ab.jsonl"
+
 echo "[tools] the load test and capacity scripts still run (tiny settings; the numbers themselves are not checked)"
 node scripts/loadtest.js --duration 1 --warmup 0 --concurrency 2 --scenarios routing,ab-file --json "$TMP/load.json" >/dev/null 2>"$TMP/load.err" \
   || { echo "scripts/loadtest.js failed: $(tail -3 "$TMP/load.err")" >&2; exit 1; }

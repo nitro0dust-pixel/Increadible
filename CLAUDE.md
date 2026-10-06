@@ -33,6 +33,7 @@ targets, not results).
 | `npm run verify` | type-check, lint, tests, build, smoke; reports `NOT AVAILABLE` for Docker and cluster checks it cannot run |
 | `bash scripts/probe-image.sh <image>` | the image the way a deployment runs it: needs Docker, curl, jq. **Only CI has a Docker daemon**; locally it can be tried against a stubbed `docker`, which proves the script's logic but not the image |
 | `npm run loadtest`, `npm run capacity` | per-tool throughput and latency; A/B data size against restart, memory and query cost (not in CI: shared runners are too noisy; `smoke.sh` only checks they still run). Use an idle machine and read `PERFORMANCE.md` first |
+| `node scripts/make-ab-data.js --file <f> --measurements <N>` | writes an A/B data file of N measurements (fast, no server); smoke and the image probe use it to start on a large file |
 | `PROMTOOL=<bin> bash scripts/check-prometheus.sh` | `promtool check rules` and `test rules` for `k8s/monitoring.yaml` (`scripts/install-promtool.sh <dir>` builds the pinned promtool) |
 
 CI (`.github/workflows/ci-cd.yml`): `quality`, `test`, `security` (audit, SBOM, secret scan), `prometheus` run in parallel;
@@ -46,7 +47,9 @@ image by digest and probes it again. The package `ghcr.io/nitro0dust-pixel/incre
 - `src/server.ts`: the JSON-RPC handler, tool dispatch, metrics (counters, tool-latency histogram). A throwing tool becomes a tool
   error; the handler never throws.
 - `features/07..09/src/mcp-server.ts`: the three modules. A/B data is an append-only JSON-lines file (`AB_DATA_FILE`) with a
-  single-writer lock file, crash recovery, optional fsync and a growth warning; it is never compacted.
+  single-writer lock file, crash recovery, optional fsync and a growth warning; it is never compacted. In memory the A/B module keeps
+  only counts and a running mean and variance per variant and metric (so memory and the cost of a results call do not grow with the
+  data), and replays the file in chunks at startup. `tests/ab-golden.test.ts` holds it to the answers of the earlier array-based version.
 - `k8s/` manifests (one replica, `Recreate`, an RWO volume: the data file has exactly one writer), `monitoring/` alert unit tests,
   `Dockerfile` (Node 24, non-root).
 - Node: one major (24) across the Dockerfile, CI and `@types/node`, enforced by a test; `engines` is `>=22`.

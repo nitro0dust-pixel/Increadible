@@ -10,10 +10,15 @@ Entries marked **behaviour change** can affect an existing deployment.
 ## [Unreleased]
 
 ### Added
+- Regression checks for the A/B memory fix: a golden-master test (120 datasets whose answers were produced by the previous implementation, replayed at several read
+  sizes), `scripts/make-ab-data.js` (writes a large data file in seconds), a `[memory]` section in `scripts/smoke.sh` (400 000 measurements replayed under a 48 MiB
+  heap, which the previous code could not do even with 96 MiB) and a `[capacity]` section in `scripts/probe-image.sh` (500 000 measurements inside a 256 MiB container).
+  ([#15](https://github.com/nitro0dust-pixel/Increadible/pull/15))
 - Measured baselines: `scripts/loadtest.js` (per-tool throughput and latency, closed and open loop, server-side means) and `scripts/capacity.js`
-  (A/B data size against restart time, memory and query cost), with results and recommendations in `PERFORMANCE.md`. Finding: the A/B module keeps every
-  measurement in memory (about 500 bytes each), so the manifests' 256Mi limit is reached near 360 000 measurements, and `get_experiment_results`
-  costs time proportional to the samples. ([#14](https://github.com/nitro0dust-pixel/Increadible/pull/14))
+  (A/B data size against restart time, memory and query cost), with results and recommendations in `PERFORMANCE.md`. Finding: the A/B module kept every
+  measurement in memory (about 440 to 500 bytes each), so the manifests' 256Mi limit was reached at roughly 400 000 to 460 000 measurements (this entry first said
+  360 000: that came from mistaking the 85 MiB reading at 50 000 measurements for the empty server, which idles at 62 MiB), and `get_experiment_results`
+  cost time proportional to the samples. ([#14](https://github.com/nitro0dust-pixel/Increadible/pull/14), fixed in [#15](https://github.com/nitro0dust-pixel/Increadible/pull/15))
 - Tool-call latency histogram `increadible_tool_call_duration_seconds{tool}`, a counter of refused requests
   `increadible_http_rejected_total{reason}` (`unauthorized`, `rate_limited`, `payload_too_large`) and an `IncreadibleSlowToolCalls`
   alert (p95 above 1 s; **provisional threshold**). ([#12](https://github.com/nitro0dust-pixel/Increadible/pull/12), [#11](https://github.com/nitro0dust-pixel/Increadible/pull/11))
@@ -33,8 +38,13 @@ Entries marked **behaviour change** can affect an existing deployment.
 - `ROADMAP.md`: status, plan, quality gates and open decisions, with evidence for every status. ([#6](https://github.com/nitro0dust-pixel/Increadible/pull/6))
 
 ### Changed
-- **Behaviour change (a log line comes earlier):** the Kubernetes manifests set `AB_DATA_WARN_BYTES` to 16 MiB (the code default stays 100 MiB), so the growth
-  warning arrives before the memory limit is a problem; a test keeps the threshold consistent with the memory limit. ([#14](https://github.com/nitro0dust-pixel/Increadible/pull/14))
+- The A/B module no longer holds every measurement in memory: it keeps counts and a running mean and variance per variant and metric, and replays the data file in
+  1 MiB chunks. The data file is unchanged and still holds every measurement. Memory is 67 MiB at 8 000 000 measurements and at 50 000 (before: 85 MiB at 50 000 and
+  397 MiB at 800 000), `get_experiment_results` takes 0.04 to 0.07 ms at any size (before: 9 ms to 177 ms), and `/health` is no longer delayed by queries. Results are
+  identical to the previous implementation on 120 stored datasets and in a differential run of 5 020 random experiments (recorded live and replayed from a file), with one
+  exception: in 1 of the 5 020 a rounded last digit differed, on data near 1 000 000 000, where the exact value sat on a rounding boundary. ([#15](https://github.com/nitro0dust-pixel/Increadible/pull/15))
+- **Behaviour change (a log line comes later):** the manifests set `AB_DATA_WARN_BYTES` back to 100 MiB (the code default), undoing the 16 MiB of #14: that value protected
+  the memory limit, which the data no longer reaches; a test now keeps the warning below a quarter of the volume. ([#15](https://github.com/nitro0dust-pixel/Increadible/pull/15), [#14](https://github.com/nitro0dust-pixel/Increadible/pull/14))
 - **Behaviour change:** an HTTP server on a non-loopback `HOST` (the image binds `0.0.0.0`) without a non-blank `AUTH_TOKEN` refuses to start
   (exit 1); before, an empty token silently turned authentication off. `ALLOW_UNAUTHENTICATED=1` overrides it. ([#11](https://github.com/nitro0dust-pixel/Increadible/pull/11))
 - **Behaviour change:** receiving a request now has a 10 s (headers) and 30 s (whole request) limit instead of Node's 60 s and 300 s.
@@ -50,6 +60,10 @@ Entries marked **behaviour change** can affect an existing deployment.
 - Kubernetes manifests: drain settings and an explicit 30 s termination grace period. ([#11](https://github.com/nitro0dust-pixel/Increadible/pull/11))
 
 ### Fixed
+- A measurement recorded without a `metrics` object made every later `get_experiment_results` call for that experiment fail with a TypeError; it now counts as a sample.
+  ([#15](https://github.com/nitro0dust-pixel/Increadible/pull/15))
+- Two series of identical values (for example a metric that is always 0.1) with different sample sizes were reported as different (p about 0.41 and an effect size of 0.15 from
+  floating-point noise in the old two-pass variance). They now compare as equal: p = 1, effect size 0, no winner. ([#15](https://github.com/nitro0dust-pixel/Increadible/pull/15))
 - One request could kill the whole server: `discover_apis` with a non-string `query` threw out of the tool (HTTP and stdio). A throwing tool is now a
   tool error; both transports have a last-resort catch. ([#11](https://github.com/nitro0dust-pixel/Increadible/pull/11))
 - The image probe reported a wrong reason when `docker logs | grep -q` hit SIGPIPE under `pipefail`; output is captured before matching, and a test forbids
@@ -62,4 +76,4 @@ Entries marked **behaviour change** can affect an existing deployment.
   upstream projects' documents are targets, not measurements. ([#2](https://github.com/nitro0dust-pixel/Increadible/pull/2))
 
 ### Not done (see `ROADMAP.md`)
-Deployment to a cluster, image vulnerability scan, image signing, a load test, real gateway API calls, and integration of the vendored features #1-#6.
+Deployment to a cluster, image vulnerability scan, image signing, load tests on target hardware, real gateway API calls, and integration of the vendored features #1-#6.

@@ -29,17 +29,28 @@ describe.each(["k8s/staging-deployment.yaml", "k8s/production-deployment.yaml"])
     expect(env.AUTH_TOKEN.secretKeyRef).toEqual({ name: "increadible-secrets", key: "auth-token" });
   });
 
-  it("warns about A/B data growth while the live data still fits the memory limit (measured in PERFORMANCE.md)", () => {
-    // Measured: 85 MiB idle, about 500 bytes of memory per measurement (434 to 504 measured), 120 bytes per measurement on disk.
-    const BASE_MIB = 85;
-    const MEMORY_BYTES_PER_MEASUREMENT = 500;
-    const DISK_BYTES_PER_MEASUREMENT = 120;
+  it("warns about A/B data growth while the volume is still mostly empty (the data file is never compacted)", () => {
+    // Memory does not grow with the file (running aggregates, guarded in tests/ab-golden.test.ts), so the volume is what fills up.
     const env = Object.fromEntries(container.env.map((e: any) => [e.name, e.value]));
-    const limitMiB = Number(/^(\d+)Mi$/.exec(container.resources.limits.memory)![1]);
     const warnBytes = Number(env.AB_DATA_WARN_BYTES);
     expect(warnBytes).toBeGreaterThan(0);
-    const liveMiB = BASE_MIB + ((warnBytes / DISK_BYTES_PER_MEASUREMENT) * MEMORY_BYTES_PER_MEASUREMENT) / 2 ** 20;
-    expect({ liveMiB: Math.round(liveMiB), limitMiB, fits: liveMiB <= 0.6 * limitMiB }).toMatchObject({ fits: true });
+    const claim = kind("PersistentVolumeClaim");
+    const unit: Record<string, number> = { Mi: 2 ** 20, Gi: 2 ** 30 };
+    const [, size, u] = /^(\d+)(Mi|Gi)$/.exec(claim.spec.resources.requests.storage)!;
+    const volumeBytes = Number(size) * unit[u];
+    expect({ warnBytes, volumeBytes, early: warnBytes <= 0.25 * volumeBytes }).toMatchObject({ early: true });
+  });
+
+  it("is probed under the memory limit it deploys with, and smoke caps the heap, so the A/B memory regression checks cannot go slack", () => {
+    // scripts/probe-image.sh starts the image with a large A/B data file under --memory=<limit>; if the manifests' limit moved and the
+    // probe's did not, the probe would be checking a different container. scripts/smoke.sh does the same with a capped Node heap.
+    const limitMiB = Number(/^(\d+)Mi$/.exec(container.resources.limits.memory)![1]);
+    const probe = /--memory=(\d+)m\b/.exec(read("scripts/probe-image.sh"));
+    expect(probe).not.toBeNull();
+    expect(Number(probe![1])).toBe(limitMiB);
+    const smoke = read("scripts/smoke.sh");
+    expect(smoke).toMatch(/NODE_OPTIONS=--max-old-space-size=\d+/);
+    expect(smoke).toContain("scripts/make-ab-data.js");
   });
 
   it("gives the kubelet more time to stop the pod than the server needs to drain and cut connections", () => {

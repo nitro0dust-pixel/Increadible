@@ -5,20 +5,23 @@
 # Docker's own health status, that A/B data survives a hard-killed container on a named volume (with AB_FSYNC on,
 # and the dead container's data file lock taken over), that a second container on the same volume is refused,
 # that a bad tool input does not kill the server, that the image (HOST=0.0.0.0) refuses to start without AUTH_TOKEN,
-# and that `docker stop` ends the server cleanly (exit 0) and releases the data file lock.
+# that `docker stop` ends the server cleanly (exit 0) and releases the data file lock, and that a data file of 500 000
+# measurements (58 MiB) still starts and answers inside a 256 MiB memory limit, the limit the Kubernetes manifests set.
 set -euo pipefail
 IMAGE=${1:?usage: probe-image.sh <image-ref>}
 PORT=${PROBE_PORT:-3000}
 TOKEN=probe-token
-A="inc-probe-a-$$"; B="inc-probe-b-$$"; C="inc-probe-c-$$"; D="inc-probe-d-$$"; VOL="inc-probe-data-$$"
+A="inc-probe-a-$$"; B="inc-probe-b-$$"; C="inc-probe-c-$$"; D="inc-probe-d-$$"; E="inc-probe-e-$$"
+VOL="inc-probe-data-$$"; VOL_BIG="inc-probe-big-$$"
+SCRIPTS=$(cd "$(dirname "$0")" && pwd)
 
 cleanup() {
   status=$?
   if [ "$status" -ne 0 ]; then
-    for c in "$A" "$B" "$C" "$D"; do docker logs "$c" 2>&1 | tail -30 || true; done
+    for c in "$A" "$B" "$C" "$D" "$E"; do docker logs "$c" 2>&1 | tail -30 || true; done
   fi
-  docker rm -f "$A" "$B" "$C" "$D" >/dev/null 2>&1 || true
-  docker volume rm "$VOL" >/dev/null 2>&1 || true
+  docker rm -f "$A" "$B" "$C" "$D" "$E" >/dev/null 2>&1 || true
+  docker volume rm "$VOL" "$VOL_BIG" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
 
@@ -94,4 +97,27 @@ code=$(docker inspect --format '{{.State.ExitCode}}' "$B")
 listing=$(docker run --rm -v "$VOL:/data" --entrypoint ls "$IMAGE" -a /data)
 grep -qx "ab-data.jsonl" <<<"$listing" || fail "the A/B data file is missing after a clean stop: $listing"
 ! grep -qx "ab-data.jsonl.lock" <<<"$listing" || fail "the data file lock was left behind after a clean stop"
+echo "[capacity] 500000 A/B measurements (a 58 MiB data file) must start and answer inside a 256 MiB memory limit (the manifests' limit)"
+# The data file is written by the image's own node (as the non-root user, into a fresh named volume), from the script in this checkout.
+docker volume create "$VOL_BIG" >/dev/null
+gen=$(docker run --rm -v "$VOL_BIG:/data" -v "$SCRIPTS:/scripts:ro" --entrypoint node "$IMAGE" \
+  /scripts/make-ab-data.js --file /data/ab-data.jsonl --measurements 500000 2>&1) || fail "could not write the large data file: $gen"
+# No swap, so the limit is a hard one. With every measurement held in memory (about 450 bytes each) this container was killed at startup.
+docker run -d --name "$E" --memory=256m --memory-swap=256m -p "$PORT:3000" -v "$VOL_BIG:/data" \
+  -e "AUTH_TOKEN=$TOKEN" -e AB_FSYNC=1 "$IMAGE" >/dev/null
+up=""
+for _ in $(seq 1 60); do
+  curl -fs "localhost:$PORT/health" >/dev/null 2>&1 && { up=yes; break; }
+  [ "$(docker inspect --format '{{.State.Running}}' "$E")" = "true" ] || break
+  sleep 1
+done
+[ -n "$up" ] || fail "the container with 500000 measurements never answered (OOMKilled: $(docker inspect --format '{{.State.OOMKilled}}' "$E"), exit code $(docker inspect --format '{{.State.ExitCode}}' "$E")): $(docker logs "$E" 2>&1 | tail -3)"
+big=$(rpc '{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"get_experiment_results","arguments":{"experiment_id":"cap"}}}' \
+  | jq -r '.result.content[0].text') || fail "get_experiment_results failed on the large data file"
+jq -e '.status == "complete" and .variant_results.A.metrics.q.sample_size == 250000 and .variant_results.B.metrics.q.sample_size == 250000' <<<"$big" >/dev/null \
+  || fail "wrong results for 500000 measurements: $big"
+[ "$(docker inspect --format '{{.State.OOMKilled}}' "$E")" = "false" ] || fail "the container was OOM-killed under the 256 MiB limit"
+# Evidence for the record (not asserted): the most memory the container's cgroup has used. cgroup v2 only; skipped elsewhere.
+peak=$(docker exec "$E" cat /sys/fs/cgroup/memory.peak 2>/dev/null || true)
+[[ "$peak" =~ ^[0-9]+$ ]] && echo "  peak memory of the container: $((peak / 1048576)) MiB of 256 MiB"
 echo "probe: OK"

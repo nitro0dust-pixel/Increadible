@@ -53,4 +53,7 @@ experiments:                    # optional file, EXPERIMENTS_FILE; invalid entri
   holder's pid, and a write fails if the lock was lost. `AB_FSYNC=1` flushes each append to disk (a failed flush fails
   the call, but the line may already be in the file). A warning is logged once the file passes `AB_DATA_WARN_BYTES`
   (default 100 MB); it is never compacted. Library users call `close()` to hand the file over.
+  Memory does not grow with the file: the module keeps only counts and a running mean and variance per variant and
+  metric (the raw values stay in the file), so `get_experiment_results` takes the same time at any size, and startup
+  replays the file in 1 MiB chunks.
 - `create_experiment` with an id that already exists is rejected; YAML definitions override a logged experiment with the same id.
