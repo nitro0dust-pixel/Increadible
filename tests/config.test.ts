@@ -118,6 +118,32 @@ describe("k8s/monitoring.yaml", () => {
     for (const metric of used) expect(emitted).toContain(metric);
   });
 
+  it("has a firing case and a quiet case in the promtool unit tests for every alert, and none for a rule that is gone", () => {
+    const rule = all.find((d) => d.kind === "PrometheusRule");
+    const alerts: string[] = rule.spec.groups.flatMap((g: any) => g.rules.filter((r: any) => r.alert).map((r: any) => r.alert));
+    const cases: any[] = yaml.parse(read("monitoring/alerts.test.yaml")).tests.flatMap((t: any) => t.alert_rule_test);
+    expect(alerts.length).toBeGreaterThan(0);
+    for (const alert of alerts) {
+      const mine = cases.filter((c) => c.alertname === alert);
+      expect({ alert, hasFiringCase: mine.some((c) => c.exp_alerts.length > 0) }).toEqual({ alert, hasFiringCase: true });
+      expect({ alert, hasQuietCase: mine.some((c) => c.exp_alerts.length === 0) }).toEqual({ alert, hasQuietCase: true });
+    }
+    for (const c of cases) expect(alerts).toContain(c.alertname);
+  });
+
+  it("is checked and unit-tested with promtool in CI, built from a pinned and checksummed Prometheus release", () => {
+    const workflow = yaml.parse(read(".github/workflows/ci-cd.yml"));
+    const runs = workflow.jobs.prometheus.steps.map((s: any) => s.run ?? "").join("\n");
+    expect(runs).toContain("scripts/install-promtool.sh");
+    expect(runs).toContain("scripts/check-prometheus.sh");
+    const install = read("scripts/install-promtool.sh");
+    expect(install).toMatch(/^VERSION=v0\.\d+\.\d+/m);
+    expect(install).toMatch(/^SUM='h1:[A-Za-z0-9+/]+=*'/m);
+    expect(install).toContain("GOWORK=off");
+    expect(read("scripts/check-prometheus.sh")).toContain('"$PROMTOOL" test rules');
+    expect(read("DEPLOYMENT.md")).toContain("scripts/check-prometheus.sh");
+  });
+
   it("scrapes the Service port by name with the auth secret the Deployment uses", () => {
     const sm = all.find((d) => d.kind === "ServiceMonitor");
     expect(sm.spec.endpoints[0].port).toBe("http");
@@ -191,10 +217,13 @@ describe("Dockerfile and package.json", () => {
     expect(smoke).toContain("Refusing to listen");
     expect(smoke).toContain("SHUTDOWN_DRAIN_MS");
     expect(smoke).toContain("deadline passed");
+    expect(smoke).toContain("increadible_tool_call_duration_seconds_count");
+    expect(smoke).toContain('reason="unauthorized"');
     const probe = read("scripts/probe-image.sh");
     expect(probe).toContain('"name":"discover_apis","arguments":{"query":123}');
     expect(probe).toContain("Refusing to listen");
     expect(probe).toContain('docker stop -t 20 "$B"');
+    expect(probe).toContain("increadible_tool_call_duration_seconds_count");
     expect(probe).toContain("ab-data.jsonl.lock");
   });
 

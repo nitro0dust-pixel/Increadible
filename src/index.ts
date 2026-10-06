@@ -106,6 +106,7 @@ export function createHttpServer(authToken?: string, options: HttpOptions = {}):
         return draining ? json(503, { status: "draining" }) : json(200, { status: "ok" });
       }
       if (authToken && !tokenMatches(req.headers.authorization, authToken)) {
+        metrics.http_rejected.unauthorized = (metrics.http_rejected.unauthorized || 0) + 1;
         return json(401, { error: "Unauthorized" });
       }
       if (req.method === "GET" && req.url === "/metrics") {

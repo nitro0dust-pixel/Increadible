@@ -160,12 +160,37 @@ way. Design choices to be aware of:
 - **ClusterIP only**, protected by `AUTH_TOKEN`. There is no TLS or ingress; add one before exposing it.
 - Health endpoints (`/health`, `/ready`) are unauthenticated for the kubelet; `/metrics` and `/mcp` need the token.
 
-### Monitoring (optional, unverified)
+### Monitoring (optional, partly verified)
 
 `k8s/monitoring.yaml` needs the Prometheus Operator CRDs and kube-state-metrics, and applies to the `increadible`
-namespace. Alerts use only metrics the server emits (`increadible_tool_calls_total`, `increadible_tool_errors_total`,
-`increadible_rpc_errors_total`, `increadible_uptime_seconds`) plus kube-state-metrics restarts. There is no
-dashboard, and no latency or cost metric exists yet.
+namespace. Alerts use only metrics the server emits plus kube-state-metrics restarts (a test enforces that).
+
+| Metric | Type | Meaning |
+|---|---|---|
+| `increadible_tool_calls_total{tool}` | counter | tool calls by tool |
+| `increadible_tool_errors_total{tool}` | counter | tool calls that returned an error |
+| `increadible_tool_call_duration_seconds{tool}` | histogram | time to handle a tool call, 1 ms to 10 s buckets; includes calls that failed. One series set per real tool (13), never per request input |
+| `increadible_rpc_errors_total` | counter | JSON-RPC protocol errors |
+| `increadible_http_rejected_total{reason}` | counter | requests refused before the handler: `unauthorized` (401), `rate_limited` (429), `payload_too_large` (413) |
+| `increadible_uptime_seconds` | gauge | seconds since start |
+
+| Alert | Fires when | Status |
+|---|---|---|
+| `IncreadibleDown` | the target is not up for 2 minutes | critical |
+| `IncreadibleToolErrorRate` | more than 5% of tool calls return errors for 10 minutes | warning |
+| `IncreadibleProtocolErrors` | more than 0.1 protocol errors per second for 10 minutes | warning |
+| `IncreadibleSlowToolCalls` | the 95th percentile tool call latency is above 1 s for 10 minutes | warning, **provisional threshold**: no baseline exists (tool calls take well under a millisecond today); revisit with the load test and when the gateway makes real external calls |
+| `IncreadiblePodRestarting` | more than 2 container restarts in 30 minutes | warning |
+
+**What is verified.** `scripts/check-prometheus.sh` extracts the rules from the `PrometheusRule` and runs `promtool check rules` and
+`promtool test rules` against `monitoring/alerts.test.yaml`: every alert has a case that must fire and one that must stay quiet
+(for example 6% errors fires and 4% does not), and each of seven deliberate breakages of the rules is caught. CI runs it as the
+`prometheus` job. `scripts/install-promtool.sh <dir>` builds the promtool for it from one pinned Prometheus release (module
+`v0.315.0`), checked against the Go checksum database and an `h1:` hash pinned in the script; it needs Go and `jq` (both on the
+GitHub runner image) and takes about three minutes on four cores.
+
+**What is not.** The rules have not run against a live Prometheus (none is available here), the `ServiceMonitor` has not scraped
+anything, and there is no dashboard and no cost metric.
 
 ## Rollback
 

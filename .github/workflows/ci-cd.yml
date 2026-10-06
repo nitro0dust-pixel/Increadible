@@ -79,6 +79,22 @@ jobs:
           path: ./
           extra_args: --only-verified
 
+  prometheus:
+    name: Prometheus alert rules (promtool)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      # Go and jq come with the runner image. The build is pinned to one Prometheus release and its checksum.
+      - name: Build promtool from the pinned, checksum-verified Prometheus release
+        run: bash scripts/install-promtool.sh "$RUNNER_TEMP/promtool-bin"
+      - name: Check the alert rules and run their unit tests
+        run: PROMTOOL="$RUNNER_TEMP/promtool-bin/promtool" bash scripts/check-prometheus.sh
+
   docker:
     name: Build and probe the Docker image
     runs-on: ubuntu-latest

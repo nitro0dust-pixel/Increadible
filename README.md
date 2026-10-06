@@ -71,7 +71,8 @@ refuses to start otherwise, unless `ALLOW_UNAUTHENTICATED=1` says something in f
 `HTTP_HEADERS_TIMEOUT_MS`, `HTTP_REQUEST_TIMEOUT_MS`, `RATE_LIMIT_PER_MINUTE` (off by default), `SHUTDOWN_DRAIN_MS` and
 `SHUTDOWN_TIMEOUT_MS`; see "HTTP hardening" in `DEPLOYMENT.md`.
 Emitted metrics: `increadible_uptime_seconds`, `increadible_tool_calls_total{tool}`,
-`increadible_tool_errors_total{tool}`, `increadible_rpc_errors_total`, `increadible_http_rejected_total{reason}`.
+`increadible_tool_errors_total{tool}`, `increadible_tool_call_duration_seconds{tool}` (histogram),
+`increadible_rpc_errors_total`, `increadible_http_rejected_total{reason}`.
 
 ## Tools (13)
 

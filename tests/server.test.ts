@@ -532,3 +532,97 @@ describe("integer settings from the environment", () => {
     }
   });
 });
+
+describe("latency histogram", () => {
+  const fresh = (): ServerModule => {
+    let isolated!: ServerModule;
+    jest.isolateModules(() => {
+      isolated = require("../src/server");
+    });
+    return isolated;
+  };
+  const bucket = (text: string, tool: string, le: string): number => {
+    const line = text.split("\n").find((l) => l.startsWith(`increadible_tool_call_duration_seconds_bucket{tool="${tool}",le="${le}"}`));
+    if (!line) throw new Error(`no bucket le=${le} for ${tool}`);
+    return Number(line.split(" ")[1]);
+  };
+
+  it("records every tool call as a valid, cumulative Prometheus histogram", async () => {
+    const s = fresh();
+    for (let id = 1; id <= 3; id++) {
+      await s.handleMessage({ jsonrpc: "2.0", id, method: "tools/call", params: { name: "get_api_stats", arguments: {} } });
+    }
+    const text = s.renderPrometheusMetrics();
+    const counts = s.LATENCY_BUCKETS_SECONDS.map((le) => bucket(text, "get_api_stats", String(le)));
+    expect(counts).toEqual([...counts].sort((a, b) => a - b)); // cumulative: never decreasing
+    expect(bucket(text, "get_api_stats", "+Inf")).toBe(3);
+    expect(text).toContain('increadible_tool_call_duration_seconds_count{tool="get_api_stats"} 3');
+    const sum = Number(/increadible_tool_call_duration_seconds_sum\{tool="get_api_stats"\} (\S+)/.exec(text)![1]);
+    expect(sum).toBeGreaterThan(0);
+    expect(sum).toBeLessThan(5); // three in-memory calls
+    for (const line of text.split("\n").filter(Boolean)) {
+      expect(line).toMatch(/^(# (HELP|TYPE) [a-z_]+ .+|[a-z_]+(\{[^}]*\})? [0-9.e+-]+)$/);
+    }
+  });
+
+  it("puts each observation in the right bucket, including the boundaries and anything slower than the last", () => {
+    const s = fresh();
+    s.observeToolLatency("t", 0.0005); // below the first bound
+    s.observeToolLatency("t", 0.005); // exactly on a bound: counts in that bucket (le is "less than or equal")
+    s.observeToolLatency("t", 0.3);
+    s.observeToolLatency("t", 11); // slower than the last bucket: only +Inf
+    const text = s.renderPrometheusMetrics();
+    expect(bucket(text, "t", "0.001")).toBe(1);
+    expect(bucket(text, "t", "0.005")).toBe(2);
+    expect(bucket(text, "t", "0.25")).toBe(2);
+    expect(bucket(text, "t", "0.5")).toBe(3);
+    expect(bucket(text, "t", "10")).toBe(3);
+    expect(bucket(text, "t", "+Inf")).toBe(4);
+    expect(text).toMatch(/_sum\{tool="t"\} 11\.3055/);
+  });
+
+  it("also times a call that fails, and never creates a series for an unknown tool name", async () => {
+    const gateway = "../features/09-api-gateway/src/mcp-server";
+    await jest.isolateModulesAsync(async () => {
+      jest.doMock(gateway, () => ({
+        ...jest.requireActual(gateway),
+        processToolCall: async () => {
+          throw new Error("boom");
+        },
+      }));
+      try {
+        const s: ServerModule = require("../src/server");
+        await s.handleMessage({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "get_api_stats", arguments: {} } });
+        await s.handleMessage({ jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "no_such_tool_" + Math.random(), arguments: {} } });
+        expect(Object.keys(s.metrics.tool_latency)).toEqual(["get_api_stats"]); // labels stay bounded by the 13 real tools
+        expect(s.renderPrometheusMetrics()).toContain('increadible_tool_call_duration_seconds_count{tool="get_api_stats"} 1');
+      } finally {
+        jest.dontMock(gateway);
+      }
+    });
+  });
+});
+
+describe("rejected-request counter", () => {
+  it("counts a request refused for a missing or wrong token", async () => {
+    const before = server.metrics.http_rejected.unauthorized ?? 0;
+    const srv = index.createHttpServer("s3cret");
+    const port = await new Promise<number>((resolve) => srv.listen(0, "127.0.0.1", () => resolve((srv.address() as net.AddressInfo).port)));
+    const status = (headers: Record<string, string>) =>
+      new Promise<number>((resolve, reject) => {
+        http.get({ host: "127.0.0.1", port, path: "/metrics", headers, agent: false }, (res) => {
+          res.resume();
+          res.on("end", () => resolve(res.statusCode!));
+        }).on("error", reject);
+      });
+    try {
+      expect(await status({})).toBe(401);
+      expect(await status({ Authorization: "Bearer wrong" })).toBe(401);
+      expect(await status({ Authorization: "Bearer s3cret" })).toBe(200); // a good request is not counted
+      expect((server.metrics.http_rejected.unauthorized ?? 0) - before).toBe(2);
+      expect(server.renderPrometheusMetrics()).toMatch(/increadible_http_rejected_total\{reason="unauthorized"\} [1-9]/);
+    } finally {
+      srv.close();
+    }
+  });
+});

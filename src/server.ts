@@ -44,13 +44,32 @@ const modules: ToolModule[] = [
 const toolOwners = new Map<string, ToolModule>();
 for (const m of modules) for (const t of m.tools) toolOwners.set(t.name, m);
 
+/** Upper bounds, in seconds, of the tool-call latency buckets: 1 ms to 10 s, from in-memory tools up to slow external calls. */
+export const LATENCY_BUCKETS_SECONDS = [0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10];
+
+interface Histogram {
+  /** counts[i]: observations in (bucket[i-1], bucket[i]]; slower ones are only in `count` (the +Inf bucket). */
+  counts: number[];
+  sum: number;
+  count: number;
+}
+
 export const metrics = {
   started_at: Date.now(),
   tool_calls: {} as Record<string, number>,
   tool_errors: {} as Record<string, number>,
+  tool_latency: {} as Record<string, Histogram>,
   rpc_errors: 0,
   http_rejected: {} as Record<string, number>,
 };
+
+export function observeToolLatency(tool: string, seconds: number): void {
+  const h = (metrics.tool_latency[tool] ??= { counts: LATENCY_BUCKETS_SECONDS.map(() => 0), sum: 0, count: 0 });
+  const bucket = LATENCY_BUCKETS_SECONDS.findIndex((upper) => seconds <= upper);
+  if (bucket >= 0) h.counts[bucket]++;
+  h.sum += seconds;
+  h.count++;
+}
 
 export interface JsonRpcRequest {
   jsonrpc?: string;
@@ -114,11 +133,14 @@ export async function handleMessage(msg: JsonRpcRequest): Promise<JsonRpcRespons
       if (!owner) return fail(id, -32602, `Unknown tool: ${String(name)}`);
       metrics.tool_calls[name] = (metrics.tool_calls[name] || 0) + 1;
       let text: string;
+      const started = performance.now();
       try {
         text = await owner.call(name, msg.params?.arguments ?? {});
       } catch (error: any) {
         // One tool that throws must not end the process (an unhandled rejection does in Node 15+): report it as a tool error.
         text = JSON.stringify({ error: String(error?.message ?? error) });
+      } finally {
+        observeToolLatency(name, (performance.now() - started) / 1000);
       }
       let isError = false;
       try {
@@ -147,6 +169,20 @@ export function renderPrometheusMetrics(): string {
     "# HELP increadible_tool_errors_total Tool calls that returned an error, by tool name",
     "# TYPE increadible_tool_errors_total counter",
     ...Object.entries(metrics.tool_errors).map(([t, n]) => `increadible_tool_errors_total{tool="${t}"} ${n}`),
+    "# HELP increadible_tool_call_duration_seconds Time to handle a tool call, by tool (includes calls that failed)",
+    "# TYPE increadible_tool_call_duration_seconds histogram",
+    ...Object.entries(metrics.tool_latency).flatMap(([tool, h]) => {
+      let cumulative = 0;
+      return [
+        ...LATENCY_BUCKETS_SECONDS.map((upper, i) => {
+          cumulative += h.counts[i];
+          return `increadible_tool_call_duration_seconds_bucket{tool="${tool}",le="${upper}"} ${cumulative}`;
+        }),
+        `increadible_tool_call_duration_seconds_bucket{tool="${tool}",le="+Inf"} ${h.count}`,
+        `increadible_tool_call_duration_seconds_sum{tool="${tool}"} ${h.sum}`,
+        `increadible_tool_call_duration_seconds_count{tool="${tool}"} ${h.count}`,
+      ];
+    }),
     "# HELP increadible_rpc_errors_total JSON-RPC protocol errors",
     "# TYPE increadible_rpc_errors_total counter",
     `increadible_rpc_errors_total ${metrics.rpc_errors}`,
