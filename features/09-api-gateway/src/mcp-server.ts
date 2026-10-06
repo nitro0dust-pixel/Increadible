@@ -377,6 +377,10 @@ export async function processToolCall(
 ): Promise<string> {
   switch (toolName) {
     case "discover_apis":
+      // A non-string query used to throw out of processToolCall and take the whole server down.
+      if (toolInput.query != null && typeof toolInput.query !== "string") {
+        return JSON.stringify({ error: "query must be a string" });
+      }
       return JSON.stringify(apiGateway.discoverAPIs(toolInput.query));
 
     case "call_api":

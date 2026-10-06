@@ -1,6 +1,7 @@
-import { describe, it, expect, beforeAll, afterAll } from "@jest/globals";
+import { describe, it, expect, beforeAll, afterAll, afterEach } from "@jest/globals";
 import * as fs from "fs";
 import * as http from "http";
+import * as net from "net";
 import * as os from "os";
 import * as path from "path";
 import { PassThrough } from "stream";
@@ -208,6 +209,326 @@ describe("HTTP transport", () => {
       expect(res.status).toBe(413);
     } finally {
       srv.close();
+    }
+  });
+});
+
+describe("a failing tool or handler must not end the process", () => {
+  it("discover_apis rejects a non-string query as a tool error (it used to throw and kill the server)", async () => {
+    for (const query of [123, {}, [], true]) {
+      const reply: any = await call("discover_apis", { query });
+      expect(reply.result.isError).toBe(true);
+      expect(JSON.parse(reply.result.content[0].text).error).toMatch(/query must be a string/);
+    }
+    expect(((await call("discover_apis", {})) as any).result.isError).toBe(false);
+    expect(((await call("discover_apis", { query: null })) as any).result.isError).toBe(false);
+  });
+
+  it("a tool module that throws is reported as a tool error, not thrown from handleMessage", async () => {
+    const gateway = "../features/09-api-gateway/src/mcp-server";
+    await jest.isolateModulesAsync(async () => {
+      jest.doMock(gateway, () => ({
+        ...jest.requireActual(gateway),
+        processToolCall: async () => {
+          throw new Error("boom");
+        },
+      }));
+      try {
+        const isolated: ServerModule = require("../src/server");
+        const reply: any = await isolated.handleMessage({ jsonrpc: "2.0", id: 7, method: "tools/call", params: { name: "get_api_stats", arguments: {} } });
+        expect(reply.id).toBe(7);
+        expect(reply.result.isError).toBe(true);
+        expect(JSON.parse(reply.result.content[0].text).error).toBe("boom");
+        expect(isolated.metrics.tool_errors.get_api_stats).toBe(1);
+      } finally {
+        jest.dontMock(gateway);
+      }
+    });
+  });
+
+  it("stdio: a message that makes the handler throw gets an Internal error reply and the session carries on", async () => {
+    const spy = jest.spyOn(server, "handleMessage").mockImplementationOnce(async () => {
+      throw new Error("boom");
+    });
+    try {
+      const input = new PassThrough();
+      const output = new PassThrough();
+      const chunks: string[] = [];
+      output.on("data", (c) => chunks.push(c.toString()));
+      const done = index.serveStdio(input, output);
+      input.write(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "ping" }) + "\n");
+      input.write(JSON.stringify({ jsonrpc: "2.0", id: 2, method: "ping" }) + "\n");
+      input.end();
+      await done;
+      const replies = chunks.join("").split("\n").filter(Boolean).map((l) => JSON.parse(l));
+      expect(replies).toHaveLength(2);
+      expect(replies[0]).toMatchObject({ id: 1, error: { code: -32603, message: "Internal error" } });
+      expect(replies[1]).toMatchObject({ id: 2, result: {} });
+    } finally {
+      spy.mockRestore();
+    }
+  });
+});
+
+describe("HTTP hardening", () => {
+  const listen = (srv: http.Server) =>
+    new Promise<number>((resolve) => srv.listen(0, "127.0.0.1", () => resolve((srv.address() as net.AddressInfo).port)));
+
+  const send = (port: number, method: string, url: string, body?: string, headers: Record<string, string> = {}) =>
+    new Promise<{ status: number; body: string; headers: http.IncomingHttpHeaders }>((resolve, reject) => {
+      const req = http.request({ host: "127.0.0.1", port, method, path: url, headers, agent: false }, (res) => {
+        let data = "";
+        res.on("data", (c) => (data += c));
+        res.on("end", () => resolve({ status: res.statusCode!, body: data, headers: res.headers }));
+      });
+      req.on("error", reject);
+      req.end(body);
+    });
+  const ping = JSON.stringify({ jsonrpc: "2.0", id: 1, method: "ping" });
+
+  it("an unexpected handler failure over HTTP is a 500 JSON-RPC error and the server keeps serving", async () => {
+    const spy = jest.spyOn(server, "handleMessage").mockImplementationOnce(async () => {
+      throw new Error("boom");
+    });
+    const srv = index.createHttpServer();
+    const port = await listen(srv);
+    try {
+      const failed = await send(port, "POST", "/mcp", ping);
+      expect(failed.status).toBe(500);
+      expect(JSON.parse(failed.body)).toMatchObject({ id: 1, error: { code: -32603, message: "Internal error" } });
+      expect(failed.body).not.toContain("boom"); // the cause is logged, not returned
+      expect((await send(port, "POST", "/mcp", ping)).status).toBe(200);
+    } finally {
+      spy.mockRestore();
+      srv.close();
+    }
+  });
+
+  it("answers 503 on /ready while draining and keeps /health and /mcp working", async () => {
+    const srv = index.createHttpServer();
+    const port = await listen(srv);
+    try {
+      expect((await send(port, "GET", "/ready")).status).toBe(200);
+      srv.setDraining(true);
+      const ready = await send(port, "GET", "/ready");
+      expect(ready.status).toBe(503);
+      expect(JSON.parse(ready.body)).toEqual({ status: "draining" });
+      expect((await send(port, "GET", "/health")).status).toBe(200);
+      expect((await send(port, "POST", "/mcp", ping)).status).toBe(200);
+      srv.setDraining(false);
+      expect((await send(port, "GET", "/ready")).status).toBe(200);
+    } finally {
+      srv.close();
+    }
+  });
+
+  it("closes a connection that never finishes its headers or its body (explicit timeouts, not Node's 60 s and 300 s)", async () => {
+    const srv = index.createHttpServer(undefined, { headersTimeoutMs: 300, requestTimeoutMs: 600 });
+    const port = await listen(srv);
+    const closedAfter = (payload: string) =>
+      new Promise<number>((resolve) => {
+        const t0 = Date.now();
+        const s = net.connect(port, "127.0.0.1");
+        s.on("error", () => undefined);
+        s.on("close", () => resolve(Date.now() - t0));
+        s.resume(); // read the 408: a socket with unread data never emits 'close'
+        s.write(payload);
+        setTimeout(() => s.destroy(), 4000).unref(); // a regression fails the assertion below instead of hanging
+      });
+    try {
+      expect(await closedAfter("POST /mcp HTTP/1.1\r\nHost: x\r\nContent-Le")).toBeLessThan(2500);
+      expect(await closedAfter('POST /mcp HTTP/1.1\r\nHost: x\r\nContent-Length: 500\r\n\r\n{"a":')).toBeLessThan(2500);
+      expect((await send(port, "POST", "/mcp", ping)).status).toBe(200); // a normal request is unaffected
+    } finally {
+      srv.close();
+    }
+  }, 10_000);
+
+  it("limits POST /mcp when RATE_LIMIT_PER_MINUTE is set, tells the client when to retry, and counts it", async () => {
+    const srv = index.createHttpServer(undefined, { rateLimitPerMinute: 2 });
+    const port = await listen(srv);
+    try {
+      expect((await send(port, "POST", "/mcp", ping)).status).toBe(200);
+      expect((await send(port, "POST", "/mcp", ping)).status).toBe(200);
+      const limited = await send(port, "POST", "/mcp", ping);
+      expect(limited.status).toBe(429);
+      expect(Number(limited.headers["retry-after"])).toBeGreaterThanOrEqual(1);
+      expect((await send(port, "GET", "/health")).status).toBe(200); // probes are never limited
+      expect((await send(port, "GET", "/metrics")).body).toMatch(/increadible_http_rejected_total\{reason="rate_limited"\} [1-9]/);
+    } finally {
+      srv.close();
+    }
+  });
+
+  it("does not limit anything by default", async () => {
+    const srv = index.createHttpServer();
+    const port = await listen(srv);
+    try {
+      for (let i = 0; i < 25; i++) expect((await send(port, "POST", "/mcp", ping)).status).toBe(200);
+    } finally {
+      srv.close();
+    }
+  });
+
+  it("counts an oversized body once, not once per chunk", async () => {
+    const before = server.metrics.http_rejected.payload_too_large ?? 0;
+    const srv = index.createHttpServer();
+    const port = await listen(srv);
+    try {
+      await send(port, "POST", "/mcp", "x".repeat(1_500_000)).catch(() => undefined);
+      await new Promise((r) => setTimeout(r, 100));
+      expect((server.metrics.http_rejected.payload_too_large ?? 0) - before).toBe(1);
+    } finally {
+      srv.close();
+    }
+  });
+});
+
+describe("rate limiter", () => {
+  it("allows a burst, refuses with a retry delay, and refills over time", () => {
+    let now = 0;
+    const take = index.createRateLimiter(60, () => now); // 60 per minute = 1 per second
+    for (let i = 0; i < 60; i++) expect(take()).toBe(0);
+    expect(take()).toBe(1);
+    now += 999;
+    expect(take()).toBeGreaterThanOrEqual(1);
+    now += 1;
+    expect(take()).toBe(0);
+    now += 10 * 60_000;
+    for (let i = 0; i < 60; i++) expect(take()).toBe(0); // refilled, but never above the burst size
+    expect(take()).toBeGreaterThanOrEqual(1);
+  });
+
+  it("is off for 0, negative and NaN", () => {
+    for (const off of [0, -5, NaN]) {
+      const take = index.createRateLimiter(off);
+      for (let i = 0; i < 1000; i++) expect(take()).toBe(0);
+    }
+  });
+});
+
+describe("graceful shutdown", () => {
+  const listen = (srv: http.Server) =>
+    new Promise<number>((resolve) => srv.listen(0, "127.0.0.1", () => resolve((srv.address() as net.AddressInfo).port)));
+  const get = (port: number, url: string) =>
+    new Promise<number>((resolve, reject) => {
+      http.get({ host: "127.0.0.1", port, path: url, agent: false }, (res) => {
+        res.resume();
+        res.on("end", () => resolve(res.statusCode!));
+      }).on("error", reject);
+    });
+  const exited = () => {
+    let resolve!: (code: number) => void;
+    const promise = new Promise<number>((r) => (resolve = r));
+    return { promise, exit: jest.fn((code: number) => resolve(code)) };
+  };
+
+  it("exits 0 promptly when nothing is in flight, and ignores a second signal", async () => {
+    const srv = index.createHttpServer();
+    await listen(srv);
+    const done = exited();
+    const shutdown = index.installShutdown(srv, { drainMs: 0, timeoutMs: 2000, exit: done.exit, log: () => undefined });
+    shutdown("SIGTERM");
+    shutdown("SIGINT");
+    expect(await done.promise).toBe(0);
+    await new Promise((r) => setTimeout(r, 50));
+    expect(done.exit).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps serving while draining (with /ready 503) and only then closes", async () => {
+    const srv = index.createHttpServer();
+    const port = await listen(srv);
+    const done = exited();
+    const t0 = Date.now();
+    index.installShutdown(srv, { drainMs: 400, timeoutMs: 2000, exit: done.exit, log: () => undefined })("SIGTERM");
+    expect(await get(port, "/ready")).toBe(503);
+    expect(await get(port, "/health")).toBe(200);
+    expect(done.exit).not.toHaveBeenCalled();
+    expect(await done.promise).toBe(0);
+    expect(Date.now() - t0).toBeGreaterThanOrEqual(350);
+  });
+
+  it("cuts a stalled request at the deadline and exits 1 (it used to wait for the orchestrator's SIGKILL)", async () => {
+    const srv = index.createHttpServer(); // default 10 s / 30 s receive timeouts: far beyond the deadline below
+    const port = await listen(srv);
+    const socket = net.connect(port, "127.0.0.1");
+    socket.on("error", () => undefined);
+    const closed = new Promise<void>((resolve) => socket.on("close", () => resolve()));
+    socket.write('POST /mcp HTTP/1.1\r\nHost: x\r\nContent-Length: 500\r\n\r\n{"a":');
+    await new Promise((r) => setTimeout(r, 100));
+    const done = exited();
+    const logs: string[] = [];
+    const t0 = Date.now();
+    index.installShutdown(srv, { drainMs: 0, timeoutMs: 300, exit: done.exit, log: (m) => logs.push(m) })("SIGTERM");
+    expect(await done.promise).toBe(1);
+    expect(Date.now() - t0).toBeLessThan(2000);
+    await closed;
+    expect(logs.join("\n")).toMatch(/deadline passed/);
+  }, 8000);
+});
+
+describe("refusing to serve an open API beyond this machine", () => {
+  const open = /Refusing to listen on/;
+  it.each([
+    ["0.0.0.0", undefined],
+    ["0.0.0.0", ""],
+    ["0.0.0.0", "   "],
+    ["::", undefined],
+    ["10.0.0.5", undefined],
+    ["127.evil.example", undefined], // looks loopback-ish, is not
+  ])("refuses HOST=%s with AUTH_TOKEN=%j", (host, token) => {
+    expect(index.exposureProblem(host, token as string | undefined, undefined)).toMatch(open);
+  });
+
+  it.each([
+    ["0.0.0.0", "a-token", undefined],
+    ["127.0.0.1", undefined, undefined],
+    ["127.1.2.3", undefined, undefined],
+    ["localhost", undefined, undefined],
+    ["::1", undefined, undefined],
+    ["[::1]", undefined, undefined],
+    ["0.0.0.0", undefined, "1"],
+    ["0.0.0.0", undefined, "true"],
+  ])("allows HOST=%s with AUTH_TOKEN=%j ALLOW_UNAUTHENTICATED=%j", (host, token, allow) => {
+    expect(index.exposureProblem(host, token as string | undefined, allow as string | undefined)).toBeNull();
+  });
+
+  it("does not treat ALLOW_UNAUTHENTICATED=0 or an empty value as consent", () => {
+    expect(index.exposureProblem("0.0.0.0", undefined, "0")).toMatch(open);
+    expect(index.exposureProblem("0.0.0.0", undefined, "")).toMatch(open);
+  });
+});
+
+describe("integer settings from the environment", () => {
+  const NAME = "INCREADIBLE_TEST_INT";
+  afterEach(() => {
+    delete process.env[NAME];
+  });
+
+  it("uses a non-negative integer, including 0 (which switches a timeout or the limiter off)", () => {
+    process.env[NAME] = "42";
+    expect(index.envInt(NAME, 7)).toBe(42);
+    process.env[NAME] = "0";
+    expect(index.envInt(NAME, 7)).toBe(0);
+  });
+
+  it("falls back for unset or blank values without complaining", () => {
+    const err = jest.spyOn(console, "error");
+    err.mockClear();
+    delete process.env[NAME];
+    expect(index.envInt(NAME, 7)).toBe(7);
+    process.env[NAME] = "   ";
+    expect(index.envInt(NAME, 7)).toBe(7);
+    expect(err).not.toHaveBeenCalled();
+  });
+
+  it("falls back and says so for negative, fractional and non-numeric values", () => {
+    const err = jest.spyOn(console, "error");
+    for (const bad of ["-1", "1.5", "abc", "10s", "NaN"]) {
+      err.mockClear();
+      process.env[NAME] = bad;
+      expect(index.envInt(NAME, 7)).toBe(7);
+      expect(err).toHaveBeenCalledWith(expect.stringContaining(`Ignoring ${NAME}="${bad}"`));
     }
   });
 });

@@ -62,13 +62,16 @@ PORT=3000 HOST=0.0.0.0 AUTH_TOKEN=change-me node dist/src/index.js
 
 | Endpoint | Auth | Purpose |
 |----------|------|---------|
-| `GET /health`, `GET /ready` | none | liveness / readiness |
+| `GET /health`, `GET /ready` | none | liveness / readiness (`/ready` answers 503 while the server drains for shutdown) |
 | `GET /metrics` | bearer token if `AUTH_TOKEN` set | Prometheus text format |
 | `POST /mcp` | bearer token if `AUTH_TOKEN` set | one JSON-RPC message per request (stateless) |
 
-`HOST` defaults to `127.0.0.1`. If you bind to `0.0.0.0`, set `AUTH_TOKEN`.
+`HOST` defaults to `127.0.0.1`. If you bind to `0.0.0.0` (or any non-loopback address) you must set `AUTH_TOKEN`: the server
+refuses to start otherwise, unless `ALLOW_UNAUTHENTICATED=1` says something in front authenticates. Other HTTP settings:
+`HTTP_HEADERS_TIMEOUT_MS`, `HTTP_REQUEST_TIMEOUT_MS`, `RATE_LIMIT_PER_MINUTE` (off by default), `SHUTDOWN_DRAIN_MS` and
+`SHUTDOWN_TIMEOUT_MS`; see "HTTP hardening" in `DEPLOYMENT.md`.
 Emitted metrics: `increadible_uptime_seconds`, `increadible_tool_calls_total{tool}`,
-`increadible_tool_errors_total{tool}`, `increadible_rpc_errors_total`.
+`increadible_tool_errors_total{tool}`, `increadible_rpc_errors_total`, `increadible_http_rejected_total{reason}`.
 
 ## Tools (13)
 

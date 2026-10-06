@@ -26,7 +26,7 @@ curl localhost:3000/health
 Config via env: `PORT` (3000), `HOST` (0.0.0.0 in the image, 127.0.0.1 otherwise), `AUTH_TOKEN`,
 `RULES_FILE` (/data/rules.yaml), `EXPERIMENTS_FILE` (/data/experiments.yaml), `AB_DATA_FILE`
 (/data/ab-data.jsonl), and optionally `AB_FSYNC` (`1` flushes every A/B append to disk) and `AB_DATA_WARN_BYTES`
-(growth warning, default 104857600). Mount a volume at `/data` to keep edited rules and A/B data across container restarts
+(growth warning, default 104857600). The HTTP hardening settings are in "HTTP hardening" below. Mount a volume at `/data` to keep edited rules and A/B data across container restarts
 (`docker run -v increadible-data:/data ...`). Without a volume, A/B data is lost when the container is removed.
 
 CI (`.github/workflows/ci-cd.yml`) builds the image, starts it, probes `/health`, `/metrics` (must be 401
@@ -39,6 +39,36 @@ After each push to `main`, a second job (`verify-published-image`) logs in to GH
 the same probe (`scripts/probe-image.sh`) against the pulled copy: non-root user, command, architecture, HTTP and
 auth behavior, A/B data surviving a container restart on a volume, and Docker's `HEALTHCHECK` reporting healthy.
 You can run the probe yourself against any image with `bash scripts/probe-image.sh <image-ref>` (needs Docker, curl and jq).
+
+### HTTP hardening
+
+What the HTTP server does when things go wrong, and the settings that control it. Defaults are chosen so that nothing
+changes for a correctly configured deployment, except where a table row says otherwise.
+
+| Setting | Default | Effect |
+|---|---|---|
+| `AUTH_TOKEN` | none | Bearer token for `/mcp` and `/metrics` (`/health` and `/ready` stay open). **A non-loopback `HOST` (the image uses `0.0.0.0`) without a token, or with an empty or whitespace-only one, now makes the server refuse to start** (exit 1, `Refusing to listen ...`). Before, an empty token silently turned authentication off |
+| `ALLOW_UNAUTHENTICATED` | unset | `1`/`true`/`yes` lets a non-loopback `HOST` start without a token, for a deployment where something in front authenticates. A warning is logged. Anything else (including `0`) is not consent |
+| `HTTP_HEADERS_TIMEOUT_MS` | `10000` | Time a client gets to send complete request headers (Node's own default is 60000). A slower client gets a 408 and is closed |
+| `HTTP_REQUEST_TIMEOUT_MS` | `30000` | Time a client gets to send the whole request (Node's default is 300000). It does not limit how long a tool call may take. `0` disables a timeout |
+| `RATE_LIMIT_PER_MINUTE` | `0` (off) | Global token bucket on `POST /mcp`: a burst of this many requests, refilled evenly over a minute. Over the limit: `429` with `Retry-After`, counted in `increadible_http_rejected_total{reason="rate_limited"}`. Global because the bearer token is shared, so there is no per-client key. `/health`, `/ready` and `/metrics` are never limited. **Off by default: no load test has measured a safe number yet** |
+| `SHUTDOWN_DRAIN_MS` | `0` | On SIGTERM/SIGINT, keep serving this long with `/ready` answering `503` before closing, so a load balancer can stop sending traffic. `/health` stays `200` |
+| `SHUTDOWN_TIMEOUT_MS` | `10000` | After closing starts, how long in-flight requests get. Then the remaining connections are cut and the process exits 1 (a clean shutdown exits 0). Without it, one stalled client held the process until the orchestrator's SIGKILL, which leaves the A/B data file lock behind |
+
+The Kubernetes manifests set `SHUTDOWN_DRAIN_MS=5000` and `SHUTDOWN_TIMEOUT_MS=10000` with `terminationGracePeriodSeconds: 30`
+(a test keeps drain plus timeout below the grace period).
+
+A tool call that throws is now returned as a tool error (`isError: true`), and a failure outside the tools becomes a
+JSON-RPC `-32603 Internal error` (HTTP `500`, cause logged to stderr only). Before, `discover_apis` with a non-string
+`query` ended the whole process, in HTTP and stdio mode alike.
+
+Verification and limits:
+- Verified locally and in CI: unit tests for each behaviour above (each fails when its fix is removed), `scripts/smoke.sh` with
+  real processes (bad tool input over HTTP and stdio, refusal to start open, `/ready` 503 while draining, a stalled client cut at the deadline),
+  and `scripts/probe-image.sh` against the real image (bad tool input, refusal without `AUTH_TOKEN`, `docker stop` exits 0 and removes the lock).
+- **NOT VERIFIED:** behaviour in a real cluster (none is available here): whether five seconds covers endpoint-removal propagation for your
+  load balancer, and the keep-alive timeout against a load balancer's idle timeout (Node's default 5 s is unchanged).
+- There is no TLS, per-client limit, request logging or latency metric here; latency metrics are the next roadmap step.
 
 ### The A/B data file: one writer, flushing, growth
 
