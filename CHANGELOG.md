@@ -10,6 +10,9 @@ Entries marked **behaviour change** can affect an existing deployment.
 ## [Unreleased]
 
 ### Added
+- `startupProbe` in both Kubernetes manifests (`/health`, every 5 s, 36 failures = 180 s), because startup replays the whole A/B data file before the port opens and a full 1Gi volume takes
+  about 23 s at the 0.5 CPU limit, against a roughly 35 s liveness window; a config test ties the window to the volume size and the CPU limit. Replay time was measured at one core and at about
+  half a core (`PERFORMANCE.md`). **Behaviour change:** liveness and readiness probes now start only after the startup probe succeeds. Not applied to a cluster. ([#16](https://github.com/nitro0dust-pixel/Increadible/pull/16))
 - Regression checks for the A/B memory fix: a golden-master test (120 datasets whose answers were produced by the previous implementation, replayed at several read
   sizes), `scripts/make-ab-data.js` (writes a large data file in seconds), a `[memory]` section in `scripts/smoke.sh` (400 000 measurements replayed under a 48 MiB
   heap, which the previous code could not do even with 96 MiB) and a `[capacity]` section in `scripts/probe-image.sh` (500 000 measurements inside a 256 MiB container).

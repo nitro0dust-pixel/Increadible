@@ -64,6 +64,21 @@ describe.each(["k8s/staging-deployment.yaml", "k8s/production-deployment.yaml"])
     expect((drainMs + cutMs) / 1000).toBeLessThan(grace);
   });
 
+  it("gives a pod that replays a full volume of A/B data time to start before the liveness probe can restart it", () => {
+    // Startup replays the whole data file before the HTTP port opens. Measured (PERFORMANCE.md, Node 24): 120 bytes per measurement on
+    // disk, and 2.6 microseconds per measurement to replay at about half a core, the CPU limit below. If the limit changes, measure again.
+    const DISK_BYTES_PER_MEASUREMENT = 120;
+    const REPLAY_SECONDS_PER_MEASUREMENT_AT_HALF_CPU = 2.6e-6;
+    expect(container.resources.limits.cpu).toBe("500m");
+    const unit: Record<string, number> = { Mi: 2 ** 20, Gi: 2 ** 30 };
+    const [, size, u] = /^(\d+)(Mi|Gi)$/.exec(kind("PersistentVolumeClaim").spec.resources.requests.storage)!;
+    const replaySeconds = ((Number(size) * unit[u]) / DISK_BYTES_PER_MEASUREMENT) * REPLAY_SECONDS_PER_MEASUREMENT_AT_HALF_CPU;
+    const probe = container.startupProbe;
+    expect(probe?.httpGet).toEqual({ path: "/health", port: "http" });
+    const windowSeconds = probe.periodSeconds * probe.failureThreshold;
+    expect({ windowSeconds, fullVolumeReplaySeconds: Math.round(replaySeconds), fourTimes: windowSeconds >= 4 * replaySeconds }).toMatchObject({ fourTimes: true });
+  });
+
   it("persists A/B data on a PersistentVolumeClaim mounted where AB_DATA_FILE points", () => {
     const dataPath = container.env.find((e: any) => e.name === "AB_DATA_FILE").value;
     const mount = container.volumeMounts.find((m: any) => dataPath.startsWith(m.mountPath + "/"));

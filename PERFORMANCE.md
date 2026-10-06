@@ -10,7 +10,7 @@ measured again: nothing they use changed.
 **Read this first.** One machine, one run of each test, the client on the same host as the server, loopback networking. The numbers show
 *relative* costs (for example fsync on or off), how cost *scales* (with the size of the A/B data), and a baseline for alert thresholds.
 They say nothing about a production node, a network, a load balancer, a network volume or the Kubernetes CPU limit (0.5 CPU in the
-manifests; the server here had up to a full core). Tail latencies (p99, max) varied by 10x to 30x between runs of the same scenario:
+manifests; the server here had up to a full core, except in the startup-replay measurement, where half a core is emulated). Tail latencies (p99, max) varied by 10x to 30x between runs of the same scenario:
 use the medians and the server-side means, which are stable.
 
 | | |
@@ -130,6 +130,20 @@ manifests give the container **256 MiB of memory and 0.5 CPU**; an empty server 
 **Starting on a file nearly the size of the manifests' volume** (`scripts/make-ab-data.js`, then the server started on it, one run): 8 000 000 measurements, a 915.5 MiB file (89% of the 1Gi volume),
 **healthy after 9.0 seconds** with 67 MiB of memory at peak and idle, and the first `get_experiment_results` answered in 5 ms.
 
+**The same file at different CPU shares** (a second measurement session, Node 24, 8 000 000 measurements, a 915.5 MiB file, warm page cache unless stated). Replay is single-threaded. "About half a core" is
+emulated: the server pinned to one core and sharing it with an equal-priority busy loop, which halved a pure CPU-bound loop (15.4 s alone, 30.4 s with the loop), so it reproduces the 0.5 CPU limit's average
+share, not its 100 ms quota throttling:
+
+| Condition | Time to healthy |
+|---|---|
+| Not pinned | 9.0, 9.6, 10.4 s |
+| One full core | 9.8, 10.3, 10.6 s |
+| One full core, page cache dropped first (the 915 MiB read from this virtual disk) | 12.3 s |
+| **About half a core** (the manifests' limit) | **19.7, 20.3, 20.5 s**, about 2.6 microseconds per measurement |
+
+One further run, pinned to one core with nothing competing, took 19.3 s for a reason I could not establish (another process on that core is the likely cause; it did not repeat in six later runs). It is reported
+because it shows the same thing the table does: the time is set by the CPU the process gets.
+
 **What this shows**
 
 | Finding | Evidence |
@@ -139,7 +153,7 @@ manifests give the container **256 MiB of memory and 0.5 CPU**; an empty server 
 | **A query no longer delays the probes** | `/health` p50 about 1 ms during a burst of 8 parallel results calls, at every size (before: 171 ms at 50 000 to 6.3 s at 800 000; the probes' timeout is 1 s) |
 | Peak memory after queries is 86 to 88 MiB at every size | before: 276 MiB at 50 000 and 851 MiB at 800 000. This machine has 16 GB. **In a real container** (CI run 37417671122, GitHub runner, the Node 24 Alpine image, `--memory=256m` with no swap, a 500 000-measurement file written by the image's own node): it started, answered `get_experiment_results` and was not OOM-killed, and the container's cgroup peak (`memory.peak`) was **22 MiB of 256 MiB**. One run, an idle server, and the figure is what the kernel charged to that container: the data file's page cache had been charged to the earlier container that wrote it, so it is mostly anonymous memory. It is lower than the 62 to 67 MiB RSS measured here (a different libc and a different measure: not reconciled). What the check enforces is not the number but that the container starts and answers inside the limit, which the previous code could not |
 | Startup replay is linear and about 1.1 microseconds per measurement | 0.16 s at 50 000, 1.0 s at 800 000, 2.2 s at 2 000 000, 9.0 s at 8 000 000. It runs before the HTTP port opens, so for that long `/health` refuses connections |
-| What limits the data now is the volume, and then startup time | the 1Gi volume holds about 8.9 million measurements (120 bytes each). The manifests' liveness probe (first check after 5 s, every 15 s, three failures) restarts the pod about 35 s after it starts: 9 s for 8 million measurements here is a margin of about 4. **NOT VERIFIED:** the 0.5 CPU limit (the server had up to a full core here) and a network volume, either of which makes replay slower; a `startupProbe` would remove the risk and is a recommendation, not applied |
+| What limits the data now is the volume, and then startup time | the 1Gi volume holds about 8.9 million measurements (120 bytes each). The liveness probe (first check after 5 s, every 15 s, three failures) restarts a pod that has not answered about 35 s after it starts. At a full core a full volume replays in about 11 s, but **at about half a core, the manifests' limit, in about 23 s** (2.6 microseconds per measurement, extrapolated from 20.4 s for 8 million): a margin of 1.5. So the manifests now have a **`startupProbe`** (`/health`, every 5 s, 36 failures: 180 s, 8 times that replay), which holds the liveness and readiness probes back until startup has finished; a config test keeps the window at least 4 times the full-volume replay at the CPU limit, so growing the volume or lowering the CPU means widening it. **NOT VERIFIED:** a network volume, whose reads may be slower than this virtual disk (12.3 s cold, 10.6 s warm), the CPU quota's throttling pattern (the emulation matches its average share), and the probe on a real cluster |
 
 ### What the earlier version of this document got wrong
 
