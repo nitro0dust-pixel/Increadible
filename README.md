@@ -4,8 +4,8 @@ A bundle of cost- and workflow-oriented components for Claude Desktop / MCP clie
 This repository contains **three components we wrote** (Features #7-#9, served by one
 MCP server) and **vendors five third-party projects as git submodules** (Features #1-#6).
 
-> **Status honesty:** nothing in this repo has been deployed to a cluster, load-tested,
-> security-scanned or independently reviewed. Cost and quality figures quoted by upstream
+> **Status honesty:** nothing in this repo has been deployed to a cluster, security-scanned or
+> independently reviewed, and it has been load-tested only on one machine ([PERFORMANCE.md](PERFORMANCE.md)). Cost and quality figures quoted by upstream
 > projects are *not* verified here. See [Limitations](#limitations).
 
 Project status, the plan and open decisions are tracked in [ROADMAP.md](ROADMAP.md); what changed and when in
@@ -126,8 +126,9 @@ First enabled rule whose `match` fits wins; an empty `match` matches everything.
   Unset, data lives in memory only (the Docker image and `k8s/` manifests set it to `/data/ab-data.jsonl`).
   Details: the file is created `0600`; unreadable or torn lines are skipped with a note on stderr; creating an
   experiment with an existing id is rejected; definitions in `EXPERIMENTS_FILE` win over a logged experiment with the
-  same id; the file grows by roughly 150 bytes per measurement and is never compacted (a warning is logged once it passes
-  `AB_DATA_WARN_BYTES`, default 100 MB).
+  same id; the file grows by about 120 bytes per measurement (measured) and is never compacted, and **every measurement is also held in memory
+  (about 500 bytes each)**: a warning is logged once the file passes `AB_DATA_WARN_BYTES` (default 100 MB; the `k8s/` manifests set 16 MiB so
+  the warning arrives before the 256Mi memory limit is a problem). Numbers and limits: [PERFORMANCE.md](PERFORMANCE.md).
   - **One writer:** a second process on the same file is refused at startup, naming the process that holds it
     (`<file>.lock`, refreshed every 3 s, removed on clean exit and on SIGTERM/SIGINT; the lock of a crashed process is
     taken over; every write re-checks it and fails if it was lost). Details and limits: `DEPLOYMENT.md`.
@@ -161,4 +162,4 @@ Layout: `src/` (server + transports), `features/07..09/*/src/` (our modules), `t
 - Only `k8s/staging-deployment.yaml` has been applied to a cluster (a local Docker Desktop one, with a locally built image).
   The production and monitoring manifests have not been applied, and the GHCR pull path has not been exercised on a cluster.
 - Features #1-#6 are not exercised by this repo's tests (see the `todo` list in `tests/e2e-integration.test.ts`).
-- `call_api` is mock-only. A/B persistence needs `AB_DATA_FILE`, is single-writer (enforced with a lock file), flushes to disk only with `AB_FSYNC=1`, and is never compacted.
+- `call_api` is mock-only. A/B persistence needs `AB_DATA_FILE`, is single-writer (enforced with a lock file), flushes to disk only with `AB_FSYNC=1`, is never compacted, and keeps every measurement in memory (memory and query time grow linearly with the data; see [PERFORMANCE.md](PERFORMANCE.md)).

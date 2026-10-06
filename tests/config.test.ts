@@ -29,6 +29,19 @@ describe.each(["k8s/staging-deployment.yaml", "k8s/production-deployment.yaml"])
     expect(env.AUTH_TOKEN.secretKeyRef).toEqual({ name: "increadible-secrets", key: "auth-token" });
   });
 
+  it("warns about A/B data growth while the live data still fits the memory limit (measured in PERFORMANCE.md)", () => {
+    // Measured: 85 MiB idle, about 500 bytes of memory per measurement (434 to 504 measured), 120 bytes per measurement on disk.
+    const BASE_MIB = 85;
+    const MEMORY_BYTES_PER_MEASUREMENT = 500;
+    const DISK_BYTES_PER_MEASUREMENT = 120;
+    const env = Object.fromEntries(container.env.map((e: any) => [e.name, e.value]));
+    const limitMiB = Number(/^(\d+)Mi$/.exec(container.resources.limits.memory)![1]);
+    const warnBytes = Number(env.AB_DATA_WARN_BYTES);
+    expect(warnBytes).toBeGreaterThan(0);
+    const liveMiB = BASE_MIB + ((warnBytes / DISK_BYTES_PER_MEASUREMENT) * MEMORY_BYTES_PER_MEASUREMENT) / 2 ** 20;
+    expect({ liveMiB: Math.round(liveMiB), limitMiB, fits: liveMiB <= 0.6 * limitMiB }).toMatchObject({ fits: true });
+  });
+
   it("gives the kubelet more time to stop the pod than the server needs to drain and cut connections", () => {
     const env = Object.fromEntries(container.env.map((e: any) => [e.name, e.value]));
     const drainMs = Number(env.SHUTDOWN_DRAIN_MS);
@@ -415,6 +428,19 @@ describe("CLAUDE.md and CHANGELOG.md", () => {
     const jobs = Object.keys(yaml.parse(read(".github/workflows/ci-cd.yml")).jobs);
     expect(jobs.length).toBeGreaterThan(0);
     for (const job of jobs) expect({ job, described: claude.includes("`" + job + "`") }).toEqual({ job, described: true });
+  });
+
+  it("PERFORMANCE.md names only commands and files that exist, is linked, and quotes the warning threshold the manifests set", () => {
+    const perf = read("PERFORMANCE.md");
+    const scripts = pkg.scripts as Record<string, string>;
+    for (const m of perf.matchAll(/npm run ([a-z:-]+)/g)) expect({ script: m[1], exists: m[1] in scripts }).toEqual({ script: m[1], exists: true });
+    for (const m of perf.matchAll(/scripts\/[A-Za-z0-9._-]+/g)) expect({ file: m[0], exists: fs.existsSync(path.join(root, m[0])) }).toEqual({ file: m[0], exists: true });
+    for (const doc of ["README.md", "CLAUDE.md"]) expect({ doc, links: read(doc).includes("PERFORMANCE.md") }).toEqual({ doc, links: true });
+    for (const file of ["k8s/staging-deployment.yaml", "k8s/production-deployment.yaml"]) {
+      const container = docs(file).find((d) => d.kind === "Deployment").spec.template.spec.containers[0];
+      const warn = Number(container.env.find((e: any) => e.name === "AB_DATA_WARN_BYTES").value);
+      expect(perf).toContain(`${warn / 2 ** 20} MiB`);
+    }
   });
 
   it("holds no secret-looking value", () => {

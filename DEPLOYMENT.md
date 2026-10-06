@@ -85,10 +85,16 @@ Verification and limits:
   from interleaving. Keep one replica (`strategy: Recreate`, `ReadWriteOnce`), as the manifests do.
 - **Flushing.** Without `AB_FSYNC` an acknowledged write survives a process crash but may be lost in an OS crash or power
   loss. `AB_FSYNC=1` flushes every append before the call returns (and the new file's directory entry), at the cost of one
-  disk flush per write; that cost has **not been measured** here, so it is off by default in the image and the manifests. If a
+  disk flush per write: **measured at about 0.2 ms per write on a local disk**, which cuts the write ceiling from about 22 000 to about
+  3 500 per second (`PERFORMANCE.md`; a network volume will cost more, not measured). It stays off by default in the image and the
+  manifests until the owner decides; the recommendation from the measurements is to turn it on. If a
   flush fails the call returns an error, but the line may already be in the file and then shows up after a restart.
-- **Growth.** The log is never compacted (about 150 bytes per measurement). A warning goes to stderr once it passes
-  `AB_DATA_WARN_BYTES`. Real size control needs a rollup design (keep count, sum and sum of squares per variant and metric
+- **Growth and memory.** The log is never compacted (about 120 bytes per measurement on disk) and **every measurement is also held in
+  memory (about 500 bytes each, on top of about 85 MiB)**, so the 256Mi limit in the manifests is reached near 360 000 measurements, a
+  41 MiB file. A warning goes to stderr once the file passes `AB_DATA_WARN_BYTES` (code default 100 MiB, far too late for that limit;
+  the manifests set 16 MiB, and a test keeps the two consistent). `get_experiment_results` costs time proportional to the number of
+  samples (about 1.2 ms at 10 000, 98 ms at 500 000) and blocks the server while it runs. Size your memory limit from the formula in
+  `PERFORMANCE.md`. Real size control needs a rollup design (keep count, sum and sum of squares per variant and metric
   instead of raw values), which is a data-model change and an open decision in `ROADMAP.md`.
 - `scripts/smoke.sh` checks all of this with real processes (clean exit, second writer refused, SIGTERM, SIGKILL takeover), and
   `scripts/probe-image.sh` checks it in a real container with `AB_FSYNC=1` (hard-killed container, second container refused).

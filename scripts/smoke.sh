@@ -171,4 +171,19 @@ wait_exit 5
 kill "$STALL" 2>/dev/null || true
 [ "$RC" = 1 ] || { echo "a stalled client must be cut at the deadline (exit 1), got $RC" >&2; exit 1; }
 grep -q "deadline passed" "$TMP/srv-$P4.err" || { echo "no deadline message: $(head -3 "$TMP/srv-$P4.err")" >&2; exit 1; }
+echo "[tools] the load test and capacity scripts still run (tiny settings; the numbers themselves are not checked)"
+node scripts/loadtest.js --duration 1 --warmup 0 --concurrency 2 --scenarios routing,ab-file --json "$TMP/load.json" >/dev/null 2>"$TMP/load.err" \
+  || { echo "scripts/loadtest.js failed: $(tail -3 "$TMP/load.err")" >&2; exit 1; }
+node -e '
+  const r = require(process.argv[1]);
+  const bad = r.runs.filter((x) => x.errors > 0 || !(x.rps > 0));
+  if (r.runs.length !== 4 || bad.length) { console.error("load test runs: " + r.runs.length + ", bad: " + JSON.stringify(bad)); process.exit(1); }
+' "$TMP/load.json" || { echo "scripts/loadtest.js produced bad results" >&2; exit 1; }
+node scripts/capacity.js --sizes 2000 --json "$TMP/cap.json" >/dev/null 2>"$TMP/cap.err" \
+  || { echo "scripts/capacity.js failed: $(tail -3 "$TMP/cap.err")" >&2; exit 1; }
+node -e '
+  const r = require(process.argv[1]);
+  const s = r.sizes[0];
+  if (!s || s.measurements !== 2000 || s.restoredMeasurements !== 2000 || s.fillErrors !== 0 || !(s.replaySeconds > 0) || !(s.resultsCallMs > 0)) { console.error(JSON.stringify(s)); process.exit(1); }
+' "$TMP/cap.json" || { echo "scripts/capacity.js produced bad results" >&2; exit 1; }
 echo "smoke: OK"

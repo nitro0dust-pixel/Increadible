@@ -1,7 +1,7 @@
 # Increadible: context for Claude sessions
 
-Read this first, then `ROADMAP.md` (status, plan, open decisions: the source of truth for *what is done*) and
-`DEPLOYMENT.md` (how it runs). This file holds the stable facts and the working rules; it deliberately holds no test
+Read this first, then `ROADMAP.md` (status, plan, open decisions: the source of truth for *what is done*),
+`DEPLOYMENT.md` (how it runs) and `PERFORMANCE.md` (what has been measured, and what the numbers do not say). This file holds the stable facts and the working rules; it deliberately holds no test
 counts, no commit hashes and no status, because those go stale with every PR.
 
 ## What this is
@@ -32,6 +32,7 @@ targets, not results).
 | `npm run smoke` | `scripts/smoke.sh`: real processes over stdio and HTTP (lock, crash safety, refusal to start open, drain, deadline) |
 | `npm run verify` | type-check, lint, tests, build, smoke; reports `NOT AVAILABLE` for Docker and cluster checks it cannot run |
 | `bash scripts/probe-image.sh <image>` | the image the way a deployment runs it: needs Docker, curl, jq. **Only CI has a Docker daemon**; locally it can be tried against a stubbed `docker`, which proves the script's logic but not the image |
+| `npm run loadtest`, `npm run capacity` | per-tool throughput and latency; A/B data size against restart, memory and query cost (not in CI: shared runners are too noisy; `smoke.sh` only checks they still run). Use an idle machine and read `PERFORMANCE.md` first |
 | `PROMTOOL=<bin> bash scripts/check-prometheus.sh` | `promtool check rules` and `test rules` for `k8s/monitoring.yaml` (`scripts/install-promtool.sh <dir>` builds the pinned promtool) |
 
 CI (`.github/workflows/ci-cd.yml`): `quality`, `test`, `security` (audit, SBOM, secret scan), `prometheus` run in parallel;
@@ -58,7 +59,7 @@ Details and defaults: `README.md` and `DEPLOYMENT.md`.
 ## Working rules that have paid for themselves
 
 1. **Evidence over assumption.** Say `NOT VERIFIED` / `NOT AVAILABLE` / `BLOCKED`; never write "works" without a run behind it. Do not
-   invent numbers (no ROI, savings, benchmarks). A default that nobody measured is not set (`AB_FSYNC`, the rate limit): it is an owner decision.
+   invent numbers (no ROI, savings, benchmarks). A default that nobody measured is not set (`AB_FSYNC`, the rate limit): it is an owner decision, and `PERFORMANCE.md` holds the measurements to decide with. Measure before believing a limit: the A/B module's memory use was estimated nowhere and turned out to cross the manifests' memory limit at a file size far below the warning threshold.
 2. **Break it on purpose.** For every guard, test or check you add, break exactly the thing it protects and confirm the check fails, then restore.
    Controls can be wrong too: one mutation turned out to be behaviourally identical, another left a second passing case in place.
 3. **Read the real logs**, not the green tick. The first CI run of a probe change failed in the probe script itself.
