@@ -46,6 +46,9 @@ start "$A"
 rpc '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | jq -e '.result.tools | length == 13' >/dev/null || fail "expected 13 tools"
 rpc '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"apply_routing_rules","arguments":{"task_type":"qa","task_complexity":"low"}}}' \
   | jq -r '.result.content[0].text' | jq -e '.provider == "claude-haiku"' >/dev/null || fail "routing tool returned the wrong provider"
+metrics=$(curl -fs -H "Authorization: Bearer $TOKEN" "localhost:$PORT/metrics")
+grep -q 'increadible_tool_call_duration_seconds_count{tool="apply_routing_rules"} 1' <<<"$metrics" \
+  || fail "/metrics has no latency histogram for the tool call just made"
 # This input used to throw out of the tool and end the process.
 rpc '{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"discover_apis","arguments":{"query":123}}}' \
   | jq -e '.result.isError == true' >/dev/null || fail "a bad tool input was not reported as a tool error"

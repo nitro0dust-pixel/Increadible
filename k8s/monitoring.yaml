@@ -1,4 +1,5 @@
 # Requires the Prometheus Operator CRDs (ServiceMonitor, PrometheusRule) and kube-state-metrics.
+# The rules are syntax-checked and unit-tested with promtool (scripts/check-prometheus.sh, tests in monitoring/alerts.test.yaml);
 # NOT VERIFIED against a live Prometheus. Every increadible_* metric below is emitted by
 # src/server.ts; nothing else is referenced.
 apiVersion: monitoring.coreos.com/v1
@@ -52,6 +53,16 @@ spec:
             severity: warning
           annotations:
             summary: Clients are sending malformed or unknown JSON-RPC requests
+        # The 1 s threshold is PROVISIONAL: nothing has measured a baseline yet (tool calls are in-memory and take well
+        # under a millisecond today). Revisit it with the load test and when the gateway makes real external calls.
+        - alert: IncreadibleSlowToolCalls
+          expr: >-
+            histogram_quantile(0.95, sum by (le) (rate(increadible_tool_call_duration_seconds_bucket[5m]))) > 1
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: 95th percentile tool call latency is above 1 second (provisional threshold)
         - alert: IncreadiblePodRestarting
           expr: >-
             increase(kube_pod_container_status_restarts_total{namespace="increadible", container="increadible"}[30m]) > 2

@@ -1,0 +1,233 @@
+# Unit tests for the alert rules in k8s/monitoring.yaml, run by scripts/check-prometheus.sh with promtool.
+# Each alert has a case that must fire and a case that must stay quiet, so a rule that can never fire,
+# or always fires, fails here. The thresholds are the ones in the rules; the latency one is provisional.
+rule_files:
+  - rules.yaml   # extracted from the PrometheusRule in k8s/monitoring.yaml
+evaluation_interval: 1m
+
+tests:
+  - name: IncreadibleDown fires after 2 minutes without a successful scrape
+    interval: 1m
+    input_series:
+      - series: 'up{job="increadible", namespace="increadible"}'
+        values: '1 1 0 0 0 0 0 0 0 0'
+    alert_rule_test:
+      - eval_time: 3m   # down since minute 2, `for: 2m` not yet elapsed
+        alertname: IncreadibleDown
+        exp_alerts: []
+      - eval_time: 6m
+        alertname: IncreadibleDown
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              job: increadible
+              namespace: increadible
+            exp_annotations:
+              summary: Increadible is not being scraped or is down
+
+  - name: IncreadibleDown stays quiet while the target is up
+    interval: 1m
+    input_series:
+      - series: 'up{job="increadible", namespace="increadible"}'
+        values: '1x20'
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: IncreadibleDown
+        exp_alerts: []
+
+  - name: IncreadibleToolErrorRate fires at 6% errors
+    interval: 1m
+    input_series:
+      - series: 'increadible_tool_calls_total{tool="a"}'
+        values: '0+100x40'
+      - series: 'increadible_tool_errors_total{tool="a"}'
+        values: '0+6x40'
+    alert_rule_test:
+      - eval_time: 25m
+        alertname: IncreadibleToolErrorRate
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: More than 5% of tool calls are returning errors
+
+  - name: IncreadibleToolErrorRate stays quiet at 4% errors
+    interval: 1m
+    input_series:
+      - series: 'increadible_tool_calls_total{tool="a"}'
+        values: '0+100x40'
+      - series: 'increadible_tool_errors_total{tool="a"}'
+        values: '0+4x40'
+    alert_rule_test:
+      - eval_time: 25m
+        alertname: IncreadibleToolErrorRate
+        exp_alerts: []
+
+  - name: IncreadibleToolErrorRate stays quiet when there is no traffic at all
+    interval: 1m
+    input_series:
+      - series: 'increadible_tool_calls_total{tool="a"}'
+        values: '0x40'
+      - series: 'increadible_tool_errors_total{tool="a"}'
+        values: '0x40'
+    alert_rule_test:
+      - eval_time: 25m
+        alertname: IncreadibleToolErrorRate
+        exp_alerts: []
+
+  - name: IncreadibleProtocolErrors fires at 0.2 protocol errors per second
+    interval: 1m
+    input_series:
+      - series: 'increadible_rpc_errors_total'
+        values: '0+12x40'
+    alert_rule_test:
+      - eval_time: 25m
+        alertname: IncreadibleProtocolErrors
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: Clients are sending malformed or unknown JSON-RPC requests
+
+  - name: IncreadibleProtocolErrors stays quiet at 0.05 per second
+    interval: 1m
+    input_series:
+      - series: 'increadible_rpc_errors_total'
+        values: '0+3x40'
+    alert_rule_test:
+      - eval_time: 25m
+        alertname: IncreadibleProtocolErrors
+        exp_alerts: []
+
+  - name: IncreadiblePodRestarting fires after three restarts in half an hour
+    interval: 5m
+    input_series:
+      - series: 'kube_pod_container_status_restarts_total{namespace="increadible", container="increadible", pod="p"}'
+        values: '0 0 1 2 3 3 3 3 3'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: IncreadiblePodRestarting
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              namespace: increadible
+              container: increadible
+              pod: p
+            exp_annotations:
+              summary: Increadible container restarted more than twice in 30 minutes
+
+  - name: IncreadiblePodRestarting stays quiet after a single restart
+    interval: 5m
+    input_series:
+      - series: 'kube_pod_container_status_restarts_total{namespace="increadible", container="increadible", pod="p"}'
+        values: '0 0 1 1 1 1 1 1 1'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: IncreadiblePodRestarting
+        exp_alerts: []
+
+  - name: IncreadibleSlowToolCalls fires when every call takes 1 to 2.5 seconds
+    interval: 1m
+    input_series:
+      - series: 'increadible_tool_call_duration_seconds_bucket{tool="get_api_stats", le="0.001"}'
+        values: '0x40'
+      - series: 'increadible_tool_call_duration_seconds_bucket{tool="get_api_stats", le="0.005"}'
+        values: '0x40'
+      - series: 'increadible_tool_call_duration_seconds_bucket{tool="get_api_stats", le="0.01"}'
+        values: '0x40'
+      - series: 'increadible_tool_call_duration_seconds_bucket{tool="get_api_stats", le="0.025"}'
+        values: '0x40'
+      - series: 'increadible_tool_call_duration_seconds_bucket{tool="get_api_stats", le="0.05"}'
+        values: '0x40'
+      - series: 'increadible_tool_call_duration_seconds_bucket{tool="get_api_stats", le="0.1"}'
+        values: '0x40'
+      - series: 'increadible_tool_call_duration_seconds_bucket{tool="get_api_stats", le="0.25"}'
+        values: '0x40'
+      - series: 'increadible_tool_call_duration_seconds_bucket{tool="get_api_stats", le="0.5"}'
+        values: '0x40'
+      - series: 'increadible_tool_call_duration_seconds_bucket{tool="get_api_stats", le="1"}'
+        values: '0x40'
+      - series: 'increadible_tool_call_duration_seconds_bucket{tool="get_api_stats", le="2.5"}'
+        values: '0+60x40'
+      - series: 'increadible_tool_call_duration_seconds_bucket{tool="get_api_stats", le="5"}'
+        values: '0+60x40'
+      - series: 'increadible_tool_call_duration_seconds_bucket{tool="get_api_stats", le="10"}'
+        values: '0+60x40'
+      - series: 'increadible_tool_call_duration_seconds_bucket{tool="get_api_stats", le="+Inf"}'
+        values: '0+60x40'
+    alert_rule_test:
+      - eval_time: 25m
+        alertname: IncreadibleSlowToolCalls
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: 95th percentile tool call latency is above 1 second (provisional threshold)
+
+  - name: IncreadibleSlowToolCalls stays quiet when every call takes under a millisecond
+    interval: 1m
+    input_series:
+      - series: 'increadible_tool_call_duration_seconds_bucket{tool="get_api_stats", le="0.001"}'
+        values: '0+60x40'
+      - series: 'increadible_tool_call_duration_seconds_bucket{tool="get_api_stats", le="0.005"}'
+        values: '0+60x40'
+      - series: 'increadible_tool_call_duration_seconds_bucket{tool="get_api_stats", le="0.01"}'
+        values: '0+60x40'
+      - series: 'increadible_tool_call_duration_seconds_bucket{tool="get_api_stats", le="0.025"}'
+        values: '0+60x40'
+      - series: 'increadible_tool_call_duration_seconds_bucket{tool="get_api_stats", le="0.05"}'
+        values: '0+60x40'
+      - series: 'increadible_tool_call_duration_seconds_bucket{tool="get_api_stats", le="0.1"}'
+        values: '0+60x40'
+      - series: 'increadible_tool_call_duration_seconds_bucket{tool="get_api_stats", le="0.25"}'
+        values: '0+60x40'
+      - series: 'increadible_tool_call_duration_seconds_bucket{tool="get_api_stats", le="0.5"}'
+        values: '0+60x40'
+      - series: 'increadible_tool_call_duration_seconds_bucket{tool="get_api_stats", le="1"}'
+        values: '0+60x40'
+      - series: 'increadible_tool_call_duration_seconds_bucket{tool="get_api_stats", le="2.5"}'
+        values: '0+60x40'
+      - series: 'increadible_tool_call_duration_seconds_bucket{tool="get_api_stats", le="5"}'
+        values: '0+60x40'
+      - series: 'increadible_tool_call_duration_seconds_bucket{tool="get_api_stats", le="10"}'
+        values: '0+60x40'
+      - series: 'increadible_tool_call_duration_seconds_bucket{tool="get_api_stats", le="+Inf"}'
+        values: '0+60x40'
+    alert_rule_test:
+      - eval_time: 25m
+        alertname: IncreadibleSlowToolCalls
+        exp_alerts: []
+
+  - name: IncreadibleSlowToolCalls stays quiet when there are no calls
+    interval: 1m
+    input_series:
+      - series: 'increadible_tool_call_duration_seconds_bucket{tool="get_api_stats", le="0.001"}'
+        values: '0x40'
+      - series: 'increadible_tool_call_duration_seconds_bucket{tool="get_api_stats", le="0.005"}'
+        values: '0x40'
+      - series: 'increadible_tool_call_duration_seconds_bucket{tool="get_api_stats", le="0.01"}'
+        values: '0x40'
+      - series: 'increadible_tool_call_duration_seconds_bucket{tool="get_api_stats", le="0.025"}'
+        values: '0x40'
+      - series: 'increadible_tool_call_duration_seconds_bucket{tool="get_api_stats", le="0.05"}'
+        values: '0x40'
+      - series: 'increadible_tool_call_duration_seconds_bucket{tool="get_api_stats", le="0.1"}'
+        values: '0x40'
+      - series: 'increadible_tool_call_duration_seconds_bucket{tool="get_api_stats", le="0.25"}'
+        values: '0x40'
+      - series: 'increadible_tool_call_duration_seconds_bucket{tool="get_api_stats", le="0.5"}'
+        values: '0x40'
+      - series: 'increadible_tool_call_duration_seconds_bucket{tool="get_api_stats", le="1"}'
+        values: '0x40'
+      - series: 'increadible_tool_call_duration_seconds_bucket{tool="get_api_stats", le="2.5"}'
+        values: '0x40'
+      - series: 'increadible_tool_call_duration_seconds_bucket{tool="get_api_stats", le="5"}'
+        values: '0x40'
+      - series: 'increadible_tool_call_duration_seconds_bucket{tool="get_api_stats", le="10"}'
+        values: '0x40'
+      - series: 'increadible_tool_call_duration_seconds_bucket{tool="get_api_stats", le="+Inf"}'
+        values: '0x40'
+    alert_rule_test:
+      - eval_time: 25m
+        alertname: IncreadibleSlowToolCalls
+        exp_alerts: []

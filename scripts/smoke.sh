@@ -95,6 +95,12 @@ grep -q '"isError":false' <<<"$RES" || { echo "tools/call over HTTP failed: $RES
 METRICS=$(curl -s "${AUTH[@]}" "http://127.0.0.1:$PORT/metrics")
 grep -q 'increadible_tool_calls_total{tool="get_api_stats"} 1' <<<"$METRICS" \
   || { echo "metrics missing tool counter" >&2; exit 1; }
+grep -q 'increadible_tool_call_duration_seconds_count{tool="get_api_stats"} 1' <<<"$METRICS" \
+  || { echo "metrics missing the tool latency histogram" >&2; exit 1; }
+grep -q 'increadible_tool_call_duration_seconds_bucket{tool="get_api_stats",le="+Inf"} 1' <<<"$METRICS" \
+  || { echo "metrics missing the +Inf latency bucket" >&2; exit 1; }
+grep -q 'increadible_http_rejected_total{reason="unauthorized"} 1' <<<"$METRICS" \
+  || { echo "metrics did not count the unauthorized /metrics request" >&2; exit 1; }
 echo "[hardening] a tool input that throws must not kill the server (HTTP and stdio)"
 BAD='{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"discover_apis","arguments":{"query":123}}}'
 RES=$(curl -s "${AUTH[@]}" -d "$BAD" "http://127.0.0.1:$PORT/mcp" || true) # a dead server must reach the message below, not abort on curl's exit code
