@@ -3,19 +3,21 @@
 # Usage: scripts/probe-image.sh <image-ref>     (e.g. increadible:ci or ghcr.io/org/img@sha256:...)
 # Checks: image config (non-root, command, architecture, HEALTHCHECK), health/auth/MCP over HTTP,
 # Docker's own health status, that A/B data survives a hard-killed container on a named volume (with AB_FSYNC on,
-# and the dead container's data file lock taken over), and that a second container on the same volume is refused.
+# and the dead container's data file lock taken over), that a second container on the same volume is refused,
+# that a bad tool input does not kill the server, that the image (HOST=0.0.0.0) refuses to start without AUTH_TOKEN,
+# and that `docker stop` ends the server cleanly (exit 0) and releases the data file lock.
 set -euo pipefail
 IMAGE=${1:?usage: probe-image.sh <image-ref>}
 PORT=${PROBE_PORT:-3000}
 TOKEN=probe-token
-A="inc-probe-a-$$"; B="inc-probe-b-$$"; C="inc-probe-c-$$"; VOL="inc-probe-data-$$"
+A="inc-probe-a-$$"; B="inc-probe-b-$$"; C="inc-probe-c-$$"; D="inc-probe-d-$$"; VOL="inc-probe-data-$$"
 
 cleanup() {
   status=$?
   if [ "$status" -ne 0 ]; then
-    for c in "$A" "$B" "$C"; do docker logs "$c" 2>&1 | tail -30 || true; done
+    for c in "$A" "$B" "$C" "$D"; do docker logs "$c" 2>&1 | tail -30 || true; done
   fi
-  docker rm -f "$A" "$B" "$C" >/dev/null 2>&1 || true
+  docker rm -f "$A" "$B" "$C" "$D" >/dev/null 2>&1 || true
   docker volume rm "$VOL" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
@@ -44,6 +46,17 @@ start "$A"
 rpc '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | jq -e '.result.tools | length == 13' >/dev/null || fail "expected 13 tools"
 rpc '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"apply_routing_rules","arguments":{"task_type":"qa","task_complexity":"low"}}}' \
   | jq -r '.result.content[0].text' | jq -e '.provider == "claude-haiku"' >/dev/null || fail "routing tool returned the wrong provider"
+# This input used to throw out of the tool and end the process.
+rpc '{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"discover_apis","arguments":{"query":123}}}' \
+  | jq -e '.result.isError == true' >/dev/null || fail "a bad tool input was not reported as a tool error"
+curl -fs "localhost:$PORT/health" >/dev/null || fail "the server died on a bad tool input"
+
+echo "[exposure] the image binds 0.0.0.0, so it must refuse to start without AUTH_TOKEN"
+docker run -d --name "$D" "$IMAGE" >/dev/null
+code=$(timeout 60 docker wait "$D") || fail "the container without AUTH_TOKEN neither exited nor was refused within 60s"
+[ "$code" != 0 ] || fail "a container without AUTH_TOKEN was allowed to start"
+d_logs=$(docker logs "$D" 2>&1)
+grep -q "Refusing to listen" <<<"$d_logs" || fail "the container without AUTH_TOKEN failed for the wrong reason: $(tail -5 <<<"$d_logs")"
 
 echo "[persistence] A/B data must survive a hard-killed container (named volume, non-root, AB_FSYNC=1)"
 rpc '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"create_experiment","arguments":{"id":"probe","name":"n","hypothesis":"h","metrics":[{"id":"q","name":"q","type":"c","aggregation":"mean"}],"variants":[{"id":"A","name":"a","config":{}},{"id":"B","name":"b","config":{}}]}}}' \
@@ -56,7 +69,7 @@ rpc '{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"get_experim
   | jq -r '.result.content[0].text' | jq -e '.statistical_analysis.current_samples == 1' >/dev/null || fail "A/B data was lost across the restart"
 
 echo "[lock] a second container on the same volume must be refused while the first one runs"
-docker run -d --name "$C" -v "$VOL:/data" -e AB_FSYNC=1 "$IMAGE" >/dev/null
+docker run -d --name "$C" -v "$VOL:/data" -e "AUTH_TOKEN=$TOKEN" -e AB_FSYNC=1 "$IMAGE" >/dev/null
 code=$(timeout 90 docker wait "$C") || fail "the second container neither exited nor was refused within 90s"
 [ "$code" != 0 ] || fail "a second container was allowed to open the same A/B data file"
 c_logs=$(docker logs "$C" 2>&1)
@@ -64,8 +77,18 @@ grep -Eq "in use by pid|could not be checked from here" <<<"$c_logs" || fail "th
 curl -fs "localhost:$PORT/health" >/dev/null || fail "the first container was disturbed by the refused second one"
 
 echo "[healthcheck] Docker's HEALTHCHECK must report healthy (waiting up to 60s)"
+healthy=""
 for _ in $(seq 1 60); do
-  [ "$(docker inspect --format '{{.State.Health.Status}}' "$B")" = "healthy" ] && { echo "probe: OK"; exit 0; }
+  [ "$(docker inspect --format '{{.State.Health.Status}}' "$B")" = "healthy" ] && { healthy=yes; break; }
   sleep 1
 done
-fail "container never became healthy (status: $(docker inspect --format '{{.State.Health.Status}}' "$B"))"
+[ -n "$healthy" ] || fail "container never became healthy (status: $(docker inspect --format '{{.State.Health.Status}}' "$B"))"
+
+echo "[shutdown] docker stop must end the server cleanly (exit 0, not SIGKILL's 137) and release the data file lock"
+docker stop -t 20 "$B" >/dev/null
+code=$(docker inspect --format '{{.State.ExitCode}}' "$B")
+[ "$code" = 0 ] || fail "docker stop ended the server with exit code $code (a clean SIGTERM shutdown exits 0)"
+listing=$(docker run --rm -v "$VOL:/data" --entrypoint ls "$IMAGE" -a /data)
+grep -qx "ab-data.jsonl" <<<"$listing" || fail "the A/B data file is missing after a clean stop: $listing"
+! grep -qx "ab-data.jsonl.lock" <<<"$listing" || fail "the data file lock was left behind after a clean stop"
+echo "probe: OK"

@@ -49,6 +49,7 @@ export const metrics = {
   tool_calls: {} as Record<string, number>,
   tool_errors: {} as Record<string, number>,
   rpc_errors: 0,
+  http_rejected: {} as Record<string, number>,
 };
 
 export interface JsonRpcRequest {
@@ -69,6 +70,12 @@ const fail = (id: JsonRpcRequest["id"], code: number, message: string): JsonRpcR
   metrics.rpc_errors++;
   return { jsonrpc: "2.0", id: id ?? null, error: { code, message } };
 };
+
+/** The reply for a failure the handler did not expect. Logged to stderr only (stdout carries the stdio protocol). */
+export function internalError(id: JsonRpcRequest["id"], error: unknown): JsonRpcResponse {
+  console.error("internal error:", error);
+  return fail(id, -32603, "Internal error");
+}
 
 /** Handles one JSON-RPC message; returns null for notifications (no reply). */
 export async function handleMessage(msg: JsonRpcRequest): Promise<JsonRpcResponse | null> {
@@ -106,7 +113,13 @@ export async function handleMessage(msg: JsonRpcRequest): Promise<JsonRpcRespons
       const owner = typeof name === "string" ? toolOwners.get(name) : undefined;
       if (!owner) return fail(id, -32602, `Unknown tool: ${String(name)}`);
       metrics.tool_calls[name] = (metrics.tool_calls[name] || 0) + 1;
-      const text = await owner.call(name, msg.params?.arguments ?? {});
+      let text: string;
+      try {
+        text = await owner.call(name, msg.params?.arguments ?? {});
+      } catch (error: any) {
+        // One tool that throws must not end the process (an unhandled rejection does in Node 15+): report it as a tool error.
+        text = JSON.stringify({ error: String(error?.message ?? error) });
+      }
       let isError = false;
       try {
         const parsed = JSON.parse(text);
@@ -137,6 +150,9 @@ export function renderPrometheusMetrics(): string {
     "# HELP increadible_rpc_errors_total JSON-RPC protocol errors",
     "# TYPE increadible_rpc_errors_total counter",
     `increadible_rpc_errors_total ${metrics.rpc_errors}`,
+    "# HELP increadible_http_rejected_total HTTP requests refused before reaching the handler, by reason",
+    "# TYPE increadible_http_rejected_total counter",
+    ...Object.entries(metrics.http_rejected).map(([r, n]) => `increadible_http_rejected_total{reason="${r}"} ${n}`),
   ];
   return lines.join("\n") + "\n";
 }

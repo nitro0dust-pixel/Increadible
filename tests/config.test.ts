@@ -29,6 +29,17 @@ describe.each(["k8s/staging-deployment.yaml", "k8s/production-deployment.yaml"])
     expect(env.AUTH_TOKEN.secretKeyRef).toEqual({ name: "increadible-secrets", key: "auth-token" });
   });
 
+  it("gives the kubelet more time to stop the pod than the server needs to drain and cut connections", () => {
+    const env = Object.fromEntries(container.env.map((e: any) => [e.name, e.value]));
+    const drainMs = Number(env.SHUTDOWN_DRAIN_MS);
+    const cutMs = Number(env.SHUTDOWN_TIMEOUT_MS);
+    const grace = deployment.spec.template.spec.terminationGracePeriodSeconds;
+    expect(drainMs).toBeGreaterThan(0);
+    expect(cutMs).toBeGreaterThan(0);
+    expect(grace).toBeGreaterThan(0); // a SIGKILL from the kubelet would leave the A/B data file lock behind
+    expect((drainMs + cutMs) / 1000).toBeLessThan(grace);
+  });
+
   it("persists A/B data on a PersistentVolumeClaim mounted where AB_DATA_FILE points", () => {
     const dataPath = container.env.find((e: any) => e.name === "AB_DATA_FILE").value;
     const mount = container.volumeMounts.find((m: any) => dataPath.startsWith(m.mountPath + "/"));
@@ -163,6 +174,28 @@ describe("Dockerfile and package.json", () => {
     }
     expect(deployment).toContain(".lock");
     expect(read("src/index.ts")).toMatch(/process\.on\("SIGTERM"/); // stdio mode must release the lock on SIGTERM too
+  });
+
+  it("documents every HTTP hardening env var the code reads", () => {
+    const code = read("src/index.ts");
+    for (const name of ["HTTP_HEADERS_TIMEOUT_MS", "HTTP_REQUEST_TIMEOUT_MS", "RATE_LIMIT_PER_MINUTE", "SHUTDOWN_DRAIN_MS", "SHUTDOWN_TIMEOUT_MS", "ALLOW_UNAUTHENTICATED"]) {
+      expect(code).toContain(name);
+      expect(read("DEPLOYMENT.md")).toContain(name);
+      expect(read("README.md")).toContain(name);
+    }
+  });
+
+  it("probes the HTTP hardening with real processes and in the real image", () => {
+    const smoke = read("scripts/smoke.sh");
+    expect(smoke).toContain("query must be a string");
+    expect(smoke).toContain("Refusing to listen");
+    expect(smoke).toContain("SHUTDOWN_DRAIN_MS");
+    expect(smoke).toContain("deadline passed");
+    const probe = read("scripts/probe-image.sh");
+    expect(probe).toContain('"name":"discover_apis","arguments":{"query":123}');
+    expect(probe).toContain("Refusing to listen");
+    expect(probe).toContain('docker stop -t 20 "$B"');
+    expect(probe).toContain("ab-data.jsonl.lock");
   });
 
   it("probes the A/B data file lock in a real container: hard kill with fsync on, and a second container refused", () => {

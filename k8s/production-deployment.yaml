@@ -98,6 +98,7 @@ spec:
       labels:
         app: increadible
     spec:
+      terminationGracePeriodSeconds: 30
       serviceAccountName: increadible
       imagePullSecrets:
         - name: ghcr-pull   # optional: only needed while the GHCR package is private (see DEPLOYMENT.md)
@@ -125,6 +126,13 @@ spec:
               value: /config/routing-rules.yaml
             - name: AB_DATA_FILE
               value: /data/ab-data.jsonl
+            # Graceful shutdown: keep serving 5 s with /ready answering 503 (time for the endpoint removal to propagate),
+            # then give in-flight requests 10 s before the remaining connections are cut. 5 + 10 must stay below
+            # terminationGracePeriodSeconds, or the kubelet's SIGKILL leaves the A/B data file lock behind.
+            - name: SHUTDOWN_DRAIN_MS
+              value: "5000"
+            - name: SHUTDOWN_TIMEOUT_MS
+              value: "10000"
             - name: AUTH_TOKEN
               valueFrom:
                 secretKeyRef:

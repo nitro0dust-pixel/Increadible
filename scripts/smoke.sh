@@ -6,7 +6,8 @@ cd "$(dirname "$0")/.."
 
 TMP=$(mktemp -d)
 PID=""
-cleanup() { [ -n "$PID" ] && kill "$PID" 2>/dev/null || true; rm -rf "$TMP"; }
+EXTRA=""
+cleanup() { [ -n "$PID" ] && kill "$PID" 2>/dev/null || true; [ -n "$EXTRA" ] && kill $EXTRA 2>/dev/null || true; rm -rf "$TMP"; }
 trap cleanup EXIT
 export RULES_FILE="$TMP/rules.yaml" EXPERIMENTS_FILE="$TMP/experiments.yaml"
 
@@ -94,4 +95,74 @@ grep -q '"isError":false' <<<"$RES" || { echo "tools/call over HTTP failed: $RES
 METRICS=$(curl -s "${AUTH[@]}" "http://127.0.0.1:$PORT/metrics")
 grep -q 'increadible_tool_calls_total{tool="get_api_stats"} 1' <<<"$METRICS" \
   || { echo "metrics missing tool counter" >&2; exit 1; }
+echo "[hardening] a tool input that throws must not kill the server (HTTP and stdio)"
+BAD='{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"discover_apis","arguments":{"query":123}}}'
+RES=$(curl -s "${AUTH[@]}" -d "$BAD" "http://127.0.0.1:$PORT/mcp" || true) # a dead server must reach the message below, not abort on curl's exit code
+grep -q 'query must be a string' <<<"$RES" || { echo "bad discover_apis input was not reported as a tool error: $RES" >&2; exit 1; }
+[ "$(code "http://127.0.0.1:$PORT/health")" = 200 ] || { echo "the HTTP server died on a bad tool input" >&2; exit 1; }
+printf '%s\n' "$BAD" '{"jsonrpc":"2.0","id":2,"method":"ping"}' | node dist/src/index.js 2>/dev/null | node -e '
+  const assert = require("assert");
+  const msgs = require("fs").readFileSync(0, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l));
+  assert.strictEqual(msgs.length, 2, "the stdio session ended early: " + JSON.stringify(msgs));
+  assert.strictEqual(msgs[0].result.isError, true);
+  assert.deepStrictEqual(msgs[1].result, {});
+'
+
+echo "[hardening] an open API beyond this machine is refused, unless explicitly allowed"
+P2=$((PORT + 1))
+for token in unset empty; do
+  # `timeout`: a server that wrongly starts never returns, which must fail here instead of hanging the script
+  rc=0
+  if [ "$token" = unset ]; then
+    timeout 10 env HOST=0.0.0.0 PORT=$P2 node dist/src/index.js >/dev/null 2>"$TMP/open.err" || rc=$?
+  else
+    timeout 10 env AUTH_TOKEN="" HOST=0.0.0.0 PORT=$P2 node dist/src/index.js >/dev/null 2>"$TMP/open.err" || rc=$?
+  fi
+  [ "$rc" = 1 ] || { echo "HOST=0.0.0.0 with AUTH_TOKEN $token must be refused with exit 1, got $rc" >&2; exit 1; }
+  grep -q "Refusing to listen" "$TMP/open.err" || { echo "refused for the wrong reason ($token): $(head -3 "$TMP/open.err")" >&2; exit 1; }
+done
+ALLOW_UNAUTHENTICATED=1 HOST=0.0.0.0 PORT=$P2 node dist/src/index.js >/dev/null 2>"$TMP/open.err" &
+SRV=$!; EXTRA="$SRV"
+for _ in $(seq 1 50); do curl -fs "http://127.0.0.1:$P2/health" >/dev/null 2>&1 && break; sleep 0.1; done
+[ "$(code "http://127.0.0.1:$P2/health")" = 200 ] || { echo "ALLOW_UNAUTHENTICATED=1 did not start the server" >&2; exit 1; }
+kill "$SRV"; wait "$SRV" 2>/dev/null || true; EXTRA=""
+
+echo "[hardening] SIGTERM: /ready answers 503 while draining; a stalled client cannot hold the process"
+cat >"$TMP/stall.js" <<'JS'
+const s = require("net").connect(Number(process.argv[2]), "127.0.0.1");
+s.on("error", () => process.exit(0));
+s.on("close", () => process.exit(0));
+s.write('POST /mcp HTTP/1.1\r\nHost: x\r\nContent-Length: 500\r\n\r\n{"a":');
+setTimeout(() => process.exit(0), 30000);
+JS
+start_on() { # port, then extra env assignments: starts a server in the background and waits until it answers
+  local port=$1; shift
+  env "$@" PORT="$port" HOST=127.0.0.1 node dist/src/index.js >/dev/null 2>"$TMP/srv-$port.err" &
+  SRV=$!; EXTRA="$SRV"
+  for _ in $(seq 1 50); do curl -fs "http://127.0.0.1:$port/health" >/dev/null 2>&1 && return 0; sleep 0.1; done
+  echo "server on $port did not start: $(head -3 "$TMP/srv-$port.err")" >&2; exit 1
+}
+wait_exit() { # seconds: waits for $SRV to exit and leaves its exit code in $RC
+  for _ in $(seq 1 $(($1 * 10))); do kill -0 "$SRV" 2>/dev/null || break; sleep 0.1; done
+  if kill -0 "$SRV" 2>/dev/null; then kill -KILL "$SRV"; echo "the server was still running $1 s after SIGTERM" >&2; exit 1; fi
+  wait "$SRV" && RC=0 || RC=$?
+  EXTRA=""
+}
+P3=$((PORT + 2))
+start_on "$P3" SHUTDOWN_DRAIN_MS=2000
+kill -TERM "$SRV"; sleep 0.5
+[ "$(code "http://127.0.0.1:$P3/ready")" = 503 ] || { echo "/ready must answer 503 while draining" >&2; exit 1; }
+[ "$(code "http://127.0.0.1:$P3/health")" = 200 ] || { echo "/health must stay 200 while draining" >&2; exit 1; }
+wait_exit 8
+[ "$RC" = 0 ] || { echo "a drained, idle server must exit 0, got $RC" >&2; exit 1; }
+
+P4=$((PORT + 3))
+start_on "$P4" SHUTDOWN_TIMEOUT_MS=1000
+node "$TMP/stall.js" "$P4" & STALL=$!
+sleep 0.5
+kill -TERM "$SRV"
+wait_exit 5
+kill "$STALL" 2>/dev/null || true
+[ "$RC" = 1 ] || { echo "a stalled client must be cut at the deadline (exit 1), got $RC" >&2; exit 1; }
+grep -q "deadline passed" "$TMP/srv-$P4.err" || { echo "no deadline message: $(head -3 "$TMP/srv-$P4.err")" >&2; exit 1; }
 echo "smoke: OK"
