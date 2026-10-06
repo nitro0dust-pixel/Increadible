@@ -10,6 +10,10 @@ Entries marked **behaviour change** can affect an existing deployment.
 ## [Unreleased]
 
 ### Added
+- Measured baselines: `scripts/loadtest.js` (per-tool throughput and latency, closed and open loop, server-side means) and `scripts/capacity.js`
+  (A/B data size against restart time, memory and query cost), with results and recommendations in `PERFORMANCE.md`. Finding: the A/B module keeps every
+  measurement in memory (about 500 bytes each), so the manifests' 256Mi limit is reached near 360 000 measurements, and `get_experiment_results`
+  costs time proportional to the samples. ([#14](https://github.com/nitro0dust-pixel/Increadible/pull/14))
 - Tool-call latency histogram `increadible_tool_call_duration_seconds{tool}`, a counter of refused requests
   `increadible_http_rejected_total{reason}` (`unauthorized`, `rate_limited`, `payload_too_large`) and an `IncreadibleSlowToolCalls`
   alert (p95 above 1 s; **provisional threshold**). ([#12](https://github.com/nitro0dust-pixel/Increadible/pull/12), [#11](https://github.com/nitro0dust-pixel/Increadible/pull/11))
@@ -29,6 +33,8 @@ Entries marked **behaviour change** can affect an existing deployment.
 - `ROADMAP.md`: status, plan, quality gates and open decisions, with evidence for every status. ([#6](https://github.com/nitro0dust-pixel/Increadible/pull/6))
 
 ### Changed
+- **Behaviour change (a log line comes earlier):** the Kubernetes manifests set `AB_DATA_WARN_BYTES` to 16 MiB (the code default stays 100 MiB), so the growth
+  warning arrives before the memory limit is a problem; a test keeps the threshold consistent with the memory limit. ([#14](https://github.com/nitro0dust-pixel/Increadible/pull/14))
 - **Behaviour change:** an HTTP server on a non-loopback `HOST` (the image binds `0.0.0.0`) without a non-blank `AUTH_TOKEN` refuses to start
   (exit 1); before, an empty token silently turned authentication off. `ALLOW_UNAUTHENTICATED=1` overrides it. ([#11](https://github.com/nitro0dust-pixel/Increadible/pull/11))
 - **Behaviour change:** receiving a request now has a 10 s (headers) and 30 s (whole request) limit instead of Node's 60 s and 300 s.
