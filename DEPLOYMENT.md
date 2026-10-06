@@ -25,7 +25,8 @@ curl localhost:3000/health
 
 Config via env: `PORT` (3000), `HOST` (0.0.0.0 in the image, 127.0.0.1 otherwise), `AUTH_TOKEN`,
 `RULES_FILE` (/data/rules.yaml), `EXPERIMENTS_FILE` (/data/experiments.yaml), `AB_DATA_FILE`
-(/data/ab-data.jsonl). Mount a volume at `/data` to keep edited rules and A/B data across container restarts
+(/data/ab-data.jsonl), and optionally `AB_FSYNC` (`1` flushes every A/B append to disk) and `AB_DATA_WARN_BYTES`
+(growth warning, default 104857600). Mount a volume at `/data` to keep edited rules and A/B data across container restarts
 (`docker run -v increadible-data:/data ...`). Without a volume, A/B data is lost when the container is removed.
 
 CI (`.github/workflows/ci-cd.yml`) builds the image, starts it, probes `/health`, `/metrics` (must be 401
@@ -38,6 +39,29 @@ After each push to `main`, a second job (`verify-published-image`) logs in to GH
 the same probe (`scripts/probe-image.sh`) against the pulled copy: non-root user, command, architecture, HTTP and
 auth behavior, A/B data surviving a container restart on a volume, and Docker's `HEALTHCHECK` reporting healthy.
 You can run the probe yourself against any image with `bash scripts/probe-image.sh <image-ref>` (needs Docker, curl and jq).
+
+### The A/B data file: one writer, flushing, growth
+
+- **One writer, enforced.** The server keeps `<AB_DATA_FILE>.lock` next to the data file and refreshes it every 3 seconds.
+  A second process on the same file fails at startup with `... is in use by pid N on HOST ...` (same machine, holder alive) or,
+  when the holder is on another machine and cannot be checked, after about 17 seconds with `... could not be checked from here`.
+  The lock is removed on clean exit and on SIGTERM/SIGINT. After a **crash** it stays; the next start takes it over at once
+  when it names a dead process on the same machine (or the same pid, as after a container restart), and otherwise after
+  it has gone 15 seconds without a refresh, so a replacement pod that follows a hard kill can wait up to about 15 seconds
+  before it listens (the probes allow for it). If a lock is stuck for another reason, delete the `.lock` file.
+- **Limits of the lock.** It guards against accidental double starts (two Claude Desktop windows, a second replica on a
+  shared volume), not against a hostile or clock-skewed environment. If two processes race for the same stale lock at the same
+  instant both can win; each write re-checks the lock and fails with `lock was lost` if it was taken, which keeps the data
+  from interleaving. Keep one replica (`strategy: Recreate`, `ReadWriteOnce`), as the manifests do.
+- **Flushing.** Without `AB_FSYNC` an acknowledged write survives a process crash but may be lost in an OS crash or power
+  loss. `AB_FSYNC=1` flushes every append before the call returns (and the new file's directory entry), at the cost of one
+  disk flush per write; that cost has **not been measured** here, so it is off by default in the image and the manifests. If a
+  flush fails the call returns an error, but the line may already be in the file and then shows up after a restart.
+- **Growth.** The log is never compacted (about 150 bytes per measurement). A warning goes to stderr once it passes
+  `AB_DATA_WARN_BYTES`. Real size control needs a rollup design (keep count, sum and sum of squares per variant and metric
+  instead of raw values), which is a data-model change and an open decision in `ROADMAP.md`.
+- `scripts/smoke.sh` checks all of this with real processes (clean exit, second writer refused, SIGTERM, SIGKILL takeover), and
+  `scripts/probe-image.sh` checks it in a real container with `AB_FSYNC=1` (hard-killed container, second container refused).
 
 ### Software bill of materials
 

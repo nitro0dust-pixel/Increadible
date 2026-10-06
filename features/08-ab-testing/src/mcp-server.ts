@@ -1,4 +1,6 @@
+import * as crypto from "crypto";
 import * as fs from "fs";
+import * as os from "os";
 import * as path from "path";
 import * as yaml from "yaml";
 
@@ -111,20 +113,201 @@ type LogEntry =
   | { type: "experiment"; experiment: Experiment }
   | ({ type: "measurement" } & Measurement);
 
+// ---- single-writer lock for the data file -------------------------------------------------------
+//
+// The data file has exactly one writer. A lock file next to it (`<data file>.lock`) enforces that:
+// it is created exclusively, refreshed every LOCK_HEARTBEAT_MS while the process lives, and removed
+// on clean exit. A lock whose holder is provably alive makes startup fail at once; a lock left by a
+// dead holder is taken over. This is a guard against accidental double starts (two Claude Desktop
+// windows, a second replica on a shared volume), not a distributed lock: if two starters race for
+// the same stale lock at the same instant, both can win. Every write re-checks that the lock is
+// still ours and fails closed if it is not.
+
+const LOCK_HEARTBEAT_MS = 3_000;
+const LOCK_STALE_MS = 15_000;
+const DEFAULT_WARN_BYTES = 100 * 1024 * 1024;
+
+interface HeldLock {
+  path: string;
+  token: string;
+  timer: NodeJS.Timeout;
+}
+
+const heldLocks = new Map<string, HeldLock>();
+let exitHookInstalled = false;
+
+function sleepSync(ms: number): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+function pidAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error: any) {
+    return error.code === "EPERM"; // exists, but owned by someone else
+  }
+}
+
+function readLockFile(lockPath: string): { pid: number; host: string; started?: string; token?: string } | null {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(lockPath, "utf-8"));
+    return typeof parsed?.pid === "number" && typeof parsed?.host === "string" ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function holdsLock(lock: HeldLock): boolean {
+  return readLockFile(lock.path)?.token === lock.token;
+}
+
+function releaseLock(lock: HeldLock): void {
+  clearInterval(lock.timer);
+  heldLocks.delete(lock.path);
+  if (holdsLock(lock)) fs.rmSync(lock.path, { force: true });
+}
+
+function releaseAllLocks(): void {
+  for (const lock of [...heldLocks.values()]) {
+    try {
+      releaseLock(lock);
+    } catch {
+      /* exiting anyway */
+    }
+  }
+}
+
+type LockVerdict = "held" | "stale" | "unknown";
+
+function judgeLock(lockPath: string): LockVerdict {
+  let age: number;
+  try {
+    age = Date.now() - fs.statSync(lockPath).mtimeMs;
+  } catch {
+    return "stale"; // vanished between our attempt and now: just try again
+  }
+  if (age > LOCK_STALE_MS) return "stale"; // holder stopped refreshing it
+  const info = readLockFile(lockPath);
+  if (info && info.host === os.hostname()) {
+    // Same machine: process ids are trustworthy. A lock naming our own pid that this module does not
+    // hold is the leftover of a previous incarnation (a restarted container is pid 1 again).
+    if (info.pid === process.pid) return "stale";
+    if (!pidAlive(info.pid)) return age > 2 * LOCK_HEARTBEAT_MS ? "stale" : "unknown";
+    return "held";
+  }
+  return "unknown"; // another machine or unreadable: only the heartbeat can tell if it is alive
+}
+
+function describeHolder(lockPath: string): string {
+  const info = readLockFile(lockPath);
+  return info ? `pid ${info.pid} on ${info.host}${info.started ? ` (started ${info.started})` : ""}` : "an unknown process";
+}
+
+function acquireLock(lockPath: string, waitMs: number): HeldLock {
+  if (heldLocks.has(lockPath)) {
+    throw new Error("it is already open in this process (close the other instance first)");
+  }
+  const token = crypto.randomBytes(12).toString("hex");
+  const body = JSON.stringify({ pid: process.pid, host: os.hostname(), started: new Date().toISOString(), token });
+  const deadline = Date.now() + waitMs;
+  for (;;) {
+    try {
+      fs.writeFileSync(lockPath, body, { flag: "wx", mode: 0o600 });
+      break;
+    } catch (error: any) {
+      if (error.code !== "EEXIST") throw error;
+    }
+    const verdict = judgeLock(lockPath);
+    if (verdict === "stale") {
+      // Move it aside atomically so that of several starters only one removes it.
+      const aside = `${lockPath}.stale-${process.pid}-${Date.now()}`;
+      try {
+        fs.renameSync(lockPath, aside);
+        fs.rmSync(aside, { force: true });
+      } catch {
+        /* someone else took it over first; try again */
+      }
+      continue;
+    }
+    if (verdict === "held") {
+      throw new Error(
+        `it is in use by ${describeHolder(lockPath)}. Only one server process may write it: ` +
+          "stop the other one or point AB_DATA_FILE at a different path"
+      );
+    }
+    if (Date.now() >= deadline) {
+      throw new Error(
+        `its lock (${lockPath}) is held by ${describeHolder(lockPath)} and was refreshed in the last ` +
+          `${LOCK_STALE_MS / 1000}s, but that process could not be checked from here. If it is really gone, delete the lock file`
+      );
+    }
+    sleepSync(500); // a crashed holder's lock ages out; wait for it rather than fail a restart
+  }
+  const timer = setInterval(() => {
+    try {
+      const now = new Date();
+      fs.utimesSync(lockPath, now, now);
+    } catch {
+      /* lost; the next write notices and fails closed */
+    }
+  }, LOCK_HEARTBEAT_MS);
+  timer.unref();
+  const lock: HeldLock = { path: lockPath, token, timer };
+  heldLocks.set(lockPath, lock);
+  if (!exitHookInstalled) {
+    exitHookInstalled = true;
+    process.on("exit", releaseAllLocks);
+  }
+  return lock;
+}
+
+/** Flush a file's data to disk; with `dir`, flush the directory entry instead (best effort, not on every OS). */
+function fsyncPath(target: string, dir = false): void {
+  let fd: number | undefined;
+  try {
+    fd = fs.openSync(target, dir ? "r" : "a");
+    fs.fsyncSync(fd);
+  } catch (error) {
+    if (!dir) throw error;
+  } finally {
+    if (fd !== undefined) fs.closeSync(fd);
+  }
+}
+
+export interface ABDataOptions {
+  /** Flush every append to disk before reporting success. Slower; a crash or power loss cannot then drop an acknowledged write. */
+  fsync?: boolean;
+  /** Log a warning once the data file passes this many bytes (it is never compacted). Default 100 MiB. */
+  warnBytes?: number;
+  /** How long startup waits for a lock that might belong to a crashed holder on another machine. */
+  lockWaitMs?: number;
+}
+
 class ABTestingFramework {
   private experiments: Map<string, Experiment> = new Map();
   private measurements: Measurement[] = [];
   private experimentsFile: string;
   private dataFile?: string;
+  private lock?: HeldLock;
+  private closed = false;
+  private fsync: boolean;
+  private warnBytes: number;
+  private lockWaitMs: number;
+  private size = 0;
+  private warned = false;
 
   /**
    * @param experimentsFile optional YAML with experiment definitions (read-only config)
    * @param dataFile optional append-only JSONL log. When set, experiments created at runtime and
    *   every measurement are written to it before being applied, and replayed on startup.
-   *   One process should own a data file; a second process would not see the first one's writes.
+   *   Exactly one process may own a data file (enforced with `<dataFile>.lock`); call close() to hand it over.
    */
-  constructor(experimentsFile: string = "./experiments.yaml", dataFile?: string) {
+  constructor(experimentsFile: string = "./experiments.yaml", dataFile?: string, options: ABDataOptions = {}) {
     this.experimentsFile = experimentsFile;
+    this.fsync = options.fsync === true;
+    this.warnBytes = options.warnBytes && options.warnBytes > 0 ? options.warnBytes : DEFAULT_WARN_BYTES;
+    this.lockWaitMs = options.lockWaitMs ?? LOCK_STALE_MS + 2_000;
     this.loadExperiments();
     if (dataFile) {
       this.dataFile = dataFile;
@@ -132,15 +315,42 @@ class ABTestingFramework {
     }
   }
 
+  /** Release the data file lock so another process (or instance) can open it. Further writes fail. */
+  public close(): void {
+    this.closed = true;
+    if (this.lock) {
+      releaseLock(this.lock);
+      this.lock = undefined;
+    }
+  }
+
+  private noteGrowth(addedBytes: number): void {
+    this.size += addedBytes;
+    if (!this.warned && this.size > this.warnBytes) {
+      this.warned = true;
+      console.error(
+        `A/B data file ${this.dataFile} is ${Math.round(this.size / 1048576)} MB. It is never compacted: ` +
+          "plan a rollup or rotation before it grows much further (see DEPLOYMENT.md)"
+      );
+    }
+  }
+
   private openDataFile(): void {
     const file = this.dataFile!;
     try {
       fs.mkdirSync(path.dirname(file), { recursive: true });
+      this.lock = acquireLock(`${file}.lock`, this.lockWaitMs);
       if (!fs.existsSync(file)) {
         fs.writeFileSync(file, "", { mode: 0o600 });
+        if (this.fsync) {
+          fsyncPath(file);
+          fsyncPath(path.dirname(file), true);
+        }
         return;
       }
       const content = fs.readFileSync(file, "utf-8");
+      this.size = Buffer.byteLength(content);
+      this.noteGrowth(0);
       let experiments = 0;
       let measurements = 0;
       let skipped = 0;
@@ -193,19 +403,32 @@ class ABTestingFramework {
       // starts on its own line instead of being glued to the torn one.
       if (content.length > 0 && !content.endsWith("\n")) {
         fs.appendFileSync(file, "\n");
+        this.size += 1;
       }
       console.error(
         `Restored ${experiments} experiments and ${measurements} measurements from ${file}` +
           (skipped || dropped ? ` (skipped ${skipped} unreadable lines, dropped ${dropped} orphaned measurements)` : "")
       );
     } catch (error: any) {
+      this.close(); // never keep the lock of a data file we could not open
       throw new Error(`Cannot use A/B data file ${file}: ${error.message}`);
     }
   }
 
   private persist(entry: LogEntry): void {
     if (!this.dataFile) return;
-    fs.appendFileSync(this.dataFile, JSON.stringify(entry) + "\n", { mode: 0o600 });
+    if (this.closed) throw new Error("A/B data file is closed");
+    if (this.lock && !holdsLock(this.lock)) {
+      // Another process took the lock over (this one stalled for longer than the stale limit, or the
+      // lock file was removed). Writing now could interleave two writers' histories: refuse.
+      throw new Error(
+        "A/B data file lock was lost to another process: refusing to write. Stop the other process and restart this server"
+      );
+    }
+    const line = JSON.stringify(entry) + "\n";
+    fs.appendFileSync(this.dataFile, line, { mode: 0o600 });
+    if (this.fsync) fsyncPath(this.dataFile);
+    this.noteGrowth(Buffer.byteLength(line));
   }
 
   private loadExperiments(): void {
@@ -468,7 +691,11 @@ class ABTestingFramework {
 // Initialize framework
 const abTesting = new ABTestingFramework(
   process.env.EXPERIMENTS_FILE || "./experiments.yaml",
-  process.env.AB_DATA_FILE || undefined
+  process.env.AB_DATA_FILE || undefined,
+  {
+    fsync: /^(1|true|yes)$/i.test(process.env.AB_FSYNC ?? ""),
+    warnBytes: Number.parseInt(process.env.AB_DATA_WARN_BYTES ?? "", 10) || undefined,
+  }
 );
 
 // Tool: Create experiment

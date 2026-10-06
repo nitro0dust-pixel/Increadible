@@ -48,5 +48,9 @@ experiments:                    # optional file, EXPERIMENTS_FILE; invalid entri
 - `ci_95` is a 95% confidence interval for the mean. `effect_sizes` is Cohen's d (pooled SD).
 - **Persistence** (`AB_DATA_FILE`, optional): an append-only JSONL log of created experiments and measurements,
   written before each change is applied and replayed at startup. If a write fails, the tool call returns an error and
-  nothing is recorded. Without `AB_DATA_FILE`, everything is in memory and lost on restart. Run one process per file.
+  nothing is recorded. Without `AB_DATA_FILE`, everything is in memory and lost on restart.
+  Exactly one process may own the file: a lock file (`<file>.lock`) makes a second process fail at startup with the
+  holder's pid, and a write fails if the lock was lost. `AB_FSYNC=1` flushes each append to disk (a failed flush fails
+  the call, but the line may already be in the file). A warning is logged once the file passes `AB_DATA_WARN_BYTES`
+  (default 100 MB); it is never compacted. Library users call `close()` to hand the file over.
 - `create_experiment` with an id that already exists is rejected; YAML definitions override a logged experiment with the same id.

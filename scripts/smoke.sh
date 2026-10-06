@@ -45,6 +45,36 @@ echo '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_experi
     assert.strictEqual(r.winner, "A");
     assert.strictEqual(r.variant_results.A.metrics.q.sample_size, 60);
   '
+
+echo "[lock] clean exit releases the data file lock; a second writer is refused; SIGTERM releases it"
+[ ! -e "$AB_DATA_FILE.lock" ] || { echo "lock left behind after a clean exit" >&2; exit 1; }
+hold() { # start a server that stays up (stdin is a fifo we keep open) and wait until it holds the lock
+  rm -f "$TMP/hold.fifo"; mkfifo "$TMP/hold.fifo"
+  node dist/src/index.js <"$TMP/hold.fifo" >/dev/null 2>"$TMP/holder.err" &
+  PID=$!
+  exec 3<>"$TMP/hold.fifo"
+  for _ in $(seq 1 50); do [ -e "$AB_DATA_FILE.lock" ] && return 0; sleep 0.1; done
+  echo "holder never took the lock: $(cat "$TMP/holder.err")" >&2; exit 1
+}
+hold
+if echo '{"jsonrpc":"2.0","id":1,"method":"ping"}' | node dist/src/index.js >/dev/null 2>"$TMP/second.err"; then
+  echo "a second writer was allowed on the same data file" >&2; exit 1
+fi
+grep -q "in use by pid $PID" "$TMP/second.err" \
+  || { echo "second writer failed for the wrong reason: $(head -5 "$TMP/second.err")" >&2; exit 1; }
+kill -TERM "$PID"; wait "$PID" 2>/dev/null || true; PID=""; exec 3>&-
+[ ! -e "$AB_DATA_FILE.lock" ] || { echo "SIGTERM did not release the lock" >&2; exit 1; }
+
+echo "[lock] a crashed (SIGKILL) holder's lock is taken over and its data survives"
+hold
+kill -KILL "$PID"; wait "$PID" 2>/dev/null || true; PID=""; exec 3>&-
+[ -e "$AB_DATA_FILE.lock" ] || { echo "SIGKILL should have left the lock behind" >&2; exit 1; }
+echo '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_experiment_results","arguments":{"experiment_id":"smoke"}}}' \
+  | node dist/src/index.js 2>/dev/null \
+  | node -e '
+    const r = JSON.parse(JSON.parse(require("fs").readFileSync(0, "utf8")).result.content[0].text);
+    require("assert").strictEqual(r.variant_results.A.metrics.q.sample_size, 60, "data lost after a crash: " + JSON.stringify(r));
+  '
 unset AB_DATA_FILE
 
 PORT=${SMOKE_PORT:-3199}
@@ -60,7 +90,8 @@ code() { curl -s -o /dev/null -w '%{http_code}' "$@"; }
 [ "$(code "http://127.0.0.1:$PORT/metrics")" = 401 ] || { echo "metrics must require auth" >&2; exit 1; }
 AUTH=(-H "Authorization: Bearer smoke-token")
 RES=$(curl -s "${AUTH[@]}" -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_api_stats","arguments":{}}}' "http://127.0.0.1:$PORT/mcp")
-echo "$RES" | grep -q '"isError":false' || { echo "tools/call over HTTP failed: $RES" >&2; exit 1; }
-curl -s "${AUTH[@]}" "http://127.0.0.1:$PORT/metrics" | grep -q 'increadible_tool_calls_total{tool="get_api_stats"} 1' \
+grep -q '"isError":false' <<<"$RES" || { echo "tools/call over HTTP failed: $RES" >&2; exit 1; }
+METRICS=$(curl -s "${AUTH[@]}" "http://127.0.0.1:$PORT/metrics")
+grep -q 'increadible_tool_calls_total{tool="get_api_stats"} 1' <<<"$METRICS" \
   || { echo "metrics missing tool counter" >&2; exit 1; }
 echo "smoke: OK"
