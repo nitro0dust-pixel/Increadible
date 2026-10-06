@@ -90,7 +90,8 @@ code() { curl -s -o /dev/null -w '%{http_code}' "$@"; }
 [ "$(code "http://127.0.0.1:$PORT/metrics")" = 401 ] || { echo "metrics must require auth" >&2; exit 1; }
 AUTH=(-H "Authorization: Bearer smoke-token")
 RES=$(curl -s "${AUTH[@]}" -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_api_stats","arguments":{}}}' "http://127.0.0.1:$PORT/mcp")
-echo "$RES" | grep -q '"isError":false' || { echo "tools/call over HTTP failed: $RES" >&2; exit 1; }
-curl -s "${AUTH[@]}" "http://127.0.0.1:$PORT/metrics" | grep -q 'increadible_tool_calls_total{tool="get_api_stats"} 1' \
+grep -q '"isError":false' <<<"$RES" || { echo "tools/call over HTTP failed: $RES" >&2; exit 1; }
+METRICS=$(curl -s "${AUTH[@]}" "http://127.0.0.1:$PORT/metrics")
+grep -q 'increadible_tool_calls_total{tool="get_api_stats"} 1' <<<"$METRICS" \
   || { echo "metrics missing tool counter" >&2; exit 1; }
 echo "smoke: OK"

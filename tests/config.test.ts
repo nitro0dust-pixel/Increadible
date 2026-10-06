@@ -173,6 +173,22 @@ describe("Dockerfile and package.json", () => {
     expect(read("scripts/smoke.sh")).toContain("kill -KILL");
   });
 
+  it("never pipes into `grep -q` in a pipefail script (SIGPIPE makes a correct match report failure)", () => {
+    // `cmd | grep -q x` under pipefail exits 141 when cmd is still writing after the first match: it failed the real-container
+    // probe in CI although the container had logged exactly the expected refusal. Capture the output, then match the variable.
+    const dir = path.join(root, "scripts");
+    const offenders: string[] = [];
+    for (const file of fs.readdirSync(dir).filter((f) => f.endsWith(".sh"))) {
+      const text = fs.readFileSync(path.join(dir, file), "utf8");
+      if (!/pipefail/.test(text)) continue;
+      text.split("\n").forEach((line, i) => {
+        if (/^\s*#/.test(line)) return;
+        if (/\|\s*grep\s+(-[A-Za-z]*q|--quiet)/.test(line)) offenders.push(`${file}:${i + 1}: ${line.trim()}`);
+      });
+    }
+    expect(offenders).toEqual([]);
+  });
+
   it("uses a tracked lockfile for reproducible installs", () => {
     expect(fs.existsSync(path.join(root, "package-lock.json"))).toBe(true);
     expect(read(".gitignore")).not.toMatch(/^package-lock\.json$/m);

@@ -33,7 +33,9 @@ echo "[config] $IMAGE"
 [ "$(docker image inspect --format '{{.Config.User}}' "$IMAGE")" = "node" ] || fail "image must run as user 'node'"
 [ "$(docker image inspect --format '{{join .Config.Cmd " "}}' "$IMAGE")" = "node dist/src/index.js" ] || fail "unexpected CMD"
 [ "$(docker image inspect --format '{{.Architecture}}' "$IMAGE")" = "amd64" ] || fail "expected an amd64 image"
-docker image inspect --format '{{json .Config.Healthcheck}}' "$IMAGE" | grep -q '"Test"' || fail "image has no HEALTHCHECK"
+# Capture, then match: under pipefail a `cmd | grep -q` fails with SIGPIPE (141) whenever cmd is still writing after the match.
+hc=$(docker image inspect --format '{{json .Config.Healthcheck}}' "$IMAGE")
+[[ "$hc" == *'"Test"'* ]] || fail "image has no HEALTHCHECK"
 
 echo "[http] health, auth, MCP tool list"
 docker volume create "$VOL" >/dev/null
@@ -57,7 +59,8 @@ echo "[lock] a second container on the same volume must be refused while the fir
 docker run -d --name "$C" -v "$VOL:/data" -e AB_FSYNC=1 "$IMAGE" >/dev/null
 code=$(timeout 90 docker wait "$C") || fail "the second container neither exited nor was refused within 90s"
 [ "$code" != 0 ] || fail "a second container was allowed to open the same A/B data file"
-docker logs "$C" 2>&1 | grep -Eq "in use by pid|could not be checked from here" || fail "the second container failed for the wrong reason: $(docker logs "$C" 2>&1 | tail -5)"
+c_logs=$(docker logs "$C" 2>&1)
+grep -Eq "in use by pid|could not be checked from here" <<<"$c_logs" || fail "the second container failed for the wrong reason: $(tail -5 <<<"$c_logs")"
 curl -fs "localhost:$PORT/health" >/dev/null || fail "the first container was disturbed by the refused second one"
 
 echo "[healthcheck] Docker's HEALTHCHECK must report healthy (waiting up to 60s)"
