@@ -389,3 +389,49 @@ describe("repository hygiene", () => {
     expect(text).not.toMatch(/PRODUCTION DEPLOYMENT AUTHORIZED|1000\+ APIs|99\.98% (cost )?(reduction|savings|optimization)/i);
   });
 });
+
+describe("CLAUDE.md and CHANGELOG.md", () => {
+  const claude = read("CLAUDE.md");
+  const changelog = read("CHANGELOG.md");
+  const sourceDirs = ["src", "features/07-routing-plugins/src", "features/08-ab-testing/src", "features/09-api-gateway/src"];
+  const sources = sourceDirs
+    .flatMap((d) => fs.readdirSync(path.join(root, d)).filter((f) => f.endsWith(".ts")).map((f) => read(`${d}/${f}`)))
+    .join("\n");
+
+  it("names every environment variable the code reads, and only those", () => {
+    const used = new Set([...sources.matchAll(/process\.env\.([A-Z][A-Z0-9_]+)/g), ...sources.matchAll(/envInt\("([A-Z][A-Z0-9_]+)"/g)].map((m) => m[1]));
+    const section = /Configuration \(names only[^\n]*\n(?:[^\n]+\n)*/.exec(claude);
+    expect(section).not.toBeNull();
+    const listed = new Set([...section![0].matchAll(/`([A-Z][A-Z0-9_]+)`/g)].map((m) => m[1]));
+    expect([...used].sort()).toEqual([...listed].sort());
+  });
+
+  it("mentions only npm scripts and files that exist, and describes every CI job", () => {
+    const scripts = pkg.scripts as Record<string, string>;
+    for (const m of claude.matchAll(/npm run ([a-z:-]+)/g)) expect({ script: m[1], exists: m[1] in scripts }).toEqual({ script: m[1], exists: true });
+    for (const m of claude.matchAll(/(?:scripts|monitoring|k8s)\/[A-Za-z0-9._-]+/g)) {
+      expect({ file: m[0], exists: fs.existsSync(path.join(root, m[0])) }).toEqual({ file: m[0], exists: true });
+    }
+    const jobs = Object.keys(yaml.parse(read(".github/workflows/ci-cd.yml")).jobs);
+    expect(jobs.length).toBeGreaterThan(0);
+    for (const job of jobs) expect({ job, described: claude.includes("`" + job + "`") }).toEqual({ job, described: true });
+  });
+
+  it("holds no secret-looking value", () => {
+    for (const doc of [claude, changelog]) expect(doc).not.toMatch(/(ghp_|github_pat_|AKIA[0-9A-Z]{12}|-----BEGIN|Bearer [A-Za-z0-9._-]{10,})/);
+    expect(claude).not.toMatch(/AUTH_TOKEN=\S/);
+  });
+
+  it("has an Unreleased section and mentions every pull request the roadmap lists as done", () => {
+    expect(changelog).toMatch(/^## \[Unreleased\]/m);
+    const listed = [...read("ROADMAP.md").matchAll(/^\d+\. \*\*\[PR #(\d+)\]/gm)].map((m) => m[1]);
+    expect(listed.length).toBeGreaterThan(5);
+    for (const n of listed) expect({ pr: n, inChangelog: changelog.includes(`pull/${n})`) }).toEqual({ pr: n, inChangelog: true });
+  });
+
+  it("is linked from the README, and the ROADMAP no longer lists either as missing", () => {
+    expect(read("README.md")).toContain("CLAUDE.md");
+    expect(read("README.md")).toContain("CHANGELOG.md");
+    expect(read("ROADMAP.md")).not.toMatch(/no CHANGELOG|no `CLAUDE\.md`/);
+  });
+});
