@@ -34,6 +34,11 @@ interface Experiment {
   metrics: Metric[];
   /** The id of the metric that decides the winner. Default: the first metric. */
   primary_metric?: string;
+  /**
+   * Relative traffic per variant, in the order of `variants` (any scale: [1, 2, 1] is 25%, 50%, 25%). Overrides `traffic_split`.
+   * Without it, two variants use `traffic_split` and more than two share traffic equally.
+   */
+  weights?: number[];
   results?: ExperimentResults;
 }
 
@@ -62,8 +67,24 @@ function bucket(key: string): number {
 }
 
 const MIN_TOTAL_SAMPLES = 100;
+const MAX_VARIANTS = 10;
 const MIN_SAMPLES_PER_VARIANT = 30;
 const SIGNIFICANCE_LEVEL = 0.05;
+
+/**
+ * Holm's step-down adjustment of a family of p-values: controls the chance of any false positive across all of them. With one
+ * p-value it returns that p-value unchanged. Adjusted values are never smaller than the raw ones and never above 1.
+ */
+export function holmAdjust(p: number[]): number[] {
+  const order = p.map((_, i) => i).sort((a, b) => p[a] - p[b] || a - b);
+  const adjusted = new Array<number>(p.length);
+  let running = 0;
+  order.forEach((index, rank) => {
+    running = Math.max(running, Math.min(1, (p.length - rank) * p[index]));
+    adjusted[index] = running;
+  });
+  return adjusted;
+}
 
 // Complementary error function (Numerical Recipes erfcc, relative error < 1.2e-7).
 function erfc(x: number): number {
@@ -553,8 +574,8 @@ class ABTestingFramework {
     if (!experiment || typeof experiment.id !== "string") {
       throw new Error("Experiment must have a string id");
     }
-    if (!experiment.variants || experiment.variants.length !== 2) {
-      throw new Error("Experiment must have exactly 2 variants");
+    if (!Array.isArray(experiment.variants) || experiment.variants.length < 2 || experiment.variants.length > MAX_VARIANTS) {
+      throw new Error(`Experiment must have between 2 and ${MAX_VARIANTS} variants`);
     }
     if (
       typeof experiment.traffic_split !== "number" ||
@@ -565,6 +586,21 @@ class ABTestingFramework {
     }
     if (!Array.isArray(experiment.metrics)) {
       throw new Error("Experiment must define a metrics array");
+    }
+    // More than two variants is new, so ids are checked there (a two-variant experiment written before is never rejected for them).
+    if (experiment.variants.length > 2) {
+      const seen = new Set<string>();
+      for (const v of experiment.variants) {
+        if (!v || typeof v.id !== "string" || v.id === "") throw new Error("Every variant must have a non-empty string id");
+        if (seen.has(v.id)) throw new Error(`Duplicate variant id: ${v.id}`);
+        seen.add(v.id);
+      }
+    }
+    if (experiment.weights !== undefined) {
+      const w = experiment.weights;
+      if (!Array.isArray(w) || w.length !== experiment.variants.length || !w.every((x) => typeof x === "number" && Number.isFinite(x) && x > 0)) {
+        throw new Error(`weights must be ${experiment.variants.length} positive numbers, one per variant`);
+      }
     }
     // The fields below are new: they are checked only when present, so every experiment written before them stays valid
     // (a stricter check on existing fields would silently drop experiments from an existing data file at replay).
@@ -596,6 +632,22 @@ class ABTestingFramework {
     this.experiments.set(created.id, created);
   }
 
+  /** Which variant a draw in [0, 1) falls on. Two variants without weights use traffic_split exactly as before. */
+  private variantIndex(experiment: Experiment, draw: number): number {
+    const n = experiment.variants.length;
+    if (experiment.weights !== undefined) {
+      const total = experiment.weights.reduce((a, b) => a + b, 0);
+      let cumulative = 0;
+      for (let i = 0; i < n - 1; i++) {
+        cumulative += experiment.weights[i];
+        if (draw < cumulative / total) return i;
+      }
+      return n - 1;
+    }
+    if (n === 2) return draw < experiment.traffic_split ? 0 : 1;
+    return Math.min(n - 1, Math.floor(draw * n));
+  }
+
   public assignVariant(
     experimentId: string,
     userId?: string
@@ -613,7 +665,7 @@ class ABTestingFramework {
       userId !== undefined && userId !== ""
         ? bucket(`${experimentId}:${userId}`)
         : Math.random();
-    const variantIndex = draw < experiment.traffic_split ? 0 : 1;
+    const variantIndex = this.variantIndex(experiment, draw);
     const selectedVariant = experiment.variants[variantIndex];
 
     return {
@@ -713,20 +765,26 @@ class ABTestingFramework {
       };
     }
 
-    const [vA, vB] = experiment.variants;
+    const vs = experiment.variants;
     const variantStats: Record<string, any> = {};
-    const pValues: Record<string, number> = {};
-    const effectSizes: Record<string, number> = {};
-    const meansByMetric: Record<string, [number, number]> = {};
+    for (const variant of vs) variantStats[variant.id] = { name: variant.name, metrics: {} };
 
-    for (const variant of experiment.variants) {
-      variantStats[variant.id] = { name: variant.name, metrics: {} };
+    // Every pair of variants (i < j) is compared on every metric with Welch's t-test, and Cohen's d is reported. With two
+    // variants there is one pair, and the numbers are exactly those this code produced before more variants were allowed.
+    interface PairResult {
+      p: number;
+      effect?: number;
+      meanA: number;
+      meanB: number;
     }
+    const pairs: Array<[number, number]> = [];
+    for (let i = 0; i < vs.length; i++) for (let j = i + 1; j < vs.length; j++) pairs.push([i, j]);
+    const pairResults = new Map<string, Array<PairResult | undefined>>();
 
     for (const metric of experiment.metrics) {
-      const groups = [vA, vB].map((v) => sampleStats(tally?.variants.get(v.id)?.metrics.get(metric.id)));
+      const groups = vs.map((v) => sampleStats(tally?.variants.get(v.id)?.metrics.get(metric.id)));
 
-      [vA, vB].forEach((v, i) => {
+      vs.forEach((v, i) => {
         const g = groups[i];
         if (g.n === 0) return;
         const half = g.n > 1 ? (tCritical95(g.n - 1) * g.std) / Math.sqrt(g.n) : 0;
@@ -741,87 +799,154 @@ class ABTestingFramework {
         };
       });
 
-      const [g1, g2] = groups;
-      if (g1.n < 2 || g2.n < 2) continue;
+      pairResults.set(
+        metric.id,
+        pairs.map(([i, j]) => {
+          const [g1, g2] = [groups[i], groups[j]];
+          if (g1.n < 2 || g2.n < 2) return undefined;
+          const diff = g1.mean - g2.mean;
+          const se2 = g1.variance / g1.n + g2.variance / g2.n;
 
-      meansByMetric[metric.id] = [g1.mean, g2.mean];
-      const diff = g1.mean - g2.mean;
-      const se2 = g1.variance / g1.n + g2.variance / g2.n;
+          // Welch's t-test
+          let p: number;
+          if (se2 === 0) {
+            p = diff === 0 ? 1 : 0;
+          } else {
+            const df =
+              (se2 * se2) /
+              ((g1.variance / g1.n) ** 2 / (g1.n - 1) +
+                (g2.variance / g2.n) ** 2 / (g2.n - 1));
+            p = parseFloat(twoSidedPValue(diff / Math.sqrt(se2), df).toPrecision(4));
+          }
 
-      // Welch's t-test
-      if (se2 === 0) {
-        pValues[metric.id] = diff === 0 ? 1 : 0;
-      } else {
-        const df =
-          (se2 * se2) /
-          ((g1.variance / g1.n) ** 2 / (g1.n - 1) +
-            (g2.variance / g2.n) ** 2 / (g2.n - 1));
-        pValues[metric.id] = parseFloat(twoSidedPValue(diff / Math.sqrt(se2), df).toPrecision(4));
-      }
-
-      // Cohen's d with pooled standard deviation
-      const pooled = Math.sqrt(
-        ((g1.n - 1) * g1.variance + (g2.n - 1) * g2.variance) / (g1.n + g2.n - 2)
+          // Cohen's d with pooled standard deviation
+          const pooled = Math.sqrt(
+            ((g1.n - 1) * g1.variance + (g2.n - 1) * g2.variance) / (g1.n + g2.n - 2)
+          );
+          let effect: number | undefined;
+          if (pooled > 0) effect = parseFloat((diff / pooled).toFixed(2));
+          else if (diff === 0) effect = 0;
+          return { p, effect, meanA: g1.mean, meanB: g2.mean };
+        })
       );
-      if (pooled > 0) effectSizes[metric.id] = parseFloat((diff / pooled).toFixed(2));
-      else if (diff === 0) effectSizes[metric.id] = 0;
     }
+    const pairOf = (metricId: string, k: number) => pairResults.get(metricId)?.[k];
 
-    // Winner: the primary metric alone decides (the first metric unless the experiment names one), the better mean wins
-    // (the higher one unless the metric says `lower_is_better`), and only if significant.
-    // `firstIsBetter` is true when variant A's mean beats variant B's on `metric`. With the defaults it is `m1 > m2`,
-    // which is what this code did before directions existed.
-    const firstIsBetter = (metric: Metric, m1: number, m2: number) =>
-      metric.direction === "lower_is_better" ? m1 < m2 : m1 > m2;
+    // `isBetter` is true when x beats y on `metric`: the higher value unless the metric says `lower_is_better`.
+    const isBetter = (metric: Metric, x: number, y: number) => (metric.direction === "lower_is_better" ? x < y : x > y);
 
+    // Winner: the primary metric alone decides (the first metric unless the experiment names one). The leader is the variant with
+    // the best mean. It wins only if it beats EVERY other variant significantly, after Holm's correction over all pairs, so that
+    // comparing many variants does not make a lucky difference look significant. With two variants this is the single comparison
+    // this code always made (Holm over one comparison changes nothing).
     let winner: string | undefined;
     let confidence = 0;
+    let leader: number | undefined;
+    const adjusted = new Map<number, number>(); // pair index -> Holm-adjusted p on the primary metric
     const primary =
       experiment.primary_metric === undefined
         ? experiment.metrics[0]
         : experiment.metrics.find((m) => m.id === experiment.primary_metric);
-    if (primary && pValues[primary.id] !== undefined) {
-      const p = pValues[primary.id];
-      confidence = parseFloat((1 - p).toFixed(4));
-      const [m1, m2] = meansByMetric[primary.id];
-      if (p < SIGNIFICANCE_LEVEL && m1 !== m2) {
-        winner = firstIsBetter(primary, m1, m2) ? vA.id : vB.id;
-      }
+    if (primary && pairs.every((_, k) => pairOf(primary.id, k) !== undefined)) {
+      const means = vs.map((v) => sampleStats(tally?.variants.get(v.id)?.metrics.get(primary.id)).mean);
+      leader = 0;
+      for (let i = 1; i < vs.length; i++) if (isBetter(primary, means[i], means[leader])) leader = i;
+      holmAdjust(pairs.map((_, k) => pairOf(primary.id, k)!.p)).forEach((a, k) => adjusted.set(k, a));
+      const mine = pairs.map((pr, k) => ({ other: pr[0] === leader ? pr[1] : pr[1] === leader ? pr[0] : -1, k })).filter((x) => x.other >= 0);
+      confidence = parseFloat((1 - Math.max(...mine.map((x) => adjusted.get(x.k)!))).toFixed(4));
+      if (mine.every((x) => adjusted.get(x.k)! < SIGNIFICANCE_LEVEL && means[leader!] !== means[x.other])) winner = vs[leader].id;
     }
 
     // Guardrails: metrics that must not get worse. They never pick a winner; they can only withhold one. A winner is
-    // withheld when a guardrail is significantly worse for it, and also when a guardrail has too little data to judge
-    // (a missing check is not a pass). "Not significantly worse" is not proof of "not worse": the same two-sided test at
-    // the same level on the same samples is weak when the sample is small, so read the p-value, not only the verdict.
+    // withheld when a guardrail is significantly worse for it against any other variant, and also when a guardrail has too
+    // little data to judge (a missing check is not a pass). "Not significantly worse" is not proof of "not worse": the same
+    // two-sided test at the same level on the same samples is weak when the sample is small, so read the p-value, not only
+    // the verdict. Guardrail p-values are NOT corrected for the number of comparisons, which errs towards withholding.
     // The keys below exist only for experiments that declare a guardrail, so every other experiment's output is unchanged.
-    const guardrails: Record<string, { p_value: number | null; significantly_worse_variant: string | null }> = {};
+    const guardrails: Record<string, any> = {};
     const withheldBy: string[] = [];
+    const two = vs.length === 2;
     for (const g of experiment.metrics.filter((m) => m.guardrail === true)) {
-      const p = pValues[g.id];
-      if (p === undefined) {
-        guardrails[g.id] = { p_value: null, significantly_worse_variant: null };
-        if (winner !== undefined) withheldBy.push(g.id);
+      if (two) {
+        const pr = pairOf(g.id, 0);
+        if (pr === undefined) {
+          guardrails[g.id] = { p_value: null, significantly_worse_variant: null };
+          if (winner !== undefined) withheldBy.push(g.id);
+          continue;
+        }
+        const worse = pr.p < SIGNIFICANCE_LEVEL && pr.meanA !== pr.meanB ? (isBetter(g, pr.meanA, pr.meanB) ? vs[1].id : vs[0].id) : null;
+        guardrails[g.id] = { p_value: pr.p, significantly_worse_variant: worse };
+        if (winner !== undefined && worse === winner) withheldBy.push(g.id);
         continue;
       }
-      const [m1, m2] = meansByMetric[g.id];
-      const worse = p < SIGNIFICANCE_LEVEL && m1 !== m2 ? (firstIsBetter(g, m1, m2) ? vB.id : vA.id) : null;
-      guardrails[g.id] = { p_value: p, significantly_worse_variant: worse };
-      if (winner !== undefined && worse === winner) withheldBy.push(g.id);
+      // More than two variants: the leader on the primary metric is compared with every other variant.
+      const comparisons: Array<{ against: string; p_value: number | null; leader_significantly_worse: boolean }> = [];
+      if (leader !== undefined) {
+        pairs.forEach(([i, j], k) => {
+          if (i !== leader && j !== leader) return;
+          const other = i === leader ? j : i;
+          const pr = pairOf(g.id, k);
+          if (pr === undefined) {
+            comparisons.push({ against: vs[other].id, p_value: null, leader_significantly_worse: false });
+            return;
+          }
+          const [mLeader, mOther] = i === leader ? [pr.meanA, pr.meanB] : [pr.meanB, pr.meanA];
+          comparisons.push({
+            against: vs[other].id,
+            p_value: pr.p,
+            leader_significantly_worse: pr.p < SIGNIFICANCE_LEVEL && mLeader !== mOther && isBetter(g, mOther, mLeader),
+          });
+        });
+      }
+      guardrails[g.id] = { leader: leader === undefined ? null : vs[leader].id, comparisons };
+      if (winner !== undefined && comparisons.some((c) => c.p_value === null || c.leader_significantly_worse)) withheldBy.push(g.id);
     }
     const hasGuardrails = Object.keys(guardrails).length > 0;
     if (withheldBy.length > 0) winner = undefined;
 
+    const analysis: Record<string, any> = { test: "Welch t-test (normal approximation of t, two-sided)" };
+    if (two) {
+      // Unchanged shape for two variants: one p-value and one effect size per metric.
+      const pValues: Record<string, number> = {};
+      const effectSizes: Record<string, number> = {};
+      for (const metric of experiment.metrics) {
+        const pr = pairOf(metric.id, 0);
+        if (!pr) continue;
+        pValues[metric.id] = pr.p;
+        if (pr.effect !== undefined) effectSizes[metric.id] = pr.effect;
+      }
+      analysis.p_values = pValues;
+      analysis.effect_sizes = effectSizes;
+    } else {
+      // More than two variants: every pair on every metric. The primary metric's p-values are also given adjusted (Holm).
+      analysis.correction = "Holm-Bonferroni over all pairs of variants, on the primary metric";
+      analysis.primary_metric = primary?.id;
+      analysis.comparisons = experiment.metrics.flatMap((metric) =>
+        pairs.flatMap(([i, j], k) => {
+          const pr = pairOf(metric.id, k);
+          if (!pr) return [];
+          return [
+            {
+              metric: metric.id,
+              a: vs[i].id,
+              b: vs[j].id,
+              p_value: pr.p,
+              ...(metric === primary && adjusted.has(k) ? { adjusted_p_value: parseFloat(adjusted.get(k)!.toPrecision(4)) } : {}),
+              ...(pr.effect !== undefined ? { effect_size: pr.effect } : {}),
+              better: pr.meanA === pr.meanB ? null : isBetter(metric, pr.meanA, pr.meanB) ? vs[i].id : vs[j].id,
+            },
+          ];
+        })
+      );
+    }
+    analysis.significance_level = SIGNIFICANCE_LEVEL;
+    if (hasGuardrails) analysis.guardrails = guardrails;
+    if (withheldBy.length > 0) analysis.winner_withheld_by = withheldBy;
+
     return {
       status: "complete",
       variant_results: variantStats,
-      statistical_analysis: {
-        test: "Welch t-test (normal approximation of t, two-sided)",
-        p_values: pValues,
-        effect_sizes: effectSizes,
-        significance_level: SIGNIFICANCE_LEVEL,
-        ...(hasGuardrails ? { guardrails } : {}),
-        ...(withheldBy.length > 0 ? { winner_withheld_by: withheldBy } : {}),
-      },
+      statistical_analysis: analysis,
       winner,
       confidence,
     };
@@ -871,8 +996,9 @@ const abTesting = new ABTestingFramework(
 export const createExperimentTool = {
   name: "create_experiment",
   description:
-    "Create a new A/B testing experiment with exactly two variants. The first metric decides the winner unless " +
-    "primary_metric names another; a metric may set direction (higher_is_better, the default, or lower_is_better) " +
+    "Create a new A/B testing experiment with two to ten variants (traffic is split by traffic_split for two, equally for " +
+    "more, or by weights). A variant wins only if it is significantly better than every other one. The first metric decides " +
+    "the winner unless primary_metric names another; a metric may set direction (higher_is_better, the default, or lower_is_better) " +
     "and guardrail: true (it can withhold a winner but never pick one).",
   inputSchema: {
     type: "object" as const,
@@ -884,6 +1010,7 @@ export const createExperimentTool = {
       traffic_split: { type: "number" },
       metrics: { type: "array" },
       primary_metric: { type: "string" },
+      weights: { type: "array" },
     },
     required: ["id", "name", "hypothesis", "variants", "metrics"],
   },

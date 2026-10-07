@@ -116,12 +116,16 @@ rules:
 First enabled rule whose `match` fits wins; an empty `match` matches everything.
 
 **A/B testing** (`EXPERIMENTS_FILE`, optional):
-- Exactly 2 variants; `traffic_split` is the share sent to the first variant (default 0.5).
+- Two to ten variants. With two, `traffic_split` is the share sent to the first (default 0.5); with more, traffic is shared
+  equally, or by `weights` (relative numbers, one per variant, which override `traffic_split`). Assignment by user id is sticky.
 - Results stay `incomplete` until there are >= 100 measurements and >= 30 per variant.
 - Significance: Welch's t-test (normal approximation of t), two-sided, alpha = 0.05, on the
   **primary** metric: the first metric unless the experiment sets `primary_metric`. The higher mean is better unless the
   metric sets `direction: lower_is_better` (cost, latency, error rate). `confidence = 1 - p`. A winner is named
-  only if p < 0.05. Per-metric Cohen's d and a 95% CI of the mean are reported.
+  only if p < 0.05. Per-metric Cohen's d and a 95% CI of the mean are reported. **With more than two variants** every pair is
+  tested and a variant wins only if it is significantly better than **every** other one after Holm's correction over all
+  pairs (so comparing many variants does not make a lucky difference look significant); `confidence` is then that of the
+  leader's weakest comparison, and the result lists each pair in `comparisons`.
 - **Guardrails:** a metric with `guardrail: true` never picks a winner but can withhold one: if the leading variant is
   significantly worse on it, or it has too little data to judge, the result names no winner and says which guardrail held
   it back (`winner_withheld_by`). "Not significantly worse" is weaker than "not worse" on small samples; read the p-value.
