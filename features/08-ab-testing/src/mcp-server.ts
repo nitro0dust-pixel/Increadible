@@ -10,6 +10,20 @@ interface Variant {
   config: Record<string, any>;
 }
 
+const DIRECTIONS = ["higher_is_better", "lower_is_better"] as const;
+type Direction = (typeof DIRECTIONS)[number];
+
+interface Metric {
+  id: string;
+  name: string;
+  type: string;
+  aggregation: string;
+  /** Which way is better. Default `higher_is_better`; use `lower_is_better` for cost, latency, error rate. */
+  direction?: Direction;
+  /** A guardrail never decides the winner; it can only withhold one (see `getExperimentResults`). */
+  guardrail?: boolean;
+}
+
 interface Experiment {
   id: string;
   name: string;
@@ -17,12 +31,9 @@ interface Experiment {
   status: "setup" | "running" | "complete";
   variants: Variant[];
   traffic_split: number;
-  metrics: Array<{
-    id: string;
-    name: string;
-    type: string;
-    aggregation: string;
-  }>;
+  metrics: Metric[];
+  /** The id of the metric that decides the winner. Default: the first metric. */
+  primary_metric?: string;
   results?: ExperimentResults;
 }
 
@@ -555,6 +566,23 @@ class ABTestingFramework {
     if (!Array.isArray(experiment.metrics)) {
       throw new Error("Experiment must define a metrics array");
     }
+    // The fields below are new: they are checked only when present, so every experiment written before them stays valid
+    // (a stricter check on existing fields would silently drop experiments from an existing data file at replay).
+    for (const m of experiment.metrics) {
+      if (m?.direction !== undefined && !DIRECTIONS.includes(m.direction)) {
+        throw new Error(`Metric ${m.id}: direction must be one of ${DIRECTIONS.join(", ")}`);
+      }
+      if (m?.guardrail !== undefined && typeof m.guardrail !== "boolean") {
+        throw new Error(`Metric ${m.id}: guardrail must be true or false`);
+      }
+    }
+    if (experiment.primary_metric !== undefined) {
+      const primary = experiment.metrics.find((m) => m?.id === experiment.primary_metric);
+      if (!primary) throw new Error(`primary_metric ${String(experiment.primary_metric)} is not one of the experiment's metrics`);
+      if (primary.guardrail === true) throw new Error(`primary_metric ${primary.id} cannot also be a guardrail`);
+    } else if (experiment.metrics[0]?.guardrail === true) {
+      throw new Error(`The first metric ${experiment.metrics[0].id} decides the winner by default, so it cannot be a guardrail; set primary_metric`);
+    }
   }
 
   public createExperiment(experiment: Experiment): void {
@@ -739,18 +767,49 @@ class ABTestingFramework {
       else if (diff === 0) effectSizes[metric.id] = 0;
     }
 
-    // Winner: first metric only, higher mean is better, and only if significant.
+    // Winner: the primary metric alone decides (the first metric unless the experiment names one), the better mean wins
+    // (the higher one unless the metric says `lower_is_better`), and only if significant.
+    // `firstIsBetter` is true when variant A's mean beats variant B's on `metric`. With the defaults it is `m1 > m2`,
+    // which is what this code did before directions existed.
+    const firstIsBetter = (metric: Metric, m1: number, m2: number) =>
+      metric.direction === "lower_is_better" ? m1 < m2 : m1 > m2;
+
     let winner: string | undefined;
     let confidence = 0;
-    const primary = experiment.metrics[0];
+    const primary =
+      experiment.primary_metric === undefined
+        ? experiment.metrics[0]
+        : experiment.metrics.find((m) => m.id === experiment.primary_metric);
     if (primary && pValues[primary.id] !== undefined) {
       const p = pValues[primary.id];
       confidence = parseFloat((1 - p).toFixed(4));
       const [m1, m2] = meansByMetric[primary.id];
       if (p < SIGNIFICANCE_LEVEL && m1 !== m2) {
-        winner = m1 > m2 ? vA.id : vB.id;
+        winner = firstIsBetter(primary, m1, m2) ? vA.id : vB.id;
       }
     }
+
+    // Guardrails: metrics that must not get worse. They never pick a winner; they can only withhold one. A winner is
+    // withheld when a guardrail is significantly worse for it, and also when a guardrail has too little data to judge
+    // (a missing check is not a pass). "Not significantly worse" is not proof of "not worse": the same two-sided test at
+    // the same level on the same samples is weak when the sample is small, so read the p-value, not only the verdict.
+    // The keys below exist only for experiments that declare a guardrail, so every other experiment's output is unchanged.
+    const guardrails: Record<string, { p_value: number | null; significantly_worse_variant: string | null }> = {};
+    const withheldBy: string[] = [];
+    for (const g of experiment.metrics.filter((m) => m.guardrail === true)) {
+      const p = pValues[g.id];
+      if (p === undefined) {
+        guardrails[g.id] = { p_value: null, significantly_worse_variant: null };
+        if (winner !== undefined) withheldBy.push(g.id);
+        continue;
+      }
+      const [m1, m2] = meansByMetric[g.id];
+      const worse = p < SIGNIFICANCE_LEVEL && m1 !== m2 ? (firstIsBetter(g, m1, m2) ? vB.id : vA.id) : null;
+      guardrails[g.id] = { p_value: p, significantly_worse_variant: worse };
+      if (winner !== undefined && worse === winner) withheldBy.push(g.id);
+    }
+    const hasGuardrails = Object.keys(guardrails).length > 0;
+    if (withheldBy.length > 0) winner = undefined;
 
     return {
       status: "complete",
@@ -760,6 +819,8 @@ class ABTestingFramework {
         p_values: pValues,
         effect_sizes: effectSizes,
         significance_level: SIGNIFICANCE_LEVEL,
+        ...(hasGuardrails ? { guardrails } : {}),
+        ...(withheldBy.length > 0 ? { winner_withheld_by: withheldBy } : {}),
       },
       winner,
       confidence,
@@ -771,8 +832,9 @@ class ABTestingFramework {
     if (!results || results.status !== "complete") {
       return "Insufficient data for recommendation";
     }
-
-    return results.winner || "No clear winner";
+    if (results.winner) return results.winner;
+    const withheld: string[] | undefined = results.statistical_analysis.winner_withheld_by;
+    return withheld ? `No clear winner (withheld by guardrail: ${withheld.join(", ")})` : "No clear winner";
   }
 
   public listExperiments(): Array<{
@@ -808,7 +870,10 @@ const abTesting = new ABTestingFramework(
 // Tool: Create experiment
 export const createExperimentTool = {
   name: "create_experiment",
-  description: "Create a new A/B testing experiment",
+  description:
+    "Create a new A/B testing experiment with exactly two variants. The first metric decides the winner unless " +
+    "primary_metric names another; a metric may set direction (higher_is_better, the default, or lower_is_better) " +
+    "and guardrail: true (it can withhold a winner but never pick one).",
   inputSchema: {
     type: "object" as const,
     properties: {
@@ -818,6 +883,7 @@ export const createExperimentTool = {
       variants: { type: "array" },
       traffic_split: { type: "number" },
       metrics: { type: "array" },
+      primary_metric: { type: "string" },
     },
     required: ["id", "name", "hypothesis", "variants", "metrics"],
   },

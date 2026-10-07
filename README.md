@@ -119,8 +119,12 @@ First enabled rule whose `match` fits wins; an empty `match` matches everything.
 - Exactly 2 variants; `traffic_split` is the share sent to the first variant (default 0.5).
 - Results stay `incomplete` until there are >= 100 measurements and >= 30 per variant.
 - Significance: Welch's t-test (normal approximation of t), two-sided, alpha = 0.05, on the
-  **first** metric; higher mean is treated as better. `confidence = 1 - p`. A winner is named
+  **primary** metric: the first metric unless the experiment sets `primary_metric`. The higher mean is better unless the
+  metric sets `direction: lower_is_better` (cost, latency, error rate). `confidence = 1 - p`. A winner is named
   only if p < 0.05. Per-metric Cohen's d and a 95% CI of the mean are reported.
+- **Guardrails:** a metric with `guardrail: true` never picks a winner but can withhold one: if the leading variant is
+  significantly worse on it, or it has too little data to judge, the result names no winner and says which guardrail held
+  it back (`winner_withheld_by`). "Not significantly worse" is weaker than "not worse" on small samples; read the p-value.
 - **Persistence:** set `AB_DATA_FILE` to keep experiments and measurements across restarts. Every
   `create_experiment` and `record_metric` is appended to that JSONL file *before* it takes effect (if the write
   fails, the call returns an error and nothing is recorded), and the file is replayed on startup.
