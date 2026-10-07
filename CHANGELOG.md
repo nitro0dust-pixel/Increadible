@@ -10,6 +10,7 @@ Entries marked **behaviour change** can affect an existing deployment.
 ## [Unreleased]
 
 ### Added
+- `COMPANIONS.md`: how third-party tools run beside this server (decided: side by side), starting with `token-optimizer-mcp` with the cautions found in its pinned source (its installer edits the global Claude settings; telemetry is opt-in), and the evidence on `agentacct` against the owner's condition (proven, in the market, one of its kind): it is an early-alpha project about ten weeks old and not unique, so it is not used. Real savings are to be measured with this server's A/B module (cost primary, quality guardrail) on a real workload. Documentation and one test only; no code change. ([#22](https://github.com/nitro0dust-pixel/Increadible/pull/22))
 - API gateway **live mode** (opt-in per API with `GATEWAY_LIVE_APIS`; the default is unchanged: mock data, no network): real GET requests to each API's registered URL, with the model-supplied `endpoint` and `params` treated as hostile
   (no other host or path, no redirects, JSON only, time and size capped, the credential added by the gateway only and never present in a result, error, log or cache key). Results now say `source: "mock"` or `"live"`, and
   `get_api_stats` gains `live_calls` and `live_apis`. Tested against a real local HTTP server (88 tests, 29 of 30 deliberate breakages caught, the 30th shown redundant) and a 60 000-endpoint property test. **Not tried against any real provider.** ([#21](https://github.com/nitro0dust-pixel/Increadible/pull/21))
