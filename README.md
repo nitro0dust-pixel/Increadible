@@ -135,7 +135,7 @@ First enabled rule whose `match` fits wins; an empty `match` matches everything.
     (`<file>.lock`, refreshed every 3 s, removed on clean exit and on SIGTERM/SIGINT; the lock of a crashed process is
     taken over; every write re-checks it and fails if it was lost). Details and limits: `DEPLOYMENT.md`.
   - **Durability:** by default an append is handed to the OS, which survives a process crash but not an OS crash or power
-    loss. Set `AB_FSYNC=1` to flush each append to disk first (slower: one flush per write, about 0.2 ms on a local disk; see [PERFORMANCE.md](PERFORMANCE.md)).
+    loss. Set `AB_FSYNC=1` to flush each append to disk first (slower: one flush per write, about 0.2 ms on a local disk; see [PERFORMANCE.md](PERFORMANCE.md)). The Kubernetes manifests set it; the image does not.
 
 **API gateway:** the registry has 9 APIs (weather, finance, news, reference, sports). `call_api`
 currently returns **generated mock data**; it makes no network calls. Results are cached for 5 minutes.

@@ -3,6 +3,7 @@ import * as fs from "fs";
 import * as path from "path";
 import * as yaml from "yaml";
 import { RoutingPluginsMCP } from "../features/07-routing-plugins/src/mcp-server";
+import { fsyncFromEnv } from "../features/08-ab-testing/src/mcp-server";
 
 const root = path.join(__dirname, "..");
 const read = (p: string) => fs.readFileSync(path.join(root, p), "utf-8");
@@ -39,6 +40,13 @@ describe.each(["k8s/staging-deployment.yaml", "k8s/production-deployment.yaml"])
     const [, size, u] = /^(\d+)(Mi|Gi)$/.exec(claim.spec.resources.requests.storage)!;
     const volumeBytes = Number(size) * unit[u];
     expect({ warnBytes, volumeBytes, early: warnBytes <= 0.25 * volumeBytes }).toMatchObject({ early: true });
+  });
+
+  it("flushes every A/B append to disk (the owner's AB_FSYNC decision), with a value the code actually reads as on", () => {
+    // The image and the code default to off. A value such as "on" would be silently read as off, so the manifest value is checked
+    // against the code's own parser, not against a copy of its regex.
+    const env = Object.fromEntries(container.env.map((e: any) => [e.name, e.value]));
+    expect({ value: env.AB_FSYNC, on: fsyncFromEnv(env.AB_FSYNC) }).toEqual({ value: env.AB_FSYNC, on: true });
   });
 
   it("is probed under the memory limit it deploys with, and smoke caps the heap, so the A/B memory regression checks cannot go slack", () => {

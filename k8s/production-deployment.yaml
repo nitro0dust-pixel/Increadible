@@ -126,6 +126,11 @@ spec:
               value: /config/routing-rules.yaml
             - name: AB_DATA_FILE
               value: /data/ab-data.jsonl
+            # Every A/B append is flushed to disk before the call returns, so an acknowledged write survives a node crash or
+            # power loss, not only a process crash. Measured on a local disk: about 0.2 ms per write, a ceiling of about 3 500
+            # writes per second (PERFORMANCE.md). NOT measured: this volume's storage class, which may cost more per flush.
+            - name: AB_FSYNC
+              value: "1"
             # The A/B data file is never compacted (about 120 bytes per measurement) and lives on the 1Gi volume below. Memory does
             # not grow with it (the module keeps running aggregates, PERFORMANCE.md), so what runs out is the volume: a warning at
             # 100 MiB (10% of it, about 870 000 measurements) leaves time to plan a rollup or a bigger volume. A test keeps the

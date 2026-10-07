@@ -44,6 +44,10 @@ Entries marked **behaviour change** can affect an existing deployment.
 - `ROADMAP.md`: status, plan, quality gates and open decisions, with evidence for every status. ([#6](https://github.com/nitro0dust-pixel/Increadible/pull/6))
 
 ### Changed
+- **Behaviour change (writes are slower, safer):** both Kubernetes manifests set `AB_FSYNC=1`, the owner's decision: every A/B append is flushed to disk before the call returns, so an acknowledged
+  write survives a node crash or power loss and not only a process crash. Measured on a local disk at about 0.2 ms per write (ceiling about 3 500 writes per second against about 22 000 without);
+  the cost on the cluster's storage class is not measured. The image and the code still default to off. A config test checks the manifest value against the code's own parser, because a value such
+  as `on` would be silently read as off. ([#18](https://github.com/nitro0dust-pixel/Increadible/pull/18))
 - The A/B module no longer holds every measurement in memory: it keeps counts and a running mean and variance per variant and metric, and replays the data file in
   1 MiB chunks. The data file is unchanged and still holds every measurement. Memory is 67 MiB at 8 000 000 measurements and at 50 000 (before: 85 MiB at 50 000 and
   397 MiB at 800 000), `get_experiment_results` takes 0.04 to 0.07 ms at any size (before: 9 ms to 177 ms), and `/health` is no longer delayed by queries. Results are
