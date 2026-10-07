@@ -10,6 +10,9 @@ Entries marked **behaviour change** can affect an existing deployment.
 ## [Unreleased]
 
 ### Added
+- API gateway **live mode** (opt-in per API with `GATEWAY_LIVE_APIS`; the default is unchanged: mock data, no network): real GET requests to each API's registered URL, with the model-supplied `endpoint` and `params` treated as hostile
+  (no other host or path, no redirects, JSON only, time and size capped, the credential added by the gateway only and never present in a result, error, log or cache key). Results now say `source: "mock"` or `"live"`, and
+  `get_api_stats` gains `live_calls` and `live_apis`. Tested against a real local HTTP server (88 tests, 29 of 30 deliberate breakages caught, the 30th shown redundant) and a 60 000-endpoint property test. **Not tried against any real provider.** ([#21](https://github.com/nitro0dust-pixel/Increadible/pull/21))
 - A/B experiments with **two to ten variants**: traffic is shared equally, or by `weights`; a variant wins only if it is significantly better than every other one, with Holm's correction over all pairs, and the result lists every
   pair (`comparisons`). An experiment with two variants behaves exactly as before: the same sticky assignments (checked against a fixture recorded from the previous implementation) and byte-identical results (the 120-dataset golden
   master is unchanged). New fields are checked only where they are new, so no existing experiment becomes invalid. ([#20](https://github.com/nitro0dust-pixel/Increadible/pull/20))

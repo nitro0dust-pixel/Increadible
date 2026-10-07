@@ -49,6 +49,11 @@ describe.each(["k8s/staging-deployment.yaml", "k8s/production-deployment.yaml"])
     expect({ value: env.AB_FSYNC, on: fsyncFromEnv(env.AB_FSYNC) }).toEqual({ value: env.AB_FSYNC, on: true });
   });
 
+  it("keeps live API gateway calls off: no manifest sets GATEWAY_LIVE_APIS or a gateway key (enabling them is the owner's decision)", () => {
+    const names = container.env.map((e: any) => e.name as string);
+    expect(names.filter((n: string) => n === "GATEWAY_LIVE_APIS" || n.startsWith("GATEWAY_KEY_"))).toEqual([]);
+  });
+
   it("is probed under the memory limit it deploys with, and smoke caps the heap, so the A/B memory regression checks cannot go slack", () => {
     // scripts/probe-image.sh starts the image with a large A/B data file under --memory=<limit>; if the manifests' limit moved and the
     // probe's did not, the probe would be checking a different container. scripts/smoke.sh does the same with a capped Node heap.
@@ -491,5 +496,25 @@ describe("CLAUDE.md and CHANGELOG.md", () => {
     expect(read("README.md")).toContain("CLAUDE.md");
     expect(read("README.md")).toContain("CHANGELOG.md");
     expect(read("ROADMAP.md")).not.toMatch(/no CHANGELOG|no `CLAUDE\.md`/);
+  });
+});
+
+describe("API gateway live mode is documented", () => {
+  const gateway = read("features/09-api-gateway/src/mcp-server.ts");
+  const deployment = read("DEPLOYMENT.md");
+
+  it("names every gateway variable the code reads in README.md and DEPLOYMENT.md", () => {
+    for (const name of ["GATEWAY_LIVE_APIS", "GATEWAY_TIMEOUT_MS", "GATEWAY_MAX_RESPONSE_BYTES", "GATEWAY_USER_AGENT"]) {
+      expect({ name, read: gateway.includes(`process.env.${name}`) }).toEqual({ name, read: true });
+      expect({ name, deployment: deployment.includes(name), readme: read("README.md").includes(name) }).toEqual({ name, deployment: true, readme: true });
+    }
+  });
+
+  it("names every credential variable and every host the registry uses in DEPLOYMENT.md (the egress advice depends on the hosts)", () => {
+    const credentials = [...gateway.matchAll(/env: "(GATEWAY_KEY_[A-Z0-9_]+)"/g)].map((m) => m[1]);
+    const hosts = [...gateway.matchAll(/endpoint: "https:\/\/([^/"]+)/g)].map((m) => m[1]);
+    expect(credentials).toHaveLength(4);
+    expect(hosts).toHaveLength(9);
+    for (const name of [...credentials, ...hosts]) expect({ name, documented: deployment.includes(name) }).toEqual({ name, documented: true });
   });
 });
