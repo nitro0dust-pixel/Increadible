@@ -518,3 +518,27 @@ describe("API gateway live mode is documented", () => {
     for (const name of [...credentials, ...hosts]) expect({ name, documented: deployment.includes(name) }).toEqual({ name, documented: true });
   });
 });
+
+describe("COMPANIONS.md", () => {
+  const doc = read("COMPANIONS.md");
+
+  it("is linked from README.md and CLAUDE.md", () => {
+    expect(read("README.md")).toContain("COMPANIONS.md");
+    expect(read("CLAUDE.md")).toContain("COMPANIONS.md");
+  });
+
+  it("names only vendored folders that exist, and states that nothing here is a dependency of the repository", () => {
+    const paths = [...doc.matchAll(/`(features\/0[1-6]-[a-z-]+\/[A-Za-z0-9._-]+)`/g)].map((m) => m[1]); // two-level folders, not the range features/01-06
+    expect(paths.length).toBeGreaterThan(4);
+    for (const p of paths) expect({ path: p, exists: fs.existsSync(path.join(root, p)) }).toEqual({ path: p, exists: true });
+    expect(doc).toContain("Nothing here is a dependency of this repository");
+  });
+
+  it("keeps its honesty markers and claims no saving: untried companions are NOT VERIFIED and the savings measurement is BLOCKED", () => {
+    expect(doc).toContain("NOT VERIFIED");
+    expect(doc).toContain("**BLOCKED**");
+    expect(doc).toMatch(/No saving is claimed/);
+    // the one place a saving could be quoted as a result is a percentage or a dollar figure next to the word saving
+    expect(doc).not.toMatch(/saving[s]? (of|is|was|are|were) [~$]?\d/i);
+  });
+});

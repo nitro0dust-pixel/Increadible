@@ -1,7 +1,7 @@
 # Increadible: context for Claude sessions
 
 Read this first, then `ROADMAP.md` (status, plan, open decisions: the source of truth for *what is done*),
-`DEPLOYMENT.md` (how it runs) and `PERFORMANCE.md` (what has been measured, and what the numbers do not say). This file holds the stable facts and the working rules; it deliberately holds no test
+`DEPLOYMENT.md` (how it runs), `PERFORMANCE.md` (what has been measured, and what the numbers do not say) and `COMPANIONS.md` (third-party tools that run beside this server, never inside it). This file holds the stable facts and the working rules; it deliberately holds no test
 counts, no commit hashes and no status, because those go stale with every PR.
 
 ## What this is

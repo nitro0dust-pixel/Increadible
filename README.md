@@ -8,7 +8,7 @@ MCP server) and **vendors five third-party projects as git submodules** (Feature
 > independently reviewed, and it has been load-tested only on one machine ([PERFORMANCE.md](PERFORMANCE.md)). Cost and quality figures quoted by upstream
 > projects are *not* verified here. See [Limitations](#limitations).
 
-Project status, the plan and open decisions are tracked in [ROADMAP.md](ROADMAP.md); what changed and when in
+Tools that run *beside* this server (and why `agentacct` is not the savings instrument) are in [COMPANIONS.md](COMPANIONS.md). Project status, the plan and open decisions are tracked in [ROADMAP.md](ROADMAP.md); what changed and when in
 [CHANGELOG.md](CHANGELOG.md); working rules and context for Claude sessions in [CLAUDE.md](CLAUDE.md).
 
 ## Components
