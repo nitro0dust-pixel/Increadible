@@ -10,6 +10,10 @@ Entries marked **behaviour change** can affect an existing deployment.
 ## [Unreleased]
 
 ### Added
+- A/B metric semantics: a metric can set `direction` (`higher_is_better`, the default, or `lower_is_better`), an experiment can name the `primary_metric` that decides the winner (default: the first metric), and a metric with `guardrail: true`
+  can withhold a winner (it is significantly worse for it, or has no data) but never picks one. Before this the first metric always decided and the higher mean always won, which reported a significantly cheaper variant as the loser.
+  Experiments that use none of the new fields answer exactly as before (the golden-master test of 120 datasets is unchanged); results gain `guardrails` and `winner_withheld_by` only for experiments that declare a guardrail. The new fields
+  are checked only when present, so no existing experiment becomes invalid. ([#19](https://github.com/nitro0dust-pixel/Increadible/pull/19))
 - `increadible_event_loop_delay_seconds` (histogram of how late the event loop ran a 10 ms timer, HTTP mode) and an `IncreadibleEventLoopBlocked` alert (a tick more than 1 s late in 5 minutes; 1 s is
   the kubelet's default probe timeout). A synchronous task that blocks the loop delays every probe and shows in no per-call timer, so this is the signal for the failure the capacity test found. Smoke and the container
   probe freeze the process for 1.3 s and require the late tick; the alert has a firing and a quiet promtool case. No measurable overhead. ([#17](https://github.com/nitro0dust-pixel/Increadible/pull/17))
