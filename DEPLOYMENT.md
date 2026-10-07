@@ -25,7 +25,7 @@ curl localhost:3000/health
 
 Config via env: `PORT` (3000), `HOST` (0.0.0.0 in the image, 127.0.0.1 otherwise), `AUTH_TOKEN`,
 `RULES_FILE` (/data/rules.yaml), `EXPERIMENTS_FILE` (/data/experiments.yaml), `AB_DATA_FILE`
-(/data/ab-data.jsonl), and optionally `AB_FSYNC` (`1` flushes every A/B append to disk) and `AB_DATA_WARN_BYTES`
+(/data/ab-data.jsonl), and optionally `AB_FSYNC` (`1` flushes every A/B append to disk; off in the image, on in the manifests) and `AB_DATA_WARN_BYTES`
 (growth warning, default 104857600). The HTTP hardening settings are in "HTTP hardening" below. Mount a volume at `/data` to keep edited rules and A/B data across container restarts
 (`docker run -v increadible-data:/data ...`). Without a volume, A/B data is lost when the container is removed.
 
@@ -86,9 +86,9 @@ Verification and limits:
 - **Flushing.** Without `AB_FSYNC` an acknowledged write survives a process crash but may be lost in an OS crash or power
   loss. `AB_FSYNC=1` flushes every append before the call returns (and the new file's directory entry), at the cost of one
   disk flush per write: **measured at about 0.2 ms per write on a local disk**, which cuts the write ceiling from about 22 000 to about
-  3 500 per second (`PERFORMANCE.md`; a network volume will cost more, not measured). It stays off by default in the image and the
-  manifests until the owner decides; the recommendation from the measurements is to turn it on. If a
-  flush fails the call returns an error, but the line may already be in the file and then shows up after a restart.
+  3 500 per second (`PERFORMANCE.md`; a network volume will cost more, not measured). It is off by default in the image and **on in both
+  manifests** (the owner's decision, from these measurements). Before relying on the ceiling, measure the flush on the deployed volume with
+  `scripts/loadtest.js` (scenario `ab-fsync`). If a flush fails the call returns an error, but the line may already be in the file and then shows up after a restart.
 - **Growth and memory.** The log is never compacted (about 120 bytes per measurement on disk). Memory does not grow with it: the module keeps
   counts and a running mean and variance per variant and metric, so the server idled at 67 MiB with 8 000 000 measurements, as it does with 50 000
   (measured, Node 24), and `get_experiment_results` takes about 0.05 ms at any size. Startup replays the file in chunks at about 1.1 microseconds

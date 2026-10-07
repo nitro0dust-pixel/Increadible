@@ -4,7 +4,7 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import { RoutingPluginsMCP, RoutingRule } from "../features/07-routing-plugins/src/mcp-server";
-import { ABTestingFramework, Experiment } from "../features/08-ab-testing/src/mcp-server";
+import { ABTestingFramework, Experiment, fsyncFromEnv } from "../features/08-ab-testing/src/mcp-server";
 import { UniversalAPIGateway } from "../features/09-api-gateway/src/mcp-server";
 
 /**
@@ -607,6 +607,11 @@ describe("Feature #8: A/B data file lock, fsync and growth warning", () => {
       } finally {
         spy.mockRestore();
       }
+    });
+
+    it("reads AB_FSYNC as 1, true or yes in any case, and nothing else (so a typo cannot silently turn it off)", () => {
+      for (const on of ["1", "true", "TRUE", "yes", "Yes"]) expect(fsyncFromEnv(on)).toBe(true);
+      for (const off of [undefined, "", "0", "false", "no", "on", "2", " 1", "1 "]) expect(fsyncFromEnv(off)).toBe(false);
     });
 
     it("does not flush when disabled (the default)", () => {

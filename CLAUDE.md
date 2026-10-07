@@ -62,7 +62,7 @@ Details and defaults: `README.md` and `DEPLOYMENT.md`.
 ## Working rules that have paid for themselves
 
 1. **Evidence over assumption.** Say `NOT VERIFIED` / `NOT AVAILABLE` / `BLOCKED`; never write "works" without a run behind it. Do not
-   invent numbers (no ROI, savings, benchmarks). A default that nobody measured is not set (`AB_FSYNC`, the rate limit): it is an owner decision, and `PERFORMANCE.md` holds the measurements to decide with. Measure before believing a limit: the A/B module's memory use was estimated nowhere and turned out to cross the manifests' memory limit at a file size far below the warning threshold.
+   invent numbers (no ROI, savings, benchmarks). A default that nobody measured is not set (the rate limit; `AB_FSYNC` was measured, then decided by the owner and is on in the manifests): it is an owner decision, and `PERFORMANCE.md` holds the measurements to decide with. Measure before believing a limit: the A/B module's memory use was estimated nowhere and turned out to cross the manifests' memory limit at a file size far below the warning threshold.
 2. **Break it on purpose.** For every guard, test or check you add, break exactly the thing it protects and confirm the check fails, then restore.
    Controls can be wrong too: one mutation turned out to be behaviourally identical, another left a second passing case in place.
 3. **Read the real logs**, not the green tick. The first CI run of a probe change failed in the probe script itself.
@@ -82,5 +82,5 @@ Details and defaults: `README.md` and `DEPLOYMENT.md`.
 
 ## Resume point
 
-`ROADMAP.md` lists what is done, what is blocked on the owner (cluster, scanner choice, default branch, rate limit, `AB_FSYNC`, release tag) and the
+`ROADMAP.md` lists what is done, what is blocked on the owner (cluster, scanner choice, default branch, rate limit, release tag) and the
 unscheduled backlog. Start from its "Open decisions" and "Backlog".

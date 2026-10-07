@@ -790,12 +790,17 @@ class ABTestingFramework {
   }
 }
 
+/** AB_FSYNC accepts 1, true or yes (any case). Anything else, "on" included, leaves flushing off. */
+export function fsyncFromEnv(value: string | undefined): boolean {
+  return /^(1|true|yes)$/i.test(value ?? "");
+}
+
 // Initialize framework
 const abTesting = new ABTestingFramework(
   process.env.EXPERIMENTS_FILE || "./experiments.yaml",
   process.env.AB_DATA_FILE || undefined,
   {
-    fsync: /^(1|true|yes)$/i.test(process.env.AB_FSYNC ?? ""),
+    fsync: fsyncFromEnv(process.env.AB_FSYNC),
     warnBytes: Number.parseInt(process.env.AB_DATA_WARN_BYTES ?? "", 10) || undefined,
   }
 );
