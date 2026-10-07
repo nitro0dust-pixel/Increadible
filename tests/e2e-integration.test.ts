@@ -209,11 +209,13 @@ describe("Feature #8: A/B Testing Framework", () => {
     expect(ab.getExperimentResults("nope")).toBeNull();
   });
 
-  it("rejects experiments the statistics cannot handle (must have exactly 2 variants)", () => {
+  it("rejects experiments the statistics cannot handle (one variant, or more than ten)", () => {
     ab = fresh();
-    expect(() =>
-      ab.createExperiment(makeExperiment({ variants: [{ id: "only", name: "o", config: {} }] }))
-    ).toThrow(/exactly 2 variants/);
+    const variants = (n: number) => Array.from({ length: n }, (_, i) => ({ id: `v${i}`, name: `v${i}`, config: {} }));
+    expect(() => ab.createExperiment(makeExperiment({ variants: variants(1) }))).toThrow("between 2 and 10 variants");
+    expect(() => ab.createExperiment(makeExperiment({ variants: variants(0) }))).toThrow("between 2 and 10 variants");
+    expect(() => ab.createExperiment(makeExperiment({ variants: variants(11) }))).toThrow("between 2 and 10 variants");
+    expect(() => ab.createExperiment(makeExperiment({ variants: undefined as any }))).toThrow("between 2 and 10 variants");
   });
 
   it("reports incomplete with zero confidence until enough data is collected", () => {
