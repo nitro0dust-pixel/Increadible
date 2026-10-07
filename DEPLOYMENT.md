@@ -103,6 +103,43 @@ Verification and limits:
   `scripts/probe-image.sh` checks it in a real container with `AB_FSYNC=1` (hard-killed container, second container refused), and that a data file of
   500 000 measurements starts and answers inside the 256 MiB memory limit (smoke does the same with a capped Node heap).
 
+### API gateway: live calls (off unless enabled)
+
+`call_api` answers with generated mock data unless an API is listed in `GATEWAY_LIVE_APIS`. Nothing changes for a deployment that does not set it, and the
+manifests do not (a config test keeps it that way until the owner decides).
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `GATEWAY_LIVE_APIS` | empty: every API answers with mock data | comma-separated API ids, or `*`; an unknown id is noted on stderr and ignored |
+| `GATEWAY_TIMEOUT_MS` | 10000 | per call, 100 to 120000 |
+| `GATEWAY_MAX_RESPONSE_BYTES` | 1048576 | larger responses are refused; 1024 to 33554432 |
+| `GATEWAY_USER_AGENT` | `increadible-gateway` | sent to the provider; Wikimedia asks clients to identify themselves with contact details, so set one before enabling `wikipedia` or `wikidata` |
+
+Credentials come from the environment at call time (names only here; the values are never logged, returned or cached). Provide them from a Secret (`secretKeyRef`), not a
+ConfigMap and not the image. An API that is live and whose key is missing fails with the variable's name.
+
+| API | Variable | Sent as |
+|---|---|---|
+| `openweathermap` | `GATEWAY_KEY_OPENWEATHERMAP` | query parameter `appid` |
+| `weatherapi` | `GATEWAY_KEY_WEATHERAPI` | query parameter `key` |
+| `finnhub` | `GATEWAY_KEY_FINNHUB` | header `X-Finnhub-Token` |
+| `newsapi` | `GATEWAY_KEY_NEWSAPI` | header `X-Api-Key` |
+| `coingecko`, `hackernews`, `wikipedia`, `wikidata` | none | none |
+| `thesportsdb` | none | the registered URL carries the provider's public test key (`1`) |
+
+`endpoint` and `params` of a `call_api` come from a model, so they are treated as hostile. What the gateway does with them (each point is tested against a real local HTTP
+server, and the URL rule also against 60 000 random hostile endpoints):
+
+- only `GET`, only to the API's registered URL: `endpoint` is a path under it (a URL, `//`, `..`, encoded dots or slashes, `?`, `#`, backslashes, spaces and control characters are
+  refused); `params` are strings, finite numbers or booleans, at most 30, and cannot set the credential parameter;
+- a redirect is never followed (it could carry the request to another host); only JSON is accepted; the time and the size are capped;
+- a credential never appears in a result, an error message (an error body that repeats it is scrubbed), a log line or a cache key; failures are not cached.
+
+**NOT VERIFIED:** any real provider (the authoring sandbox cannot reach them; the tests use a local server, and for the built-in registry a mocked `fetch`); each provider's
+terms of service and rate limits (there is no per-API limiter; `RATE_LIMIT_PER_MINUTE` is global and off); **egress**: no NetworkPolicy exists, so a pod can reach any host.
+Before enabling live calls in a cluster, add an egress policy that allows DNS and only the registered hosts: api.openweathermap.org, api.weatherapi.com, api.coingecko.com,
+finnhub.io, newsapi.org, hacker-news.firebaseio.com, en.wikipedia.org, www.wikidata.org, www.thesportsdb.com.
+
 ### Software bill of materials
 
 - The `security` job runs `npm sbom --omit=dev --sbom-format cyclonedx`, fails if the result is not CycloneDX or lists no

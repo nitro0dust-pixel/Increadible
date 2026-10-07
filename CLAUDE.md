@@ -7,7 +7,7 @@ counts, no commit hashes and no status, because those go stale with every PR.
 ## What this is
 
 One MCP server (stdio and HTTP) serving three components we wrote: Routing Plugins (#7), A/B Testing (#8) and API
-Gateway (#9, **mock data only**). `features/01-06` are vendored third-party submodules that are **not integrated or
+Gateway (#9, **mock data by default**, with opt-in live calls that have never run against a real provider). `features/01-06` are vendored third-party submodules that are **not integrated or
 tested here**. Nothing is deployed beyond a local rehearsal; no cost saving has been measured (the old percentages were
 targets, not results).
 
@@ -56,7 +56,8 @@ image by digest and probes it again. The package `ghcr.io/nitro0dust-pixel/incre
 
 Configuration (names only; values come from the environment, never commit them): `PORT`, `HOST`, `AUTH_TOKEN`,
 `ALLOW_UNAUTHENTICATED`, `RULES_FILE`, `EXPERIMENTS_FILE`, `AB_DATA_FILE`, `AB_FSYNC`, `AB_DATA_WARN_BYTES`,
-`HTTP_HEADERS_TIMEOUT_MS`, `HTTP_REQUEST_TIMEOUT_MS`, `RATE_LIMIT_PER_MINUTE`, `SHUTDOWN_DRAIN_MS`, `SHUTDOWN_TIMEOUT_MS`.
+`HTTP_HEADERS_TIMEOUT_MS`, `HTTP_REQUEST_TIMEOUT_MS`, `RATE_LIMIT_PER_MINUTE`, `SHUTDOWN_DRAIN_MS`, `SHUTDOWN_TIMEOUT_MS`,
+`GATEWAY_LIVE_APIS`, `GATEWAY_TIMEOUT_MS`, `GATEWAY_MAX_RESPONSE_BYTES`, `GATEWAY_USER_AGENT` (and one `GATEWAY_KEY_<API>` per key-based API, named in `DEPLOYMENT.md`).
 Details and defaults: `README.md` and `DEPLOYMENT.md`.
 
 ## Working rules that have paid for themselves

@@ -23,7 +23,7 @@ Project status, the plan and open decisions are tracked in [ROADMAP.md](ROADMAP.
 | 6 | agentacct (cost tracking) | submodule `features/06-agentacct/agentacct` ([upstream](https://github.com/mikehasa/agentacct)) | no |
 | 7 | Routing Plugins | `features/07-routing-plugins/src/mcp-server.ts` | yes |
 | 8 | A/B Testing | `features/08-ab-testing/src/mcp-server.ts` | yes |
-| 9 | API Gateway | `features/09-api-gateway/src/mcp-server.ts` | yes (mock data only) |
+| 9 | API Gateway | `features/09-api-gateway/src/mcp-server.ts` | yes (mock data by default; opt-in live calls, never tried against a real provider) |
 
 Each feature has an `INTEGRATION_GUIDE.md` next to its code or submodule. Features #1-#6 are
 documented by their upstream READMEs; the guides here only describe how they fit together.
@@ -145,8 +145,11 @@ First enabled rule whose `match` fits wins; an empty `match` matches everything.
   - **Durability:** by default an append is handed to the OS, which survives a process crash but not an OS crash or power
     loss. Set `AB_FSYNC=1` to flush each append to disk first (slower: one flush per write, about 0.2 ms on a local disk; see [PERFORMANCE.md](PERFORMANCE.md)). The Kubernetes manifests set it; the image does not.
 
-**API gateway:** the registry has 9 APIs (weather, finance, news, reference, sports). `call_api`
-currently returns **generated mock data**; it makes no network calls. Results are cached for 5 minutes.
+**API gateway:** the registry has 9 APIs (weather, finance, news, reference, sports). By default `call_api`
+returns **generated mock data** and makes no network calls (every result says `"source": "mock"`). Real HTTP calls are **opt-in per
+API**: set `GATEWAY_LIVE_APIS` to a comma-separated list of API ids (or `*`); `GATEWAY_TIMEOUT_MS`, `GATEWAY_MAX_RESPONSE_BYTES` and
+`GATEWAY_USER_AGENT` tune them, and the four key-based APIs read their key from `GATEWAY_KEY_<API>` (names and the security rules in
+`DEPLOYMENT.md`). Live mode has been tested against a local HTTP server only, **not against the real providers**. Results are cached for 5 minutes.
 
 ## Development
 
@@ -172,4 +175,4 @@ Layout: `src/` (server + transports), `features/07..09/*/src/` (our modules), `t
 - Only `k8s/staging-deployment.yaml` has been applied to a cluster (a local Docker Desktop one, with a locally built image).
   The production and monitoring manifests have not been applied, and the GHCR pull path has not been exercised on a cluster.
 - Features #1-#6 are not exercised by this repo's tests (see the `todo` list in `tests/e2e-integration.test.ts`).
-- `call_api` is mock-only. A/B persistence needs `AB_DATA_FILE`, is single-writer (enforced with a lock file), flushes to disk only with `AB_FSYNC=1`, and is never compacted (memory and query time do not grow with the data: it keeps running aggregates; see [PERFORMANCE.md](PERFORMANCE.md)).
+- `call_api` returns mock data unless live calls are enabled (`GATEWAY_LIVE_APIS`), and live calls have not been tried against the real providers. A/B persistence needs `AB_DATA_FILE`, is single-writer (enforced with a lock file), flushes to disk only with `AB_FSYNC=1`, and is never compacted (memory and query time do not grow with the data: it keeps running aggregates; see [PERFORMANCE.md](PERFORMANCE.md)).
