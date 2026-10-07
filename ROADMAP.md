@@ -1,6 +1,6 @@
 # Roadmap and project status
 
-Last updated: 2026-10-07 18:55 UTC (8 Oct 2026, 00:25 IST), measured at `main` = `15b2c83` (PR #17 merged) plus the `AB_FSYNC` decision in PR #18.
+Last updated: 2026-10-07 19:05 UTC (8 Oct 2026, 00:35 IST), measured at `main` = `6847795` (PR #18 merged) plus roadmap step 12 in PR #19.
 
 **Bottom line:** the in-repo code (Features #7-#9 and the server around them) is built, tested, containerised, and the
 image published to GHCR passes its probe. **Nothing is deployed anywhere beyond a local rehearsal**: the staging
