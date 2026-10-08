@@ -301,11 +301,31 @@ describe("Dockerfile and package.json", () => {
     expect(offenders).toEqual([]);
   });
 
+  it("README states the number of vendored projects that .gitmodules declares, and lists each of them", () => {
+    const paths = [...read(".gitmodules").matchAll(/^\s*path\s*=\s*(\S+)/gm)].map((m) => m[1]);
+    const words = ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten"];
+    expect(paths.length).toBeGreaterThan(0);
+    const readme = read("README.md");
+    expect(readme).toContain(`vendors ${words[paths.length]} third-party projects`);
+    for (const p of paths) expect(readme).toContain(`submodule \`${p}\``);
+  });
+
   it("documents every file in scripts/ (by name in a document, or through the npm script that runs it)", () => {
     const docs = ["README.md", "CLAUDE.md", "DEPLOYMENT.md", "PERFORMANCE.md"].map(read).join("\n");
     const pkg = read("package.json");
     const undocumented = fs.readdirSync(path.join(root, "scripts")).filter((f) => !docs.includes(f) && !pkg.includes(`scripts/${f}`));
     expect(undocumented).toEqual([]);
+  });
+
+  it("ships the license package.json declares, in the name of the author it declares", () => {
+    const pkg = JSON.parse(read("package.json"));
+    expect(pkg.license).toBe("MIT");
+    const license = read("LICENSE");
+    expect(license).toMatch(/^MIT License\n/);
+    expect(license).toContain(`Copyright (c) 2026 ${pkg.author}`);
+    // the MIT notice must travel with every copy, and the image is a copy
+    const runtime = dockerfile.slice(dockerfile.indexOf("# ---- runtime ----"));
+    expect(runtime).toMatch(/^COPY .*\bLICENSE\b/m);
   });
 
   it("uses a tracked lockfile for reproducible installs", () => {
@@ -553,5 +573,28 @@ describe("COMPANIONS.md", () => {
     expect(doc).toMatch(/No saving is claimed/);
     // the one place a saving could be quoted as a result is a percentage or a dollar figure next to the word saving
     expect(doc).not.toMatch(/saving[s]? (of|is|was|are|were) [~$]?\d/i);
+  });
+});
+
+describe("GATEWAY.md", () => {
+  const doc = read("GATEWAY.md");
+
+  it("is linked from README.md, CLAUDE.md and ROADMAP.md", () => {
+    for (const f of ["README.md", "CLAUDE.md", "ROADMAP.md"]) expect({ file: f, links: read(f).includes("GATEWAY.md") }).toEqual({ file: f, links: true });
+  });
+
+  it("says it is a proposal waiting on the owner and that nothing was built, and keeps its NOT VERIFIED list", () => {
+    expect(doc).toContain("**Status: PROPOSED. Waiting for the owner's decision. Nothing has been built from it.**");
+    expect(doc).toContain("NOT VERIFIED");
+    expect(doc).toContain("## Not verified");
+    expect(doc).toContain("## Decisions requested from the owner");
+    // the decisions stay unticked until the owner makes them
+    expect(doc.split("## Decisions requested from the owner")[1]).not.toMatch(/- \[x\]/i);
+  });
+
+  it("states the size of the registry it is a proposal to change", () => {
+    const registered = (read("features/09-api-gateway/src/mcp-server.ts").match(/^\s*id: "[a-z]+",\s*\n\s*name:/gm) ?? []).length;
+    expect(registered).toBe(9);
+    expect(doc).toContain(`${registered} registered APIs`);
   });
 });

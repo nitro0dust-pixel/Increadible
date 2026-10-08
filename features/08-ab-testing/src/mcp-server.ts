@@ -573,7 +573,8 @@ class ABTestingFramework {
         const content = fs.readFileSync(this.experimentsFile, "utf-8");
         const config = yaml.parse(content);
 
-        for (const exp of config.experiments || []) {
+        // An empty file parses to null: no experiments, not an error.
+        for (const exp of config?.experiments || []) {
           try {
             this.validateExperiment(exp);
             this.experiments.set(exp.id, exp);
@@ -597,6 +598,7 @@ class ABTestingFramework {
     }
     if (
       typeof experiment.traffic_split !== "number" ||
+      !Number.isFinite(experiment.traffic_split) || // NaN passes both comparisons below (a YAML `.nan`), and sends every user to the second variant
       experiment.traffic_split < 0 ||
       experiment.traffic_split > 1
     ) {
