@@ -55,6 +55,7 @@ Entries marked **behaviour change** can affect an existing deployment.
 - `ROADMAP.md`: status, plan, quality gates and open decisions, with evidence for every status. ([#6](https://github.com/nitro0dust-pixel/Increadible/pull/6))
 
 ### Changed
+- **Behaviour change (audit):** `aggregate_apis` no longer fails the whole request when one call fails. The failed call holds `{error}` in its own place, the reply adds `failed: n`, and only when every call failed is the reply an error (`all n calls failed`, with `data` still attached). A request takes at most 100 calls (more is a plain error) and runs five at a time; a wrong type is a plain message instead of an internal one (`apis.map is not a function`). `call_api` checks the type of `api_id`, `endpoint` and `params` the same way. ([#23](https://github.com/nitro0dust-pixel/Increadible/pull/23))
 - **Behaviour change (an error message):** creating an experiment with the wrong number of variants now says `Experiment must have between 2 and 10 variants` instead of `... exactly 2 variants`. ([#20](https://github.com/nitro0dust-pixel/Increadible/pull/20))
 - **Behaviour change (writes are slower, safer):** both Kubernetes manifests set `AB_FSYNC=1`, the owner's decision: every A/B append is flushed to disk before the call returns, so an acknowledged
   write survives a node crash or power loss and not only a process crash. Measured on a local disk at about 0.2 ms per write (ceiling about 3 500 writes per second against about 22 000 without);
@@ -82,6 +83,7 @@ Entries marked **behaviour change** can affect an existing deployment.
 - Kubernetes manifests: drain settings and an explicit 30 s termination grace period. ([#11](https://github.com/nitro0dust-pixel/Increadible/pull/11))
 
 ### Fixed
+- **API gateway resource bounds (audit findings GW-1, GW-3):** the result cache grew with every distinct call and never shrank (2 000 calls with 200 KB of params held 385 MB of heap, against a 256Mi pod limit), and one `aggregate_apis` request started every call at once (5 000 requested, 5 000 started together, which in live mode means 5 000 simultaneous calls to a provider with the gateway's own key). The cache now holds at most 500 entries and about 16 MiB (expired, then oldest, dropped first; `cache_evictions` in `get_api_stats`), keys long params by a hash and does not keep a result over 4 MiB; live calls are limited to 10 at once across the gateway with 100 allowed to wait. Measured before and after in the PR. 21 deliberate breakages of the new code are caught. ([#23](https://github.com/nitro0dust-pixel/Increadible/pull/23))
 - A measurement recorded without a `metrics` object made every later `get_experiment_results` call for that experiment fail with a TypeError; it now counts as a sample.
   ([#15](https://github.com/nitro0dust-pixel/Increadible/pull/15))
 - Two series of identical values (for example a metric that is always 0.1) with different sample sizes were reported as different (p about 0.41 and an effect size of 0.15 from

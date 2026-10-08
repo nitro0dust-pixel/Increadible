@@ -19,11 +19,11 @@ wikipedia, wikidata (reference); thesportsdb (sports). Add more at runtime from 
 |------|-------|--------|
 | `discover_apis` | optional `query` (case-insensitive match on name, category or description) | array of API definitions |
 | `call_api` | `api_id`, `endpoint` (a path under the API's registered URL, or empty), optional `params` | `{data, source: "mock" \| "live", cached, timestamp}`; `{error}` for an unknown API, a refused request or a failed call |
-| `aggregate_apis` | `apis`: `[{id, endpoint, params?}]` | `{data: [...], count}` (calls run in parallel, order preserved) |
-| `get_api_stats` | none | `{total_calls, successful, failed, cache_hit_rate: "0.50", api_distribution, cached_items, live_calls, live_apis}` |
+| `aggregate_apis` | `apis`: up to 100 of `[{id, endpoint, params?}]` | `{data: [...], count}`, order preserved, five calls at a time. A call that fails holds `{error}` in its place and the reply adds `failed: n`; only when every call failed is the reply an error (`error: "all n calls failed"`, with the `data` still attached). A wrong type or too many calls is a plain `{error}` |
+| `get_api_stats` | none | `{total_calls, successful, failed, cache_hit_rate: "0.50", api_distribution, cached_items, cache_evictions, live_calls, live_apis}` |
 
 Responses are cached for a fixed 300 seconds, keyed on `api_id + endpoint + params` (a failed call is never cached).
-The cache and stats are in memory.
+The cache and stats are in memory. The cache is bounded (a caller chooses the arguments of every call, and each distinct call used to add an entry for good): at most 500 entries and about 16 MiB of data, expired and then the oldest entries are dropped first (`cache_evictions` counts the latter), a result larger than 4 MiB is returned but not cached, and a long key is stored as its SHA-256. Live calls are limited to 10 at once across the gateway; 100 more may wait, and a call beyond that is refused with `the gateway is busy`.
 
 ## Live mode
 
