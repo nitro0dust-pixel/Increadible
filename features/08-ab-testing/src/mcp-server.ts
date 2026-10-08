@@ -1088,7 +1088,8 @@ export const assignVariantTool = {
     type: "object" as const,
     properties: {
       experiment_id: { type: "string" },
-      user_id: { type: "string" },
+      // The handler takes a number too (it is used as its text), as INTEGRATION_GUIDE.md says; the schema used to say string only.
+      user_id: { type: ["string", "number"] },
     },
     required: ["experiment_id"],
   },
