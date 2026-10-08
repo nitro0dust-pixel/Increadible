@@ -435,7 +435,7 @@ describe("Feature #8: A/B data persistence", () => {
     expect(ab.listExperiments().map((e) => e.id)).toEqual(["exp-1"]);
     ab.recordMetric("exp-1", "A", { quality: 2 });
     recordSamples(ab, "exp-1", "B", 99, () => 1);
-    expect(ab.getExperimentResults("exp-1")!.status).not.toBe(undefined);
+    expect(ab.getExperimentResults("exp-1")!.status).toBe("incomplete"); // 100 samples in all, but only one in A
     expect(open(dataFile("write-fail")).getExperimentResults("exp-1")!.statistical_analysis.current_samples).toBe(100);
   });
 });

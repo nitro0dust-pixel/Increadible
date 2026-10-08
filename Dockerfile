@@ -21,7 +21,7 @@ ENV NODE_ENV=production \
     RULES_FILE=/data/rules.yaml \
     EXPERIMENTS_FILE=/data/experiments.yaml \
     AB_DATA_FILE=/data/ab-data.jsonl
-COPY package.json package-lock.json ./
+COPY package.json package-lock.json LICENSE ./
 RUN npm ci --omit=dev && npm cache clean --force
 COPY --from=builder /app/dist ./dist
 RUN mkdir -p /data && chown node:node /data

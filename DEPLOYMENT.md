@@ -69,7 +69,7 @@ Verification and limits:
   and `scripts/probe-image.sh` against the real image (bad tool input, refusal without `AUTH_TOKEN`, `docker stop` exits 0 and removes the lock).
 - **NOT VERIFIED:** behaviour in a real cluster (none is available here): whether five seconds covers endpoint-removal propagation for your
   load balancer, and the keep-alive timeout against a load balancer's idle timeout (Node's default 5 s is unchanged).
-- There is no TLS, per-client limit, request logging or latency metric here; latency metrics are the next roadmap step.
+- There is no TLS, per-client limit, request logging or HTTP-level request-latency metric here. Tool-call latency and event-loop delay are exported (see the metrics table under Monitoring).
 
 ### The A/B data file: one writer, flushing, growth
 
@@ -235,7 +235,7 @@ namespace. Alerts use only metrics the server emits plus kube-state-metrics rest
 
 **What is verified.** `scripts/check-prometheus.sh` extracts the rules from the `PrometheusRule` and runs `promtool check rules` and
 `promtool test rules` against `monitoring/alerts.test.yaml`: every alert has a case that must fire and one that must stay quiet
-(for example 6% errors fires and 4% does not), and each of seven deliberate breakages of the rules is caught (four more for `IncreadibleEventLoopBlocked`: a wrong bucket, a wrong threshold, a missing `ignoring(le)` and a flipped sign). CI runs it as the
+(for example 6% errors fires and 4% does not), and each of seven deliberate breakages of the rules is caught (four more for `IncreadibleEventLoopBlocked`: a wrong bucket, a wrong threshold, a missing `ignoring(le)` and a flipped sign; and the two `IncreadibleDown` cases for a vanished target fail against the earlier `up == 0` rule). CI runs it as the
 `prometheus` job. `scripts/install-promtool.sh <dir>` builds the promtool for it from one pinned Prometheus release (module
 `v0.315.0`), checked against the Go checksum database and an `h1:` hash pinned in the script; it needs Go and `jq` (both on the
 GitHub runner image) and takes about 70 seconds from a cold build cache on four cores and 2 minutes 37 seconds on the GitHub-hosted runner (first CI run), which makes this job the longest of the run. It leaves out the cloud service-discovery code (`-tags remove_all_sd`), which the two checks do not use, so `promtool check config` is not available from that build.

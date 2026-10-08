@@ -2,13 +2,13 @@
 
 A bundle of cost- and workflow-oriented components for Claude Desktop / MCP clients.
 This repository contains **three components we wrote** (Features #7-#9, served by one
-MCP server) and **vendors five third-party projects as git submodules** (Features #1-#6).
+MCP server) and **vendors six third-party projects as git submodules** (Features #1-#6; #3 has two, Token Optimizer and Headroom).
 
 > **Status honesty:** nothing in this repo has been deployed to a cluster, security-scanned or
 > independently reviewed, and it has been load-tested only on one machine ([PERFORMANCE.md](PERFORMANCE.md)). Cost and quality figures quoted by upstream
 > projects are *not* verified here. See [Limitations](#limitations).
 
-Tools that run *beside* this server (and why `agentacct` is not the savings instrument) are in [COMPANIONS.md](COMPANIONS.md). Project status, the plan and open decisions are tracked in [ROADMAP.md](ROADMAP.md); what changed and when in
+Tools that run *beside* this server (and why `agentacct` is not the savings instrument) are in [COMPANIONS.md](COMPANIONS.md); the research and recommendation for a universal API gateway (proposed, not built) are in [GATEWAY.md](GATEWAY.md). Project status, the plan and open decisions are tracked in [ROADMAP.md](ROADMAP.md); what changed and when in
 [CHANGELOG.md](CHANGELOG.md); working rules and context for Claude sessions in [CLAUDE.md](CLAUDE.md).
 
 ## Components
@@ -84,7 +84,7 @@ Emitted metrics: `increadible_uptime_seconds`, `increadible_tool_calls_total{too
 | `get_rule_stats` | #7 | Rule hit counts and provider breakdown |
 | `update_rules` | #7 | Replace the rule set (validated, written to `RULES_FILE` first and only then made live, so a failed write changes nothing) |
 | `suggest_rules` | #7 | Suggestion based on observed provider share |
-| `create_experiment` | #8 | Define a 2-variant experiment |
+| `create_experiment` | #8 | Define an experiment with two to ten variants |
 | `assign_variant` | #8 | Assign a variant (sticky per `user_id` if given) |
 | `record_metric` | #8 | Record numeric metrics for a variant |
 | `get_experiment_results` | #8 | Per-variant stats and significance test |
