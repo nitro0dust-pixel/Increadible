@@ -4,6 +4,8 @@ import * as gateway from "../features/09-api-gateway/src/mcp-server";
 
 export const SERVER_INFO = { name: "increadible", version: "1.0.0" };
 const DEFAULT_PROTOCOL_VERSION = "2024-11-05";
+/** MCP protocol versions are dates. Anything else a client sends is not echoed back as the version this server speaks. */
+const PROTOCOL_VERSION_FORMAT = /^\d{4}-\d{2}-\d{2}$/;
 
 interface ToolModule {
   tools: Array<{ name: string; description: string; inputSchema: unknown }>;
@@ -142,25 +144,39 @@ export function internalError(id: JsonRpcRequest["id"], error: unknown): JsonRpc
   return fail(id, -32603, "Internal error");
 }
 
-/** Handles one JSON-RPC message; returns null for notifications (no reply). */
+/** JSON-RPC 2.0: an id is a string, a number or null (or absent, for a notification). An object or a boolean is not one. */
+const validId = (id: unknown): boolean => id === undefined || id === null || typeof id === "string" || (typeof id === "number" && Number.isFinite(id));
+
+/**
+ * Handles one JSON-RPC message; returns null for notifications (no reply). A message is only handled if it is a JSON-RPC 2.0 request:
+ * `jsonrpc` must be "2.0" and `id` a string, a number or null. A notification (no id) is carried out but never answered, as the
+ * specification requires (it used to be answered, with an id of null, for every method but unknown ones).
+ */
 export async function handleMessage(msg: JsonRpcRequest): Promise<JsonRpcResponse | null> {
-  if (!msg || typeof msg !== "object" || Array.isArray(msg) || typeof msg.method !== "string") {
-    return fail(msg?.id, -32600, "Invalid Request");
+  if (!msg || typeof msg !== "object" || Array.isArray(msg) || msg.jsonrpc !== "2.0" || typeof msg.method !== "string" || !validId(msg.id)) {
+    return fail(msg && typeof msg === "object" && validId(msg.id) ? msg.id : null, -32600, "Invalid Request");
   }
+  const reply = await handleRequest(msg);
+  return msg.id === undefined ? null : reply;
+}
+
+async function handleRequest(msg: JsonRpcRequest): Promise<JsonRpcResponse | null> {
   const isNotification = msg.id === undefined;
   const id = msg.id ?? null;
 
   switch (msg.method) {
-    case "initialize":
+    case "initialize": {
+      const requested = msg.params?.protocolVersion;
       return {
         jsonrpc: "2.0",
         id,
         result: {
-          protocolVersion: msg.params?.protocolVersion ?? DEFAULT_PROTOCOL_VERSION,
+          protocolVersion: typeof requested === "string" && PROTOCOL_VERSION_FORMAT.test(requested) ? requested : DEFAULT_PROTOCOL_VERSION,
           capabilities: { tools: {} },
           serverInfo: SERVER_INFO,
         },
       };
+    }
     case "ping":
       return { jsonrpc: "2.0", id, result: {} };
     case "tools/list":

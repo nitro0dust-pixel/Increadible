@@ -204,7 +204,7 @@ way. Design choices to be aware of:
   (`increadible-data`, mounted at `/data`), which has a single writer. Do not add an HPA or more replicas.
   Rule hit counts are still in memory. The cluster needs a default StorageClass (or set `storageClassName` in the PVC).
 - **Rules are read-only** (ConfigMap mount): edit `increadible-config`, then `kubectl rollout restart`. The
-  `update_rules` tool returns an error in this setup.
+  `update_rules` tool returns an error in this setup, and the live rules are left as they were (the write happens first; before PR #25 the error was returned after the live rules had already changed, and the change was lost at the next restart).
 - **ClusterIP only**, protected by `AUTH_TOKEN`. There is no TLS or ingress; add one before exposing it.
 - Health endpoints (`/health`, `/ready`) are unauthenticated for the kubelet; `/metrics` and `/mcp` need the token.
 

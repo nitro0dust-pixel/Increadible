@@ -63,9 +63,9 @@ PORT=3000 HOST=0.0.0.0 AUTH_TOKEN=change-me node dist/src/index.js
 
 | Endpoint | Auth | Purpose |
 |----------|------|---------|
-| `GET /health`, `GET /ready` | none | liveness / readiness (`/ready` answers 503 while the server drains for shutdown) |
+| `GET`/`HEAD` `/health`, `/ready` | none | liveness / readiness (`/ready` answers 503 while the server drains for shutdown). A query string is ignored |
 | `GET /metrics` | bearer token if `AUTH_TOKEN` set | Prometheus text format |
-| `POST /mcp` | bearer token if `AUTH_TOKEN` set | one JSON-RPC message per request (stateless) |
+| `POST /mcp` | bearer token if `AUTH_TOKEN` set | one JSON-RPC 2.0 message per request (stateless). `jsonrpc` must be `"2.0"` and `id` a string, a number or null; a request without an `id` is a notification: it is carried out and gets no reply (HTTP 202). The `Bearer` scheme name is case-insensitive |
 
 `HOST` defaults to `127.0.0.1`. If you bind to `0.0.0.0` (or any non-loopback address) you must set `AUTH_TOKEN`: the server
 refuses to start otherwise, unless `ALLOW_UNAUTHENTICATED=1` says something in front authenticates. Other HTTP settings:
@@ -82,7 +82,7 @@ Emitted metrics: `increadible_uptime_seconds`, `increadible_tool_calls_total{too
 |------|-----------|---------|
 | `apply_routing_rules` | #7 | Pick a provider for a request from YAML rules |
 | `get_rule_stats` | #7 | Rule hit counts and provider breakdown |
-| `update_rules` | #7 | Replace the rule set (validated, persisted to `RULES_FILE`) |
+| `update_rules` | #7 | Replace the rule set (validated, written to `RULES_FILE` first and only then made live, so a failed write changes nothing) |
 | `suggest_rules` | #7 | Suggestion based on observed provider share |
 | `create_experiment` | #8 | Define a 2-variant experiment |
 | `assign_variant` | #8 | Assign a variant (sticky per `user_id` if given) |
@@ -96,7 +96,7 @@ Emitted metrics: `increadible_uptime_seconds`, `increadible_tool_calls_total{too
 
 ## Behavior reference
 
-**Routing rules** (`RULES_FILE`, default `./rules.yaml`; built-in defaults if the file is missing or invalid):
+**Routing rules** (`RULES_FILE`, default `./rules.yaml`; built-in defaults if the file is missing, unparseable, or holds any rule that `update_rules` would refuse: a rule needs a unique non-empty string `id`, a string `provider`, a finite number `priority`, a boolean `enabled` and an object `match` (not a list), and `fallback`, if present, is a list of provider names; at most 500 rules and 1 MB):
 
 ```yaml
 metadata: { team: Engineering, version: "1.0", last_updated: "2026-01-01T00:00:00Z" }
