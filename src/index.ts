@@ -38,9 +38,12 @@ export function serveStdio(input: Readable, output: Writable): Promise<void> {
   return new Promise((resolve) => rl.on("close", () => pending.then(resolve)));
 }
 
+/** `Authorization: Bearer <token>`. The scheme name is case-insensitive (RFC 7235); the token is compared in constant time. */
 function tokenMatches(header: string | undefined, token: string): boolean {
-  const expected = Buffer.from(`Bearer ${token}`);
-  const given = Buffer.from(header ?? "");
+  const h = header ?? "";
+  if (h.slice(0, 7).toLowerCase() !== "bearer ") return false;
+  const given = Buffer.from(h.slice(7));
+  const expected = Buffer.from(token);
   return given.length === expected.length && crypto.timingSafeEqual(given, expected);
 }
 
@@ -101,19 +104,23 @@ export function createHttpServer(authToken?: string, options: HttpOptions = {}):
         }
       };
 
-      if (req.method === "GET" && req.url === "/health") return json(200, { status: "ok" });
-      if (req.method === "GET" && req.url === "/ready") {
+      // The query string is not part of the route (a probe or a load balancer may add one), and HEAD is allowed where GET is for
+      // the two probes: both used to fall through to the authenticated routes and get a 401 when a token was set.
+      const pathname = (req.url ?? "").split("?", 1)[0];
+      const probe = req.method === "GET" || req.method === "HEAD";
+      if (probe && pathname === "/health") return json(200, { status: "ok" });
+      if (probe && pathname === "/ready") {
         return draining ? json(503, { status: "draining" }) : json(200, { status: "ok" });
       }
       if (authToken && !tokenMatches(req.headers.authorization, authToken)) {
         metrics.http_rejected.unauthorized = (metrics.http_rejected.unauthorized || 0) + 1;
         return json(401, { error: "Unauthorized" });
       }
-      if (req.method === "GET" && req.url === "/metrics") {
+      if (req.method === "GET" && pathname === "/metrics") {
         res.writeHead(200, { "Content-Type": "text/plain; version=0.0.4" });
         return res.end(renderPrometheusMetrics());
       }
-      if (req.method === "POST" && req.url === "/mcp") {
+      if (req.method === "POST" && pathname === "/mcp") {
         const retryAfter = takeToken();
         if (retryAfter) return refuse(429, "rate_limited", { error: "Too many requests" }, { "Retry-After": String(retryAfter) });
 

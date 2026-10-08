@@ -22,12 +22,51 @@ interface RulesConfig {
   rules: RoutingRule[];
 }
 
+const MAX_RULES = 500;
+const MAX_RULES_BYTES = 1024 * 1024;
+
+/**
+ * What is wrong with a list of rules, or null. One check for both ways rules arrive, so they cannot disagree: the update_rules tool
+ * and a rules file at startup. (The file used to be trusted: a file that parsed but held a rule with no `match` made every
+ * apply_routing_rules call fail with "Cannot convert undefined or null to object", and `enabled: "no"` counted as enabled.)
+ */
+export function rulesProblem(rules: unknown): string | null {
+  if (!Array.isArray(rules)) return "rules must be an array";
+  if (rules.length > MAX_RULES) return `at most ${MAX_RULES} rules are allowed (got ${rules.length})`;
+  const seen = new Set<string>();
+  for (const rule of rules) {
+    if (
+      !rule ||
+      typeof rule.id !== "string" ||
+      typeof rule.provider !== "string" ||
+      typeof rule.priority !== "number" ||
+      typeof rule.enabled !== "boolean" ||
+      typeof rule.match !== "object" ||
+      rule.match === null
+    ) {
+      return "each rule needs string id, string provider, number priority, boolean enabled and object match";
+    }
+    if (rule.id === "") return "a rule id must not be empty";
+    if (seen.has(rule.id)) return `duplicate rule id: ${rule.id}`;
+    seen.add(rule.id);
+    if (!Number.isFinite(rule.priority)) return `rule ${rule.id}: priority must be a finite number`;
+    if (Array.isArray(rule.match)) return `rule ${rule.id}: match must be an object of key: value pairs, not a list`;
+    if (rule.fallback !== undefined && (!Array.isArray(rule.fallback) || !rule.fallback.every((f: unknown) => typeof f === "string"))) {
+      return `rule ${rule.id}: fallback must be a list of provider names`;
+    }
+  }
+  if (JSON.stringify(rules).length > MAX_RULES_BYTES) return `the rules are larger than ${MAX_RULES_BYTES / 1024} KB`;
+  return null;
+}
+
 class RoutingPluginsMCP {
   private rules: RoutingRule[] = [];
   private rulesFile: string;
+  // A Map, because the keys are rule ids chosen by whoever sends the rules: in a plain object an id such as "constructor" found
+  // Object's own function, "+ 1" turned the count into text, and the provider share printed "NaN%".
   private stats = {
     total_requests: 0,
-    rules_applied: {} as Record<string, number>,
+    rules_applied: new Map<string, number>(),
     cost_savings: {} as Record<string, string>,
   };
 
@@ -41,6 +80,12 @@ class RoutingPluginsMCP {
       if (fs.existsSync(this.rulesFile)) {
         const content = fs.readFileSync(this.rulesFile, "utf-8");
         const config: RulesConfig = yaml.parse(content);
+        const problem = rulesProblem(config?.rules);
+        if (problem) {
+          console.error(`Rules file ${this.rulesFile} is not usable (${problem}); using the built-in rules`);
+          this.createDefaultRules();
+          return;
+        }
         this.rules = config.rules.sort((a, b) => a.priority - b.priority);
         console.error(`Loaded ${this.rules.length} routing rules`);
       } else {
@@ -119,8 +164,7 @@ class RoutingPluginsMCP {
       if (!rule.enabled) continue;
 
       if (this.matchesConditions(request, rule.match)) {
-        this.stats.rules_applied[rule.id] =
-          (this.stats.rules_applied[rule.id] || 0) + 1;
+        this.stats.rules_applied.set(rule.id, (this.stats.rules_applied.get(rule.id) ?? 0) + 1);
 
         return {
           provider: rule.provider,
@@ -143,7 +187,7 @@ class RoutingPluginsMCP {
   public getStats(): Record<string, any> {
     return {
       total_requests: this.stats.total_requests,
-      rules_applied: this.stats.rules_applied,
+      rules_applied: Object.fromEntries(this.stats.rules_applied),
       provider_breakdown: this.calculateProviderBreakdown(),
       rules_count: this.rules.length,
       enabled_rules: this.rules.filter((r) => r.enabled).length,
@@ -154,7 +198,7 @@ class RoutingPluginsMCP {
     const counts: Record<string, number> = {};
     const total = this.stats.total_requests;
 
-    for (const [ruleId, count] of Object.entries(this.stats.rules_applied)) {
+    for (const [ruleId, count] of this.stats.rules_applied) {
       const rule = this.rules.find((r) => r.id === ruleId);
       if (rule) {
         counts[rule.provider] = (counts[rule.provider] || 0) + count;
@@ -171,39 +215,39 @@ class RoutingPluginsMCP {
   }
 
   public updateRules(newRules: RoutingRule[]): void {
-    if (!Array.isArray(newRules)) {
-      throw new Error("rules must be an array");
-    }
-    for (const rule of newRules) {
-      if (
-        !rule ||
-        typeof rule.id !== "string" ||
-        typeof rule.provider !== "string" ||
-        typeof rule.priority !== "number" ||
-        typeof rule.enabled !== "boolean" ||
-        typeof rule.match !== "object" ||
-        rule.match === null
-      ) {
-        throw new Error(
-          "each rule needs string id, string provider, number priority, boolean enabled and object match"
-        );
-      }
-    }
-    this.rules = [...newRules].sort((a, b) => a.priority - b.priority);
-    this.saveRules();
+    const problem = rulesProblem(newRules);
+    if (problem) throw new Error(problem);
+    const sorted = [...newRules].sort((a, b) => a.priority - b.priority);
+    // Write first, then switch: when the write fails (a read-only ConfigMap mount, a full disk) the call reports an error AND the
+    // live rules are unchanged. They used to be replaced before the write, so the error was true but routing had changed anyway.
+    this.saveRules(sorted);
+    this.rules = sorted;
   }
 
-  private saveRules(): void {
+  private saveRules(rules: RoutingRule[]): void {
     const config: RulesConfig = {
       metadata: {
         team: "Engineering",
         version: "1.0",
         last_updated: new Date().toISOString(),
       },
-      rules: this.rules,
+      rules,
     };
 
-    fs.writeFileSync(this.rulesFile, yaml.stringify(config));
+    // A temporary file renamed over the target: a crash in the middle leaves the old file whole, not a truncated one (which the
+    // next start would have discarded in favour of the built-in rules).
+    const tmp = `${this.rulesFile}.${process.pid}.tmp`;
+    try {
+      fs.writeFileSync(tmp, yaml.stringify(config));
+      fs.renameSync(tmp, this.rulesFile);
+    } catch (error) {
+      try {
+        fs.unlinkSync(tmp);
+      } catch {
+        /* nothing to remove */
+      }
+      throw error;
+    }
   }
 }
 
