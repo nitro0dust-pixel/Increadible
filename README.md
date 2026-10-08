@@ -91,7 +91,7 @@ Emitted metrics: `increadible_uptime_seconds`, `increadible_tool_calls_total{too
 | `recommend_winner` | #8 | Winner only if statistically significant |
 | `discover_apis` | #9 | Search the API registry |
 | `call_api` | #9 | Call a registered API (cached 5 min) |
-| `aggregate_apis` | #9 | Several calls in parallel |
+| `aggregate_apis` | #9 | Up to 100 calls, five at a time; a call that fails does not discard the others |
 | `get_api_stats` | #9 | Call counts and cache hit rate |
 
 ## Behavior reference
@@ -149,7 +149,7 @@ First enabled rule whose `match` fits wins; an empty `match` matches everything.
 returns **generated mock data** and makes no network calls (every result says `"source": "mock"`). Real HTTP calls are **opt-in per
 API**: set `GATEWAY_LIVE_APIS` to a comma-separated list of API ids (or `*`); `GATEWAY_TIMEOUT_MS`, `GATEWAY_MAX_RESPONSE_BYTES` and
 `GATEWAY_USER_AGENT` tune them, and the four key-based APIs read their key from `GATEWAY_KEY_<API>` (names and the security rules in
-`DEPLOYMENT.md`). Live mode has been tested against a local HTTP server only, **not against the real providers**. Results are cached for 5 minutes.
+`DEPLOYMENT.md`). Live mode has been tested against a local HTTP server only, **not against the real providers**. Results are cached for 5 minutes, at most 500 results and about 16 MiB (the oldest go first). At most 10 live calls run at once across the gateway, up to 100 more wait for a slot and anything beyond that is refused at once; an `aggregate_apis` request takes up to 100 calls and a call that fails holds its own `{error}` in the result instead of failing the request.
 
 ## Development
 

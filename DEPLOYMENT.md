@@ -133,7 +133,8 @@ server, and the URL rule also against 60 000 random hostile endpoints):
 - only `GET`, only to the API's registered URL: `endpoint` is a path under it (a URL, `//`, `..`, encoded dots or slashes, `?`, `#`, backslashes, spaces and control characters are
   refused); `params` are strings, finite numbers or booleans, at most 30, and cannot set the credential parameter;
 - a redirect is never followed (it could carry the request to another host); only JSON is accepted; the time and the size are capped;
-- a credential never appears in a result, an error message (an error body that repeats it is scrubbed), a log line or a cache key; failures are not cached.
+- a credential never appears in a result, an error message (an error body that repeats it is scrubbed), a log line or a cache key; failures are not cached;
+- what one caller can make the gateway hold or start is bounded: the result cache keeps at most 500 entries and about 16 MiB (the oldest go first; before this, every distinct call added an entry for good, and 2 000 calls with 200 KB of params held 385 MB of heap against the manifests' 256Mi limit), at most 10 live calls run at once and 100 more may wait (a call beyond that is refused with `the gateway is busy`), and one `aggregate_apis` request takes at most 100 calls and runs five of them at a time (it used to start every call it was given at once: 5 000 requested, 5 000 started together).
 
 **NOT VERIFIED:** any real provider (the authoring sandbox cannot reach them; the tests use a local server, and for the built-in registry a mocked `fetch`); each provider's
 terms of service and rate limits (there is no per-API limiter; `RATE_LIMIT_PER_MINUTE` is global and off); **egress**: no NetworkPolicy exists, so a pod can reach any host.

@@ -1,3 +1,4 @@
+import * as crypto from "crypto";
 import { Credential, LiveCallError, LiveOptions, buildRequestUrl, liveGet, redact } from "./live";
 
 interface APIDefinition {
@@ -17,7 +18,26 @@ interface CacheEntry {
   timestamp: number;
   ttl: number;
   source: "mock" | "live";
+  /** Size of the cached data as JSON, counted against MAX_CACHE_BYTES. */
+  bytes: number;
 }
+
+// Bounds on what one caller can make the process hold or start. A model (or whoever steers it) chooses the arguments of every
+// call, so none of these may depend on them: without a bound, distinct calls grew the cache until the pod was killed, and one
+// aggregate_apis request could start thousands of outbound calls at once with the gateway's own credentials.
+/** The result cache holds at most this many entries, and about this many bytes of data; the oldest go first. */
+export const MAX_CACHE_ENTRIES = 500;
+export const MAX_CACHE_BYTES = 16 * 1024 * 1024;
+/** One result larger than a quarter of the cache is returned but not cached (it would evict almost everything else). */
+const MAX_CACHED_ENTRY_BYTES = MAX_CACHE_BYTES / 4;
+/** A cache key longer than this (long params) is replaced by its SHA-256 so the key itself stays small. */
+const MAX_CACHE_KEY_CHARS = 256;
+/** At most this many calls in one aggregate_apis request, and this many of them in flight at a time. */
+export const MAX_AGGREGATE_CALLS = 100;
+const AGGREGATE_CONCURRENCY = 5;
+/** Live (network) calls in flight across the whole gateway, and how many more may wait for a slot before new ones are refused. */
+export const MAX_LIVE_IN_FLIGHT = 10;
+export const MAX_LIVE_WAITING = 100;
 
 /** Where each key-based API takes its credential. The environment variable is read at call time; its value is never logged or returned. */
 const DEFAULT_CREDENTIALS: Record<string, Credential> = {
@@ -69,6 +89,10 @@ class UniversalAPIGateway {
   private apis: Map<string, APIDefinition> = new Map();
   private credentials: Map<string, Credential> = new Map();
   private cache: Map<string, CacheEntry> = new Map();
+  private cacheBytes = 0;
+  private cacheEvictions = 0;
+  private liveInFlight = 0;
+  private liveWaiters: Array<() => void> = [];
   private cacheTTL: number = 300; // 5 minutes default
   private liveApis: Set<string> | "*";
   private live: LiveOptions;
@@ -244,8 +268,10 @@ class UniversalAPIGateway {
   ): Promise<any> {
     this.stats.total_calls++;
 
-    // Check cache
-    const cacheKey = `${apiId}:${endpoint}:${JSON.stringify(params)}`;
+    // Check cache. Long params would make a long key that stays in memory for as long as the entry does.
+    const rawKey = `${apiId}:${endpoint}:${JSON.stringify(params)}`;
+    const cacheKey =
+      rawKey.length > MAX_CACHE_KEY_CHARS ? `sha256:${crypto.createHash("sha256").update(rawKey).digest("hex")}` : rawKey;
     const cached = this.getFromCache(cacheKey);
     if (cached) {
       this.stats.cached_hits++;
@@ -311,11 +337,33 @@ class UniversalAPIGateway {
         if (credential.in === "query") url.searchParams.set(credential.name, secret as string);
         else headers[credential.name] = secret as string;
       }
-      this.stats.live_calls++;
-      return await liveGet(url, headers, this.live, secrets);
+      return await this.withLiveSlot(() => {
+        this.stats.live_calls++;
+        return liveGet(url, headers, this.live, secrets);
+      });
     } catch (error: any) {
       if (error instanceof LiveCallError) throw new Error(`${api.id}: ${redact(error.message, secrets)}`);
       throw new Error(`${api.id}: unexpected error`);
+    }
+  }
+
+  /**
+   * Runs `fn` once one of MAX_LIVE_IN_FLIGHT slots is free. Past MAX_LIVE_WAITING waiting calls a new one is refused at once, so a
+   * flood of requests becomes a quick, safe error instead of an ever-growing queue of outbound calls on the gateway's credentials.
+   */
+  private async withLiveSlot<T>(fn: () => Promise<T>): Promise<T> {
+    if (this.liveInFlight >= MAX_LIVE_IN_FLIGHT) {
+      if (this.liveWaiters.length >= MAX_LIVE_WAITING) throw new LiveCallError("the gateway is busy: too many live calls are waiting");
+      await new Promise<void>((resolve) => this.liveWaiters.push(resolve)); // the slot is handed over, not re-counted
+    } else {
+      this.liveInFlight++;
+    }
+    try {
+      return await fn();
+    } finally {
+      const next = this.liveWaiters.shift();
+      if (next) next();
+      else this.liveInFlight--;
     }
   }
 
@@ -370,29 +418,64 @@ class UniversalAPIGateway {
 
     // Check if expired
     if (Date.now() - entry.timestamp > entry.ttl * 1000) {
-      this.cache.delete(key);
+      this.dropFromCache(key, entry);
       return null;
     }
 
     return entry;
   }
 
-  private cacheData(key: string, data: any, ttl: number | undefined, source: "mock" | "live"): void {
-    this.cache.set(key, {
-      data,
-      timestamp: Date.now(),
-      ttl: ttl || this.cacheTTL,
-      source,
-    });
+  private dropFromCache(key: string, entry: CacheEntry): void {
+    this.cache.delete(key);
+    this.cacheBytes -= entry.bytes;
   }
 
-  public aggregateAPIs(
+  private cacheData(key: string, data: any, ttl: number | undefined, source: "mock" | "live"): void {
+    const bytes = JSON.stringify(data)?.length ?? 0;
+    const existing = this.cache.get(key);
+    if (existing) this.dropFromCache(key, existing); // re-inserting moves it to the newest position
+    if (bytes > MAX_CACHED_ENTRY_BYTES) return;
+    // Oldest first (a Map iterates in insertion order, and every entry is inserted when written): expired entries go, then the
+    // oldest live ones, until the new entry fits within both bounds.
+    const now = Date.now();
+    for (const [oldKey, old] of this.cache) {
+      const expired = now - old.timestamp > old.ttl * 1000;
+      const full = this.cache.size >= MAX_CACHE_ENTRIES || this.cacheBytes + bytes > MAX_CACHE_BYTES;
+      if (!expired && !full) break;
+      this.dropFromCache(oldKey, old);
+      if (!expired) this.cacheEvictions++;
+    }
+    this.cache.set(key, {
+      data,
+      timestamp: now,
+      ttl: ttl || this.cacheTTL,
+      source,
+      bytes,
+    });
+    this.cacheBytes += bytes;
+  }
+
+  /**
+   * Several calls, MAX concurrently, results in the order asked. A call that fails does not fail the others: its place in the
+   * result holds `{ error }` (the message is the same safe one `callAPI` throws), so the data already fetched is not thrown away.
+   */
+  public async aggregateAPIs(
     apis: Array<{ id: string; endpoint: string; params?: Record<string, any> }>
   ): Promise<any[]> {
-    // Aggregate multiple API calls in parallel
-    return Promise.all(
-      apis.map((api) => this.callAPI(api.id, api.endpoint, api.params))
-    );
+    const results: any[] = new Array(apis.length);
+    let next = 0;
+    const worker = async (): Promise<void> => {
+      for (let i = next++; i < apis.length; i = next++) {
+        try {
+          const api = apis[i];
+          results[i] = await this.callAPI(api.id, api.endpoint, api.params);
+        } catch (error: any) {
+          results[i] = { error: String(error?.message ?? error) };
+        }
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(AGGREGATE_CONCURRENCY, apis.length) }, worker));
+    return results;
   }
 
   public getStats(): Record<string, any> {
@@ -405,6 +488,7 @@ class UniversalAPIGateway {
       ).toFixed(2),
       api_distribution: this.stats.api_distribution,
       cached_items: this.cache.size,
+      cache_evictions: this.cacheEvictions,
       live_calls: this.stats.live_calls,
       live_apis: this.liveApis === "*" ? "*" : [...this.liveApis].filter((id) => this.apis.has(id)),
     };
@@ -412,6 +496,7 @@ class UniversalAPIGateway {
 
   public clearCache(): void {
     this.cache.clear();
+    this.cacheBytes = 0;
   }
 
   public addCustomAPI(api: APIDefinition, credential?: Credential): void {
@@ -482,6 +567,33 @@ export const getStatsTool = {
   },
 };
 
+/**
+ * What is wrong with the arguments of one call, or null. call_api names the API `api_id`; an item of aggregate_apis names it `id`.
+ * `label` prefixes the message when the call is an item of an aggregate. Checked here so that a wrong type is a plain message
+ * rather than whatever error the code behind it happens to throw.
+ */
+function callInputProblem(input: unknown, label: string, idField: "api_id" | "id"): string | null {
+  const at = (field: string) => (label ? `${label}.${field}` : field);
+  if (!input || typeof input !== "object" || Array.isArray(input)) return `${label || "arguments"} must be an object`;
+  const call = input as Record<string, unknown>;
+  if (typeof call[idField] !== "string") return `${at(idField)} must be a string`;
+  if (typeof call.endpoint !== "string") return `${at("endpoint")} must be a string`;
+  if (call.params !== undefined && call.params !== null && (typeof call.params !== "object" || Array.isArray(call.params))) {
+    return `${at("params")} must be an object`;
+  }
+  return null;
+}
+
+function aggregateInputProblem(apis: unknown): string | null {
+  if (!Array.isArray(apis)) return "apis must be an array";
+  if (apis.length > MAX_AGGREGATE_CALLS) return `apis may hold at most ${MAX_AGGREGATE_CALLS} calls (got ${apis.length})`;
+  for (let i = 0; i < apis.length; i++) {
+    const problem = callInputProblem(apis[i], `apis[${i}]`, "id");
+    if (problem) return problem;
+  }
+  return null;
+}
+
 // Process tool calls
 export async function processToolCall(
   toolName: string,
@@ -495,7 +607,9 @@ export async function processToolCall(
       }
       return JSON.stringify(apiGateway.discoverAPIs(toolInput.query));
 
-    case "call_api":
+    case "call_api": {
+      const problem = callInputProblem(toolInput, "", "api_id");
+      if (problem) return JSON.stringify({ error: problem });
       try {
         const result = await apiGateway.callAPI(
           toolInput.api_id,
@@ -506,14 +620,19 @@ export async function processToolCall(
       } catch (error: any) {
         return JSON.stringify({ error: error.message });
       }
+    }
 
-    case "aggregate_apis":
-      try {
-        const results = await apiGateway.aggregateAPIs(toolInput.apis);
-        return JSON.stringify({ data: results, count: results.length });
-      } catch (error: any) {
-        return JSON.stringify({ error: error.message });
+    case "aggregate_apis": {
+      const problem = aggregateInputProblem(toolInput.apis);
+      if (problem) return JSON.stringify({ error: problem });
+      const results = await apiGateway.aggregateAPIs(toolInput.apis);
+      // A failed call holds { error } in its place (see aggregateAPIs); a result that worked never has a top-level error.
+      const failed = results.filter((r) => r && typeof r === "object" && "error" in r).length;
+      if (results.length > 0 && failed === results.length) {
+        return JSON.stringify({ error: `all ${failed} calls failed`, data: results, count: results.length, failed });
       }
+      return JSON.stringify({ data: results, count: results.length, ...(failed > 0 ? { failed } : {}) });
+    }
 
     case "get_api_stats":
       return JSON.stringify(apiGateway.getStats());

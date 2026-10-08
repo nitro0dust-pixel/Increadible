@@ -470,14 +470,17 @@ describe("failures are bounded, safe and not cached", () => {
 });
 
 describe("aggregate_apis and the tool layer with live calls", () => {
-  it("mixes live and mock APIs in one aggregate, and one safe failure fails the aggregate as before", async () => {
+  it("mixes live and mock APIs in one aggregate, and one safe failure no longer discards the others (audit finding GW-4)", async () => {
     const gw = open({ liveApis: ["plain"] });
     const ok = await gw.aggregateAPIs([
       { id: "plain", endpoint: "/ok" },
       { id: "qkey", endpoint: "/ok" },
     ]);
     expect(ok.map((r) => r.source)).toEqual(["live", "mock"]);
-    expect(await fail(gw.aggregateAPIs([{ id: "plain", endpoint: "/ok" }, { id: "plain", endpoint: "https://evil.example" }]))).toContain("plain: endpoint must be a path");
+    // The failed call holds its safe message in its own place; the call that worked is still there.
+    const mixed = await gw.aggregateAPIs([{ id: "plain", endpoint: "/ok" }, { id: "plain", endpoint: "https://evil.example" }]);
+    expect(mixed[0]).toMatchObject({ source: "live", cached: expect.any(Boolean) });
+    expect(mixed[1]).toEqual({ error: expect.stringContaining("plain: endpoint must be a path") });
   });
 });
 
