@@ -598,3 +598,34 @@ describe("GATEWAY.md", () => {
     expect(doc).toContain(`${registered} registered APIs`);
   });
 });
+
+describe("lint and test tooling", () => {
+  const pkg = JSON.parse(read("package.json"));
+
+  it("lints with a flat config; the old .eslintrc.json is gone and the removed --ext flag is not used", () => {
+    expect(fs.existsSync(path.join(root, "eslint.config.mjs"))).toBe(true); // .mjs: .gitignore ignores every other *.js
+    expect(fs.existsSync(path.join(root, ".eslintrc.json"))).toBe(false);
+    expect(pkg.scripts.lint).toMatch(/^eslint /);
+    expect(pkg.scripts.lint).not.toContain("--ext");
+    const config = read("eslint.config.mjs");
+    // the two rules the old config switched off stay off (the second was called no-var-requires)
+    expect(config).toContain('"@typescript-eslint/no-explicit-any": "off"');
+    expect(config).toContain('"@typescript-eslint/no-require-imports": "off"');
+    expect(Object.keys(pkg.devDependencies)).not.toContain("@typescript-eslint/eslint-plugin");
+  });
+
+  it("keeps TypeScript below the major that ts-jest 29 and typescript-eslint 8 do not support yet", () => {
+    // ts-jest 29.4 accepts TypeScript <7 and typescript-eslint 8.71 accepts <6.1: raise this only after checking both.
+    const installed: string = JSON.parse(fs.readFileSync(path.join(root, "node_modules/typescript/package.json"), "utf8")).version;
+    expect(Number(installed.split(".")[0])).toBeLessThan(6);
+    expect(pkg.devDependencies.typescript).toMatch(/^\^5\./);
+  });
+
+  it("throws inside catch blocks keep their cause, except where the cause could carry a credential", () => {
+    // eslint 10's preserve-caught-error found three throws; the two in the gateway are deliberate and say why.
+    const gateway = read("features/09-api-gateway/src/mcp-server.ts");
+    expect((gateway.match(/eslint-disable-next-line preserve-caught-error/g) ?? []).length).toBe(2);
+    expect(gateway).toContain("could carry a");
+    expect(read("features/08-ab-testing/src/mcp-server.ts")).toContain("{ cause: error }");
+  });
+});

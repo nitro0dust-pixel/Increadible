@@ -342,7 +342,11 @@ class UniversalAPIGateway {
         return liveGet(url, headers, this.live, secrets);
       });
     } catch (error: any) {
+      // The original error is deliberately not attached as `cause` in either throw below: its message and stack could carry a
+      // credential from the request, and the cause would travel with the error to wherever it is logged or serialised.
+      // eslint-disable-next-line preserve-caught-error
       if (error instanceof LiveCallError) throw new Error(`${api.id}: ${redact(error.message, secrets)}`);
+      // eslint-disable-next-line preserve-caught-error
       throw new Error(`${api.id}: unexpected error`);
     }
   }

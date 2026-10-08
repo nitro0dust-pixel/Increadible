@@ -5,7 +5,7 @@
 #
 # Major versions are deliberately NOT proposed automatically for npm and for the Node base image:
 # the Node major must be one value across the Dockerfile, CI, @types/node and `engines` (a test enforces it),
-# and test-tooling majors (eslint, jest) need planned migrations. Raise those by hand.
+# and test-tooling majors (eslint, jest) need planned migrations. Raise those by hand (jest 30 and eslint 10 were, on 2026-10-08).
 version: 2
 updates:
   - package-ecosystem: npm
