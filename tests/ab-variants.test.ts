@@ -135,11 +135,48 @@ describe("validation", () => {
     for (const n of [0, 1, 11]) expect(() => create(experiment(ids(n), []))).toThrow("between 2 and 10 variants");
   });
 
-  it("rejects an empty or duplicate variant id when there are more than two (a two-variant experiment written before is never rejected for it)", () => {
+  it("rejects an empty or duplicate variant id when there are more than two", () => {
     expect(() => create(experiment(["A", "B", "A"], []))).toThrow("Duplicate variant id: A");
     expect(() => create(experiment(["A", "B", ""], []))).toThrow("non-empty string id");
     expect(() => create({ ...experiment(["A", "B", "C"], []), variants: [{ id: "A" }, { id: "B" }, { name: "no id" }] })).toThrow("non-empty string id");
-    expect(() => create(experiment(["A", "A"], []))).not.toThrow(); // legal before, so still legal
+  });
+
+  it("rejects the same for a NEW two-variant experiment (audit AB-2), but a stored one written before still loads", () => {
+    // Created now: duplicate ids merge both arms, missing ids leave assign_variant with no variant to return.
+    expect(() => create(experiment(["A", "A"], [metric("m")]))).toThrow("Duplicate variant id: A");
+    expect(() => create(experiment(["A", ""], [metric("m")]))).toThrow("Variant id must be a non-empty string");
+    expect(() => create({ ...experiment(["A", "B"], [metric("m")]), variants: [{ name: "x" }, { name: "y" }] })).toThrow("Variant id must be a non-empty string");
+    expect(() => create({ ...experiment(["A", "B"], [metric("m")]), id: "" })).toThrow("Experiment id must be a non-empty string");
+    expect(() => create({ ...experiment(["A", "B"], [metric("m")]), id: "e".repeat(201) })).toThrow("longer than 200 characters");
+    expect(() => create(experiment(["A", "B"], [metric("m"), metric("m")]))).toThrow("Duplicate metric id: m");
+    expect(() => create(experiment(["A", "B"], [metric("")]))).toThrow("Metric id must be a non-empty string");
+    // "__proto__" as an id makes the variant (or metric) vanish from the results, so it cannot be created.
+    expect(() => create(experiment(["A", "__proto__"], [metric("m")]))).toThrow('Variant id cannot be "__proto__"');
+    expect(() => create(experiment(["A", "B"], [metric("__proto__")]))).toThrow('Metric id cannot be "__proto__"');
+    expect(() => create({ ...experiment(["A", "B"], [metric("m")]), hypothesis: "h".repeat(70 * 1024) })).toThrow("larger than 64 KB");
+    // What the old rule was really protecting: a data file written before must still load. Replay does not use these checks.
+    const file = path.join(tmp, "legacy-two-variant.jsonl");
+    const legacy = { ...experiment(["A", "A"], [metric("m")]), id: "legacy" };
+    fs.writeFileSync(file, JSON.stringify({ type: "experiment", experiment: legacy }) + "\n");
+    const fw = new ABTestingFramework(noExperimentsFile, file);
+    try {
+      expect(fw.listExperiments().map((e) => e.id)).toEqual(["legacy"]);
+    } finally {
+      fw.close();
+    }
+  });
+
+  it("keeps only the fields the module uses (anything else would be stored in the log for good)", () => {
+    const file = path.join(tmp, "whitelist.jsonl");
+    const fw = new ABTestingFramework(noExperimentsFile, file);
+    try {
+      fw.createExperiment({ ...experiment(["A", "B"], [metric("m")]), id: "w", results: { junk: true }, notes: "x".repeat(1000), primary_metric: "m", weights: [1, 3] });
+      const stored = JSON.parse(fs.readFileSync(file, "utf8").trim().split("\n")[0]).experiment;
+      expect(Object.keys(stored).sort()).toEqual(["hypothesis", "id", "metrics", "name", "primary_metric", "status", "traffic_split", "variants", "weights"]);
+      expect(stored.status).toBe("setup");
+    } finally {
+      fw.close();
+    }
   });
 
   it("rejects weights that are not one positive number per variant", () => {

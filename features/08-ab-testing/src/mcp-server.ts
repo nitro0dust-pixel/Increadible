@@ -70,6 +70,14 @@ const MIN_TOTAL_SAMPLES = 100;
 const MAX_VARIANTS = 10;
 const MIN_SAMPLES_PER_VARIANT = 30;
 const SIGNIFICANCE_LEVEL = 0.05;
+/**
+ * Limits on what a new write may carry. A measurement is permanent (the log is append-only and never edited), and the running sums
+ * square every value: one 1.7e308 (finite, so it passed the old check) made the mean 2.8e306 and the deviation, interval, p-value and
+ * confidence null, for good. 1e15 is also where whole numbers stop being exact in a double, so nothing real is excluded.
+ */
+const MAX_METRIC_ABS = 1e15;
+const MAX_ID_CHARS = 200;
+const MAX_DEFINITION_BYTES = 64 * 1024;
 
 /**
  * Holm's step-down adjustment of a family of p-values: controls the chance of any false positive across all of them. With one
@@ -120,8 +128,18 @@ function twoSidedPValue(t: number, df: number): number {
   return Math.min(1, erfc(z / Math.SQRT2));
 }
 
-// Approximate two-sided 95% t critical value.
+// Exact two-sided 95% Student-t critical values for 1 to 29 degrees of freedom (computed with an independent incomplete-beta
+// implementation and checked against the textbook table to within its rounding). The formula below is accurate from 30 up
+// but too narrow below it (df 1: 4.33 against 12.71; df 5: 2.43 against 2.57), which made the 95% intervals of a metric with few
+// values too tight. From 30 up the formula is kept as it was, so those numbers do not change.
+const T_CRITICAL_95 = [
+  12.7062, 4.3027, 3.1824, 2.7764, 2.5706, 2.4469, 2.3646, 2.306, 2.2622, 2.2281, 2.201, 2.1788, 2.1604, 2.1448, 2.1314, 2.1199,
+  2.1098, 2.1009, 2.093, 2.086, 2.0796, 2.0739, 2.0687, 2.0639, 2.0595, 2.0555, 2.0518, 2.0484, 2.0452,
+];
+
+// Two-sided 95% t critical value.
 function tCritical95(df: number): number {
+  if (Number.isInteger(df) && df >= 1 && df <= T_CRITICAL_95.length) return T_CRITICAL_95[df - 1];
   const z = 1.96;
   return z + (z * z * z + z) / (4 * df);
 }
@@ -621,12 +639,44 @@ class ABTestingFramework {
     }
   }
 
+  /**
+   * Extra checks for an experiment created now, on top of validateExperiment. They are NOT applied when a data file or the YAML file
+   * is read, so an experiment accepted before (a two-variant one with no variant ids, say) still loads; they only stop a new one
+   * from being created that could never give a sound result: duplicate or missing ids merge arms or leave assign_variant with no
+   * variant to return, and "__proto__" as an id makes that variant vanish from the results.
+   */
+  private validateNewExperiment(experiment: Experiment): void {
+    const checkId = (label: string, id: unknown, seen: Set<string>): void => {
+      if (typeof id !== "string" || id === "") throw new Error(`${label} must be a non-empty string`);
+      if (id.length > MAX_ID_CHARS) throw new Error(`${label} is longer than ${MAX_ID_CHARS} characters`);
+      if (id === "__proto__") throw new Error(`${label} cannot be "__proto__"`);
+      if (seen.has(id)) throw new Error(`Duplicate ${label.toLowerCase()}: ${id}`);
+      seen.add(id);
+    };
+    checkId("Experiment id", experiment.id, new Set());
+    const variantIds = new Set<string>();
+    for (const v of experiment.variants) checkId("Variant id", v?.id, variantIds);
+    const metricIds = new Set<string>();
+    for (const m of experiment.metrics) checkId("Metric id", m?.id, metricIds);
+    if (JSON.stringify(experiment).length > MAX_DEFINITION_BYTES) {
+      throw new Error(`The experiment definition is larger than ${MAX_DEFINITION_BYTES / 1024} KB`);
+    }
+  }
+
   public createExperiment(experiment: Experiment): void {
     this.validateExperiment(experiment);
+    this.validateNewExperiment(experiment);
     if (this.experiments.has(experiment.id)) {
       throw new Error(`Experiment already exists: ${experiment.id}`);
     }
-    const created: Experiment = { ...experiment, status: "setup" };
+    // Only the fields the module uses are kept: anything else a caller sent would be stored in the log for good.
+    const { id, name, hypothesis, variants, traffic_split, metrics, primary_metric, weights } = experiment;
+    const created: Experiment = {
+      id, name, hypothesis, variants, traffic_split, metrics,
+      ...(primary_metric !== undefined ? { primary_metric } : {}),
+      ...(weights !== undefined ? { weights } : {}),
+      status: "setup",
+    };
     // Write first: if the disk write fails the experiment is not created, so memory never gets ahead of disk.
     this.persist({ type: "experiment", experiment: created });
     this.experiments.set(created.id, created);
@@ -715,9 +765,17 @@ class ABTestingFramework {
     if (!experiment.variants.some((v) => v.id === variantId)) {
       throw new Error(`Variant ${variantId} is not part of experiment ${experimentId}`);
     }
+    const known = new Set(experiment.metrics.map((m) => m?.id));
     for (const [key, value] of Object.entries(metrics ?? {})) {
       if (typeof value !== "number" || !Number.isFinite(value)) {
         throw new Error(`Metric ${key} must be a finite number`);
+      }
+      if (Math.abs(value) > MAX_METRIC_ABS) {
+        throw new Error(`Metric ${key} must be between -1e15 and 1e15 (a larger value would spoil the statistics of the experiment for good)`);
+      }
+      // A key the experiment does not define is used by no statistic, so it would be stored and silently ignored (a misspelt id).
+      if (!known.has(key)) {
+        throw new Error(`Unknown metric ${key} for experiment ${experimentId}: its metrics are ${[...known].join(", ") || "(none)"}`);
       }
     }
     const measurement: Measurement = {
@@ -962,6 +1020,10 @@ class ABTestingFramework {
     return withheld ? `No clear winner (withheld by guardrail: ${withheld.join(", ")})` : "No clear winner";
   }
 
+  public hasExperiment(experimentId: string): boolean {
+    return this.experiments.has(experimentId);
+  }
+
   public listExperiments(): Array<{
     id: string;
     name: string;
@@ -1083,6 +1145,10 @@ export async function processToolCall(
   }
 }
 
+function mustBeString(value: unknown, name: string): void {
+  if (typeof value !== "string") throw new Error(`${name} must be a string`);
+}
+
 async function dispatchToolCall(
   toolName: string,
   toolInput: Record<string, any>
@@ -1095,28 +1161,36 @@ async function dispatchToolCall(
       } as Experiment);
       return JSON.stringify({ status: "success", experiment_id: toolInput.id });
 
-    case "assign_variant":
-      return JSON.stringify(
-        abTesting.assignVariant(
-          toolInput.experiment_id,
-          toolInput.user_id
-        )
-      );
+    case "assign_variant": {
+      mustBeString(toolInput.experiment_id, "experiment_id");
+      const user = toolInput.user_id;
+      if (user !== undefined && user !== null && typeof user !== "string" && typeof user !== "number") {
+        // An object would become "[object Object]" and put every such caller in one bucket.
+        throw new Error("user_id must be a string or a number");
+      }
+      return JSON.stringify(abTesting.assignVariant(toolInput.experiment_id, user === undefined || user === null ? undefined : String(user)));
+    }
 
-    case "record_metric":
-      abTesting.recordMetric(
-        toolInput.experiment_id,
-        toolInput.variant_id,
-        toolInput.metrics
-      );
+    case "record_metric": {
+      mustBeString(toolInput.experiment_id, "experiment_id");
+      mustBeString(toolInput.variant_id, "variant_id");
+      const m = toolInput.metrics;
+      if (!m || typeof m !== "object" || Array.isArray(m)) throw new Error("metrics must be an object of numbers, such as {\"cost\": 0.02}");
+      abTesting.recordMetric(toolInput.experiment_id, toolInput.variant_id, m);
       return JSON.stringify({ status: "recorded" });
+    }
 
-    case "get_experiment_results":
-      return JSON.stringify(
-        abTesting.getExperimentResults(toolInput.experiment_id)
-      );
+    case "get_experiment_results": {
+      mustBeString(toolInput.experiment_id, "experiment_id");
+      const results = abTesting.getExperimentResults(toolInput.experiment_id);
+      // Every other tool answers an unknown experiment with an error; "null" looked like a result.
+      if (results === null) throw new Error(`Experiment not found: ${toolInput.experiment_id}`);
+      return JSON.stringify(results);
+    }
 
     case "recommend_winner":
+      mustBeString(toolInput.experiment_id, "experiment_id");
+      if (!abTesting.hasExperiment(toolInput.experiment_id)) throw new Error(`Experiment not found: ${toolInput.experiment_id}`);
       return JSON.stringify({
         recommendation: abTesting.recommendWinner(toolInput.experiment_id),
       });
