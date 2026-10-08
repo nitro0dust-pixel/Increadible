@@ -163,6 +163,8 @@ API**: set `GATEWAY_LIVE_APIS` to a comma-separated list of API ids (or `*`); `G
 | `npm run verify` | Type-check, lint, tests (a run that skipped a suite fails), build and smoke test; also the Docker build and the alert-rule check when Docker and `promtool` exist, otherwise those lines say `NOT AVAILABLE`. The first line names the commit and whether the tree was clean |
 | `bash scripts/cleanroom.sh [commit]` | `verify` on exactly what git has committed: exports `HEAD` (or the commit given) with `git archive` into an empty directory, runs `npm ci`, then `verify`. Files in your working copy cannot change the result |
 
+**Node for development:** the server runs on Node 22 or later (24 in the image and CI); `npm run lint` uses ESLint 10, which needs 22.13 or later (or 20.19 / 24).
+
 **Windows:** `type-check`, `lint`, `test` and `build` work from PowerShell. `npm run smoke`, `npm run verify` and the `scripts/*.sh`
 probes are bash scripts: run them from Git Bash or WSL (not yet verified on Windows). The repo forces LF line endings
 (`.gitattributes`); if you cloned before that landed, re-clone or run `git add --renormalize .`.

@@ -547,7 +547,7 @@ class ABTestingFramework {
       );
     } catch (error: any) {
       this.close(); // never keep the lock of a data file we could not open
-      throw new Error(`Cannot use A/B data file ${file}: ${error.message}`);
+      throw new Error(`Cannot use A/B data file ${file}: ${error.message}`, { cause: error });
     }
   }
 
