@@ -1,6 +1,6 @@
 # Roadmap and project status
 
-Last updated: 2026-10-08 22:30 UTC (9 Oct 2026, 04:00 IST), measured at `main` = `ec5fc64` (PR #28 merged); PR #29 (audit part 7: the mutation-testing pass and the final report) is in review.
+Last updated: 2026-10-08 22:30 UTC (9 Oct 2026, 04:00 IST), measured at `main` = `ec5fc64` (PR #28 merged); PR #30 (audit part 7: the mutation-testing pass and the final report) is in review.
 
 **Bottom line:** the in-repo code (Features #7-#9 and the server around them) is built, tested, containerised, and the
 image published to GHCR passes its probe. **Nothing is deployed anywhere beyond a local rehearsal**: the staging

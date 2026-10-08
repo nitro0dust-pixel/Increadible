@@ -254,6 +254,41 @@ describe("what replaying a data file does with each line", () => {
     expect(samplesOf(ab)).toBe(3);
   });
 
+  it("counts a measurement whose metrics are null as a sample without values", () => {
+    const file = prepare([experimentLine(exp()), JSON.stringify({ type: "measurement", experiment_id: "exp-1", variant_id: "A", metrics: null, timestamp: "t" }), measurementLine("A", { quality: 1 })]);
+    const ab = open(file);
+    expect(summary()).toBe(`Restored 1 experiments and 2 measurements from ${file}`);
+    expect(samplesOf(ab)).toBe(2);
+  });
+
+  it("keeps the underlying error as the cause when the data file cannot be used", () => {
+    const dir = fileIn("dir-as-data-file.jsonl");
+    fs.mkdirSync(dir);
+    let thrown: any;
+    try {
+      open(dir);
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown.message).toMatch(/^Cannot use A\/B data file .*EISDIR/);
+    expect(thrown.cause?.code).toBe("EISDIR"); // the original error, not a copy of its message (it comes from another realm, so no instanceof)
+  });
+
+  it("creates the data file readable by its owner only, also when it has to create it again", () => {
+    const file = fileIn("private.jsonl");
+    const ab = open(file);
+    ab.createExperiment(exp());
+    expect(fs.statSync(file).mode & 0o777).toBe(0o600);
+    fs.rmSync(file);
+    const previous = process.umask(0o022); // the usual default: without an explicit mode the new file would be 0644
+    try {
+      ab.recordMetric("exp-1", "A", { quality: 1 });
+    } finally {
+      process.umask(previous);
+    }
+    expect(fs.statSync(file).mode & 0o777).toBe(0o600);
+  });
+
   it("restores a clean file without the parenthesis", () => {
     const file = prepare([experimentLine(exp()), measurementLine("A", { quality: 1 })]);
     open(file);
@@ -423,6 +458,23 @@ describe("experiments from the YAML file: what is kept and what is said about th
   });
 });
 
+describe("variants and metrics that are not objects", () => {
+  const two = [{ id: "A", name: "a" }, { id: "B", name: "b" }];
+  it("loads from the YAML file an experiment with an empty metric entry that names a primary metric", () => {
+    const file = fileIn("null-metric.yaml");
+    fs.writeFileSync(file, require("yaml").stringify({ experiments: [{ id: "x", name: "n", hypothesis: "h", traffic_split: 0.5, variants: two, primary_metric: "quality", metrics: [null, { id: "quality", name: "q", type: "continuous", aggregation: "mean" }] }] }));
+    errors.mockClear();
+    const ab = open(undefined, undefined, file);
+    expect(logged()).toEqual(["Loaded 1 experiments"]);
+    expect(ab.listExperiments()).toHaveLength(1);
+  });
+
+  it("refuses to create one, saying the id is missing, instead of failing on the empty entry", () => {
+    expect(() => open().createExperiment(exp({ variants: [null as any, { id: "B", name: "b", config: {} }] }))).toThrow("Variant id must be a non-empty string");
+    expect(() => open().createExperiment(exp({ metrics: [null as any] }))).toThrow("Metric id must be a non-empty string");
+  });
+});
+
 describe("the draw that picks a variant, at the exact split", () => {
   const assign = (ab: ABTestingFramework, draw: number, user?: string) => {
     jest.spyOn(Math, "random").mockReturnValue(draw);
@@ -490,9 +542,9 @@ describe("results for several variants and for guardrails", () => {
   const variants = ["A", "B", "C"];
   type Plan = Record<string, { score?: number | null; cost?: number | null }>;
   /** `null` leaves the metric out for that variant; a number is its mean, with a little noise (or none when `flat`). */
-  function run(plan: Plan, options: { two?: boolean; flat?: boolean; guard?: boolean } = {}) {
+  function run(plan: Plan, options: { two?: boolean; flat?: boolean; guard?: boolean; lowerPrimary?: boolean } = {}) {
     const ids = options.two ? ["A", "B"] : variants;
-    const metricList: any[] = [{ id: "score", name: "score", type: "continuous", aggregation: "mean" }];
+    const metricList: any[] = [{ id: "score", name: "score", type: "continuous", aggregation: "mean", ...(options.lowerPrimary ? { direction: "lower_is_better" } : {}) }];
     if (options.guard !== false) metricList.push({ id: "cost", name: "cost", type: "continuous", aggregation: "mean", direction: "lower_is_better", guardrail: true });
     const ab = open();
     ab.createExperiment(exp({ variants: ids.map((id) => ({ id, name: id, config: {} })), metrics: metricList }));
@@ -613,6 +665,62 @@ describe("results for several variants and for guardrails", () => {
     expect(plain.statistical_analysis.significance_level).toBe(0.05);
   });
 
+  it("does not call a guardrail worse for a difference that is there but not significant (two variants)", () => {
+    const slightlyWorse = run({ A: { score: 20, cost: 1.01 }, B: { score: 10, cost: 1 } }, { two: true });
+    const g = slightlyWorse.statistical_analysis.guardrails.cost;
+    expect(g.p_value).toBeGreaterThan(0.05);
+    expect(g.significantly_worse_variant).toBeNull();
+    expect(slightlyWorse.winner).toBe("A"); // the winner is slightly dearer, within the noise: it stays
+    expect(slightlyWorse.statistical_analysis.winner_withheld_by).toBeUndefined();
+    const slightlyBetter = run({ A: { score: 20, cost: 1 }, B: { score: 10, cost: 1.01 } }, { two: true });
+    expect(slightlyBetter.statistical_analysis.guardrails.cost.significantly_worse_variant).toBeNull();
+  });
+
+  it("does not call the leader worse on a guardrail for a difference that is not significant (three variants)", () => {
+    const r = run({ A: { score: 10, cost: 1 }, B: { score: 20, cost: 1.01 }, C: { score: 10, cost: 1 } });
+    const comparisons = r.statistical_analysis.guardrails.cost.comparisons;
+    expect(comparisons.map((c: any) => c.against)).toEqual(["A", "C"]);
+    for (const c of comparisons) {
+      expect(c.p_value).toBeGreaterThan(0.05);
+      expect(c.leader_significantly_worse).toBe(false);
+    }
+    expect(r.winner).toBe("B");
+  });
+
+  it("lists no guardrail as withholding a winner there is none to withhold", () => {
+    const three = run({ A: { score: 10, cost: 1 }, B: { score: 10, cost: 1 }, C: { score: 10, cost: null } });
+    expect(three.winner).toBeUndefined();
+    expect(three.statistical_analysis.guardrails.cost.comparisons.some((c: any) => c.p_value === null)).toBe(true);
+    expect(three.statistical_analysis.winner_withheld_by).toBeUndefined();
+    const two = run({ A: { score: 10, cost: 1 }, B: { score: 10, cost: null } }, { two: true });
+    expect(two.winner).toBeUndefined();
+    expect(two.statistical_analysis.winner_withheld_by).toBeUndefined();
+  });
+
+  it("names the first variant as the leader of a tie when lower is better, too", () => {
+    const r = run({ A: { score: 10, cost: 1 }, B: { score: 10, cost: 1 }, C: { score: 10, cost: 1 } }, { lowerPrimary: true });
+    expect(r.statistical_analysis.guardrails.cost.leader).toBe("A");
+    expect(r.winner).toBeUndefined();
+    const lower = run({ A: { score: 20, cost: 1 }, B: { score: 10, cost: 1 }, C: { score: 20, cost: 1 } }, { lowerPrimary: true });
+    expect(lower.winner).toBe("B"); // the lowest wins when lower is better
+  });
+
+  it("compares a metric that two variants have only two values of, and none that has fewer than two", () => {
+    const build = (extraA: number, extraB: number) => {
+      const ab = open();
+      ab.createExperiment(exp({ metrics: [{ id: "quality", name: "q", type: "continuous", aggregation: "mean" }, { id: "extra", name: "e", type: "continuous", aggregation: "mean" }] }));
+      for (let i = 0; i < 60; i++) {
+        ab.recordMetric("exp-1", "A", i < extraA ? { quality: 10 + NOISE[i % 5], extra: 1 + NOISE[i % 5] } : { quality: 10 + NOISE[i % 5] });
+        ab.recordMetric("exp-1", "B", i < extraB ? { quality: 20 + NOISE[i % 5], extra: 2 + NOISE[i % 5] } : { quality: 20 + NOISE[i % 5] });
+      }
+      return ab.getExperimentResults("exp-1")!.statistical_analysis.p_values;
+    };
+    expect(typeof build(2, 2).extra).toBe("number");
+    expect(build(1, 2).extra).toBeUndefined();
+    expect(build(2, 1).extra).toBeUndefined();
+    expect(typeof build(2, 2).quality).toBe("number");
+  });
+
   it("reports the 95% interval of a variant with the t value of its size: the table up to 29 degrees of freedom, the formula from 30", () => {
     const ab = open();
     ab.createExperiment(exp());
@@ -671,10 +779,13 @@ describe("the tools: what they answer, and the environment that sets the module 
     await tool("create_experiment", definition());
     const byNumber = await tool("assign_variant", { experiment_id: "t-1", user_id: 12345 });
     expect(byNumber).toEqual(await tool("assign_variant", { experiment_id: "t-1", user_id: "12345" }));
-    jest.spyOn(Math, "random").mockReturnValue(0.9);
-    expect((await tool("assign_variant", { experiment_id: "t-1" })).variant_id).toBe("B");
-    expect((await tool("assign_variant", { experiment_id: "t-1", user_id: null })).variant_id).toBe("B");
-    expect((await tool("assign_variant", { experiment_id: "t-1", user_id: "" })).variant_id).toBe("B");
+    const draw = jest.spyOn(Math, "random");
+    for (const [value, expected] of [[0.1, "A"], [0.9, "B"]] as const) {
+      draw.mockReturnValue(value); // with no user the dice decide, so both answers must be reachable
+      expect((await tool("assign_variant", { experiment_id: "t-1" })).variant_id).toBe(expected);
+      expect((await tool("assign_variant", { experiment_id: "t-1", user_id: null })).variant_id).toBe(expected);
+      expect((await tool("assign_variant", { experiment_id: "t-1", user_id: "" })).variant_id).toBe(expected);
+    }
     for (const bad of [{}, [], true]) expect(await tool("assign_variant", { experiment_id: "t-1", user_id: bad })).toEqual({ error: "user_id must be a string or a number" });
   });
 
