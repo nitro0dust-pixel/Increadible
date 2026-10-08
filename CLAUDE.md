@@ -30,7 +30,8 @@ targets, not results).
 | `npm test` | Jest over `tests/` (add `-- --coverage`; no coverage threshold is configured) |
 | `npm run build` | compile to `dist/` (a cleaner script runs first: `scripts/clean.js`, because `rm -rf` is not portable to `cmd.exe`) |
 | `npm run smoke` | `scripts/smoke.sh`: real processes over stdio and HTTP (lock, crash safety, refusal to start open, drain, deadline) |
-| `npm run verify` | type-check, lint, tests, build, smoke; reports `NOT AVAILABLE` for Docker and cluster checks it cannot run |
+| `npm run verify` | type-check, lint, tests (fails if fewer suites ran than `tests/*.test.ts` files), build, smoke, plus Docker build and `promtool` when present; prints the commit and tree it tested and reports `NOT AVAILABLE` for what it cannot run |
+| `bash scripts/cleanroom.sh [commit]` | `verify` on a `git archive` of `HEAD` (or the commit given) after `npm ci`: only what is committed, nothing from the working copy. Use it for any claim of the form "it passes on commit X" |
 | `bash scripts/probe-image.sh <image>` | the image the way a deployment runs it: needs Docker, curl, jq. **Only CI has a Docker daemon**; locally it can be tried against a stubbed `docker`, which proves the script's logic but not the image |
 | `npm run loadtest`, `npm run capacity` | per-tool throughput and latency; A/B data size against restart, memory and query cost (not in CI: shared runners are too noisy; `smoke.sh` only checks they still run). Use an idle machine and read `PERFORMANCE.md` first |
 | `node scripts/make-ab-data.js --file <f> --measurements <N>` | writes an A/B data file of N measurements (fast, no server); smoke and the image probe use it to start on a large file |

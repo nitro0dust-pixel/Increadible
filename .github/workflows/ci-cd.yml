@@ -8,7 +8,9 @@ on:
 
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  # A newer push replaces the older run of the same pull request, but a push to main is never cancelled: each merge keeps its own run,
+  # because that run pushes the image and verifies it by digest, and is the evidence recorded for that commit.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 permissions:
   contents: read

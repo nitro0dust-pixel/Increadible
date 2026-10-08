@@ -301,6 +301,13 @@ describe("Dockerfile and package.json", () => {
     expect(offenders).toEqual([]);
   });
 
+  it("documents every file in scripts/ (by name in a document, or through the npm script that runs it)", () => {
+    const docs = ["README.md", "CLAUDE.md", "DEPLOYMENT.md", "PERFORMANCE.md"].map(read).join("\n");
+    const pkg = read("package.json");
+    const undocumented = fs.readdirSync(path.join(root, "scripts")).filter((f) => !docs.includes(f) && !pkg.includes(`scripts/${f}`));
+    expect(undocumented).toEqual([]);
+  });
+
   it("uses a tracked lockfile for reproducible installs", () => {
     expect(fs.existsSync(path.join(root, "package-lock.json"))).toBe(true);
     expect(read(".gitignore")).not.toMatch(/^package-lock\.json$/m);
@@ -354,6 +361,12 @@ describe(".github/workflows/ci-cd.yml", () => {
     expect(runs).toContain('docker pull "$IMAGE@$DIGEST"');
     expect(runs).toContain('scripts/probe-image.sh "$IMAGE@$DIGEST"');
     expect(runs).toContain("imagetools inspect");
+  });
+
+  it("cancels a superseded run on a pull request but never a run on main", () => {
+    // Two quick merges would otherwise cancel the first merge's run midway: no image push, no verification by digest, no record.
+    expect(wf.concurrency.group).toBe("ci-${{ github.ref }}");
+    expect(wf.concurrency["cancel-in-progress"]).toBe("${{ github.ref != 'refs/heads/main' }}");
   });
 
   it("does not mask failures with continue-on-error", () => {

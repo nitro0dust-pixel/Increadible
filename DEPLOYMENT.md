@@ -12,7 +12,8 @@
 npm ci && npm run build
 node dist/src/index.js                      # stdio (Claude Desktop)
 PORT=3000 AUTH_TOKEN=change-me node dist/src/index.js   # HTTP
-npm run verify                              # type-check, lint, tests, build, smoke, docker build if available
+npm run verify                              # type-check, lint, tests, build, smoke, docker build and alert rules if available
+bash scripts/cleanroom.sh                   # the same on a clean export of HEAD (only what is committed)
 ```
 
 ## Docker
@@ -225,7 +226,7 @@ namespace. Alerts use only metrics the server emits plus kube-state-metrics rest
 
 | Alert | Fires when | Status |
 |---|---|---|
-| `IncreadibleDown` | the target is not up for 2 minutes | critical |
+| `IncreadibleDown` | the target is not up, or has no `up` series at all (Deployment gone, ServiceMonitor not matching), for 2 minutes | critical |
 | `IncreadibleToolErrorRate` | more than 5% of tool calls return errors for 10 minutes | warning |
 | `IncreadibleProtocolErrors` | more than 0.1 protocol errors per second for 10 minutes | warning |
 | `IncreadibleSlowToolCalls` | the 95th percentile tool call latency is above 1 s for 10 minutes | warning, **provisional threshold**: no baseline exists (tool calls take well under a millisecond today); revisit with the load test and when the gateway makes real external calls |

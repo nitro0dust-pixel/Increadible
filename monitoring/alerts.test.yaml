@@ -25,6 +25,44 @@ tests:
             exp_annotations:
               summary: Increadible is not being scraped or is down
 
+  - name: IncreadibleDown fires when the target has no up series at all (never scraped)
+    interval: 1m
+    input_series:
+      - series: 'up{job="some-other-job", namespace="increadible"}'
+        values: '1x20'
+    alert_rule_test:
+      - eval_time: 1m   # absent since minute 0, `for: 2m` not yet elapsed
+        alertname: IncreadibleDown
+        exp_alerts: []
+      - eval_time: 5m
+        alertname: IncreadibleDown
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              job: increadible
+              namespace: increadible
+            exp_annotations:
+              summary: Increadible is not being scraped or is down
+
+  - name: IncreadibleDown fires when the target disappears after having been up
+    interval: 1m
+    input_series:
+      - series: 'up{job="increadible", namespace="increadible"}'
+        values: '1 1 1 stale'
+    alert_rule_test:
+      - eval_time: 4m   # gone since minute 3
+        alertname: IncreadibleDown
+        exp_alerts: []
+      - eval_time: 8m
+        alertname: IncreadibleDown
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              job: increadible
+              namespace: increadible
+            exp_annotations:
+              summary: Increadible is not being scraped or is down
+
   - name: IncreadibleDown stays quiet while the target is up
     interval: 1m
     input_series:

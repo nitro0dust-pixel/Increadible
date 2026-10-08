@@ -31,7 +31,11 @@ spec:
     - name: increadible
       rules:
         - alert: IncreadibleDown
-          expr: up{job="increadible", namespace="increadible"} == 0
+          # `== 0` alone cannot fire for a target that is gone (Deployment deleted or scaled to zero, ServiceMonitor selector no longer
+          # matching): no scrape happens, so there is no `up` series to compare. absent() covers exactly that case.
+          expr: >-
+            up{job="increadible", namespace="increadible"} == 0
+            or absent(up{job="increadible", namespace="increadible"})
           for: 2m
           labels:
             severity: critical
