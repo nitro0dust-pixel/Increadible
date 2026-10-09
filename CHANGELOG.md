@@ -19,6 +19,7 @@ Entries marked **behaviour change** can affect an existing deployment.
 - `docs/GATEWAY-GATED-CATALOG.md`: option A of `GATEWAY.md` (the gated catalog) as components and an order of work. **Proposed, not built**; drafted in a separate session from the owner's local copy and corrected against `main` (four statements were wrong, listed in its section 8). ([#39](https://github.com/nitro0dust-pixel/Increadible/pull/39))
 
 ### Changed
+- **CI: the secret-scanner action `trufflesecurity/trufflehog` 3.97.9 to 3.99.0** (Dependabot). The scanner image itself stays pinned by digest (3.99.2, `sha256:47a84bc1...`); the action's CI log shows that exact image pulled. ([#29](https://github.com/nitro0dust-pixel/Increadible/pull/29))
 - **License: proprietary (owner decision, 2026-10-09; behaviour change for anyone who relied on MIT).** `LICENSE` now reserves all rights for `Increadible Team`; `package.json` and `mcpb/manifest.json` declare `UNLICENSED`, and `package.json` is `private`. ([#39](https://github.com/nitro0dust-pixel/Increadible/pull/39))
 - **CI: the secret scanner is pinned by digest** (audit D-5, owner decision): TruffleHog 3.99.2, `sha256:47a84bc1...`, the image CI already ran, instead of the moving `latest`. ([#39](https://github.com/nitro0dust-pixel/Increadible/pull/39))
 
