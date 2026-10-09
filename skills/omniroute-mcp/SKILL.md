@@ -19,15 +19,15 @@ Features #1 to #6 (`features/01` to `06`) are third-party submodules. They run b
 
 | Item | State |
 |---|---|
-| Last recorded: 2026-10-09 | `main` includes PR #34 (the fix that makes the Claude Desktop package answer, version 1.0.1) after PR #32 (the package) and PR #31 (this skill and the documentation set); PR #33 recorded PR #32. The 1.0.1 file was handed to the owner; the owner's retest is the next thing to settle |
-| Last merged PR | #34 |
-| Open PR / handover | draft [#36](https://github.com/nitro0dust-pixel/Increadible/pull/36) (tool schemas: item shapes, bounds, examples; **version 1.0.2**; branch `ccr-5b8e0f6b-j2aqvn`): CI logs read, reviews done by probe, three findings fixed; next: CI on the new head, then merge and record. The project moved from the Claude Pro account `hsharma.gxi@gmail.com` (weekly limit reached, resets 2026-10-12 16:00 UTC) to `ashiurvi786@gmail.com` on 2026-10-09; see "Session continuity" in `references/roadmap.md` |
-| Tests | `main` at PR #34: 22 suites, 798 passed, 6 todo; CI green, run 37878301365 (all six jobs, pull-by-digest probe read) |
+| Last recorded: 2026-10-09 | `main` includes PR #36 (tool schemas with item shapes, bounds and examples; **version 1.0.2**) after PR #34 (the fix that makes the package answer, 1.0.1); PR #35 recorded PR #34. The owner's retest (1.0.1 first, then 1.0.2) is the next thing to settle |
+| Last merged PR | #36 |
+| Open PR / handover | the record of PR #36 only (merged as `7de40c2`).  The project moved from the Claude Pro account `hsharma.gxi@gmail.com` (weekly limit reached, resets 2026-10-12 16:00 UTC) to `ashiurvi786@gmail.com` on 2026-10-09; see "Session continuity" in `references/roadmap.md` |
+| Tests | `main` at PR #36: 24 suites, 868 passed, 6 todo; CI green, run 37970177739 (all six jobs, pull-by-digest probe read); clean room of `7de40c2` on Node 22.22.0 |
 | Audit | done: `references/audit.md` (7 parts; mutation testing 78.7% to 90.0%, every remaining mutant read) |
 | Container image | built, probed, pushed to GHCR (private), pulled back by digest and probed again, in CI |
 | Production / cluster | **NOT DONE**: needs the owner's explicit approval and a cluster target |
 | Installed in the owner's Claude Desktop | **PARTLY**: version 1.0.0 installed and enabled on Windows and its settings were substituted correctly (owner's screenshots), but the server **did not answer** (the app's log: `initialize` unanswered for 60 s). Version 1.0.1 (merged in PR #34, handed to the owner) removes the known causes: **NOT VERIFIED** until the owner retests (`references/install-claude-desktop.md`, sections 5.4 and 5.5) |
-| One-click `.mcpb` package | **merged** (PR #32, fixed by PR #34 as version 1.0.1; SHA-256 `bc24224c...`): `npm run mcpb`, or the CI artifact `increadible-mcpb`; manifest accepted by the vendor's validator; started from the unpacked bundle in a test; CI-built bytes equal the sandbox build. **Claude Desktop installing it: NOT VERIFIED** (step C in `references/build-history.md`) |
+| One-click `.mcpb` package | **merged** (PR #32, fixed by PR #34 as version 1.0.1, SHA-256 `bc24224c...`; schemas added by PR #36 as version 1.0.2, SHA-256 `3594d5fd...`): `npm run mcpb`, or the CI artifact `increadible-mcpb`; manifest accepted by the vendor's validator; started from the unpacked bundle in a test; CI-built bytes equal the sandbox build. **Claude Desktop installing it: NOT VERIFIED** (step C in `references/build-history.md`) |
 | Owner decisions open | install the package in Claude Desktop and report back; code signing; license and holder; gateway direction; scanner pin policy; security contact; cluster target; image scanner; default branch to `main`; rate limit; latency alert threshold; release tag |
 
 ## Operating rules (non-negotiable)
