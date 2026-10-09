@@ -652,3 +652,256 @@ describe("AUDIT.md", () => {
     for (const file of new Set(named)) expect({ file, exists: fs.existsSync(path.join(root, file)) }).toEqual({ file, exists: true });
   });
 });
+
+describe("the documentation set", () => {
+  /** Every markdown file that is ours: not vendored (features/), not installed, not built, and not a synced copy inside the skill. */
+  const ownDocuments = (): string[] => {
+    const found: string[] = [];
+    const walk = (dir: string) => {
+      for (const entry of fs.readdirSync(path.join(root, dir), { withFileTypes: true })) {
+        const rel = dir ? `${dir}/${entry.name}` : entry.name;
+        if (entry.isDirectory()) {
+          if (["node_modules", "features", "dist", "coverage", ".git"].includes(entry.name) || rel === "skills/omniroute-mcp/references") continue;
+          walk(rel);
+        } else if (entry.name.endsWith(".md")) found.push(rel);
+      }
+    };
+    walk("");
+    return found.sort();
+  };
+  const index = read("docs/README.md");
+  /** The link target that docs/README.md must hold for a document. */
+  const targetFrom = (file: string) => (file.startsWith("docs/") ? file.slice(5) : `../${file}`);
+
+  it("lists every document of the repository in docs/README.md, and every link in it points at a file that exists", () => {
+    for (const file of ownDocuments()) {
+      if (file === "docs/README.md") continue;
+      expect({ file, listed: index.includes(`](${targetFrom(file)})`) }).toEqual({ file, listed: true });
+    }
+    for (const [, target] of index.matchAll(/\]\(([^)#]+?)\)/g)) {
+      if (/^https?:/.test(target)) continue;
+      expect({ target, exists: fs.existsSync(path.join(root, "docs", target)) }).toEqual({ target, exists: true });
+    }
+  });
+
+  it("has the documents a person needs from nothing to a running Claude Desktop", () => {
+    for (const file of ["README.md", "ROADMAP.md", "docs/INSTALL-CLAUDE-DESKTOP.md", "docs/TROUBLESHOOTING.md", "docs/ARCHITECTURE.md", "docs/BUILD-HISTORY.md", "DEPLOYMENT.md", "CONTRIBUTING.md", "SECURITY.md", "CLAUDE.md", "CHANGELOG.md", ".github/pull_request_template.md"]) {
+      expect({ file, exists: fs.existsSync(path.join(root, file)) }).toEqual({ file, exists: true });
+    }
+    for (const file of ["README.md", "CLAUDE.md"]) expect({ file, links: read(file).includes("docs/README.md") }).toEqual({ file, links: true });
+  });
+
+  it("names only npm scripts, script files and settings that exist", () => {
+    const own = ownDocuments().filter((f) => f.startsWith("docs/") || ["CONTRIBUTING.md", "SECURITY.md"].includes(f));
+    const sources = ["src/index.ts", "src/server.ts", "features/07-routing-plugins/src/mcp-server.ts", "features/08-ab-testing/src/mcp-server.ts", "features/09-api-gateway/src/mcp-server.ts"].map(read).join("\n");
+    for (const file of own) {
+      const text = read(file);
+      for (const [, script] of text.matchAll(/npm run ([a-z][a-z0-9:-]*)/g)) expect({ file, script, exists: script in pkg.scripts }).toEqual({ file, script, exists: true });
+      for (const [, name] of text.matchAll(/`(scripts\/[A-Za-z0-9._/-]+?)`/g)) expect({ file, name, exists: fs.existsSync(path.join(root, name)) }).toEqual({ file, name, exists: true });
+      for (const [, name] of text.matchAll(/`((?:AB|GATEWAY|HTTP|RATE|SHUTDOWN|RULES|EXPERIMENTS|ALLOW)_[A-Z0-9_]+)`/g)) {
+        if (name === "GATEWAY_KEY_") continue;
+        expect({ file, name, readByCode: sources.includes(name) }).toEqual({ file, name, readByCode: true });
+      }
+    }
+  });
+
+  it("tells the reader about all 13 tools by their real names, and what is not verified", () => {
+    const tools = [...[
+      "features/07-routing-plugins/src/mcp-server.ts",
+      "features/08-ab-testing/src/mcp-server.ts",
+      "features/09-api-gateway/src/mcp-server.ts",
+    ].map(read).join("\n").matchAll(/^ {2}name: "([a-z]+(?:_[a-z]+)+)",$/gm)].map((m) => m[1]);
+    expect(tools).toHaveLength(13);
+    const guide = read("docs/INSTALL-CLAUDE-DESKTOP.md");
+    for (const tool of tools) expect({ tool, named: guide.includes(`\`${tool}\``) }).toEqual({ tool, named: true });
+    expect(guide).toContain("NOT VERIFIED");
+    expect(guide).toContain("claude_desktop_config.json");
+    expect(read("docs/TROUBLESHOOTING.md")).toContain("NOT VERIFIED");
+  });
+
+  it("records every pull request that ROADMAP.md lists as done, in order, in docs/BUILD-HISTORY.md", () => {
+    const history = read("docs/BUILD-HISTORY.md");
+    const listed = [...read("ROADMAP.md").matchAll(/^\d+\. \*\*\[PR #(\d+)\]/gm)].map((m) => Number(m[1]));
+    const recorded = [...history.matchAll(/^\| \d+ \| [^|]+ \| \[#(\d+)\]/gm)].map((m) => Number(m[1]));
+    expect(listed.length).toBeGreaterThan(20);
+    for (const pr of listed) expect({ pr, recorded: recorded.includes(pr) }).toEqual({ pr, recorded: true });
+    expect([...recorded].sort((a, b) => a - b)).toEqual(recorded); // merged order is number order here
+    expect(history).toContain("## 5. How to add a step");
+  });
+
+  it("has a pull request template that asks for the record to be updated, the skill included", () => {
+    const template = read(".github/pull_request_template.md");
+    expect(template).toContain("node scripts/skill.js sync");
+    expect(template).toContain("docs/BUILD-HISTORY.md");
+    expect(template).toContain("## Not verified");
+  });
+});
+
+describe("the global skill omniroute-mcp", () => {
+  const skill = require("../scripts/skill.js");
+  const skillDir = path.join(root, "skills", "omniroute-mcp");
+  const text = read("skills/omniroute-mcp/SKILL.md");
+  const tmp = () => fs.mkdtempSync(path.join(require("os").tmpdir(), "skill-"));
+
+  it("is sound and in step with the documents it carries (node scripts/skill.js check)", () => {
+    expect(skill.problems()).toEqual([]);
+  });
+
+  it("carries every reference file and nothing else, and SKILL.md points to each", () => {
+    const refs = fs.readdirSync(path.join(skillDir, "references")).sort();
+    expect(refs).toEqual(Object.values(skill.REFERENCES as Record<string, string>).sort());
+    for (const ref of refs) expect(text).toContain(`references/${ref}`);
+  });
+
+  it("has front matter a skill loader accepts: the name of its folder, a description of at most 1024 characters, no angle brackets", () => {
+    const front = text.match(/^---\n([\s\S]*?)\n---\n/)!;
+    expect(front).not.toBeNull();
+    expect(front[1]).toMatch(/^name: omniroute-mcp$/m);
+    const description = front[1].match(/^description: "(.*)"$/m)![1];
+    expect(description.length).toBeGreaterThan(100);
+    expect(description.length).toBeLessThanOrEqual(1024);
+    expect(description).not.toMatch(/[<>]/);
+    expect(description).toMatch(/Claude Desktop/);
+  });
+
+  it("warns that OmniRoute is the vendored third-party project, not what was built", () => {
+    expect(text).toMatch(/OmniRoute\*\* \| A \*\*third-party\*\* project/);
+    expect(text).toContain("features/01-omniroute");
+  });
+
+  it("names the last merged pull request of the build history, and states what is not verified", () => {
+    const recorded = [...read("docs/BUILD-HISTORY.md").matchAll(/^\| \d+ \| [^|]+ \| \[#(\d+)\]/gm)].map((m) => Number(m[1]));
+    expect(text).toContain(`| Last merged PR | #${Math.max(...recorded)} |`);
+    expect(text).toContain("## Update protocol: after every step, without exception");
+    expect(text).toContain("NOT VERIFIED");
+    expect(text).toContain("## Status at a glance");
+  });
+
+  it("is detected as out of step when a copy is edited, and when a reference is missing", () => {
+    const ref = path.join(skillDir, "references", "troubleshooting.md");
+    const original = fs.readFileSync(ref, "utf8");
+    try {
+      fs.writeFileSync(ref, original + "\nedited by hand\n");
+      expect(skill.problems().join("\n")).toContain("references/troubleshooting.md differs from docs/TROUBLESHOOTING.md");
+    } finally {
+      fs.writeFileSync(ref, original);
+    }
+    expect(skill.problems()).toEqual([]);
+  });
+
+  /** The textbook bit-by-bit CRC-32, written apart from scripts/skill.js so that the two can disagree. */
+  const bitwiseCrc32 = (buf: Buffer): number => {
+    let c = 0xffffffff;
+    for (const byte of buf) {
+      c ^= byte;
+      for (let k = 0; k < 8; k++) c = c & 1 ? (c >>> 1) ^ 0xedb88320 : c >>> 1;
+    }
+    return (c ^ 0xffffffff) >>> 0;
+  };
+
+  it("computes CRC-32 as the standard defines it (the published check value for \"123456789\", and the empty input)", () => {
+    expect(skill.crc32(Buffer.from("123456789"))).toBe(0xcbf43926);
+    expect(skill.crc32(Buffer.alloc(0))).toBe(0);
+    expect(skill.crc32(Buffer.from("123456789"))).toBe(bitwiseCrc32(Buffer.from("123456789")));
+  });
+
+  it("sync writes every reference from its source and check fails until it has (run in a copy of the layout, never in the repository)", () => {
+    const copy = tmp();
+    const put = (rel: string) => {
+      fs.mkdirSync(path.dirname(path.join(copy, rel)), { recursive: true });
+      fs.copyFileSync(path.join(root, rel), path.join(copy, rel));
+    };
+    for (const rel of ["scripts/skill.js", "skills/omniroute-mcp/SKILL.md", ...Object.keys(skill.REFERENCES)]) put(rel);
+    const run = (command: string) => require("child_process").spawnSync(process.execPath, [path.join(copy, "scripts", "skill.js"), command], { encoding: "utf8" });
+    const reference = path.join(copy, "skills", "omniroute-mcp", "references", "roadmap.md");
+
+    expect(run("check").status).toBe(1); // no references yet
+    expect(run("sync").status).toBe(0);
+    expect(fs.readFileSync(reference, "utf8")).toBe(`<!-- Copy of ROADMAP.md made by "node scripts/skill.js sync". Do not edit here: edit the source and run sync. Relative links point into the repository. -->\n\n` + read("ROADMAP.md"));
+    expect(run("check").status).toBe(0);
+
+    fs.appendFileSync(path.join(copy, "ROADMAP.md"), "\na line added to the source\n");
+    expect(run("check").status).toBe(1); // the source moved on
+    expect(run("sync").status).toBe(0);
+    expect(run("check").status).toBe(0);
+    expect(fs.readFileSync(reference, "utf8")).toContain("a line added to the source");
+  });
+
+  /** A zip reader written for the test (central directory only, as unzip does): name, method, stored checksum and inflated content of each entry. */
+  const readZip = (zip: Buffer) => {
+    const end = zip.lastIndexOf(Buffer.from([0x50, 0x4b, 0x05, 0x06]));
+    expect(end).toBeGreaterThan(0);
+    const count = zip.readUInt16LE(end + 10);
+    let pos = zip.readUInt32LE(end + 16);
+    const entries: { name: string; method: number; flags: number; localFlags: number; crc: number; usize: number; data: Buffer }[] = [];
+    for (let i = 0; i < count; i++) {
+      expect(zip.readUInt32LE(pos)).toBe(0x02014b50);
+      const flags = zip.readUInt16LE(pos + 8);
+      const method = zip.readUInt16LE(pos + 10);
+      const crc = zip.readUInt32LE(pos + 16);
+      const csize = zip.readUInt32LE(pos + 20);
+      const usize = zip.readUInt32LE(pos + 24);
+      const nameLen = zip.readUInt16LE(pos + 28);
+      const offset = zip.readUInt32LE(pos + 42);
+      const name = zip.subarray(pos + 46, pos + 46 + nameLen).toString("utf8");
+      const dataStart = offset + 30 + zip.readUInt16LE(offset + 26) + zip.readUInt16LE(offset + 28);
+      const body = zip.subarray(dataStart, dataStart + csize);
+      expect([0, 8]).toContain(method);
+      entries.push({ name, method, flags, localFlags: zip.readUInt16LE(offset + 6), crc, usize, data: method === 8 ? require("zlib").inflateRawSync(body) : body });
+      pos += 46 + nameLen;
+    }
+    return entries;
+  };
+
+  it("packages to a zip that an independent reader accepts: every file, its content, the folder name, and a matching checksum", () => {
+    const out = path.join(tmp(), "skill.zip");
+    const { files } = skill.packageZip(out);
+    const zip = fs.readFileSync(out);
+    const entries = readZip(zip);
+    expect(entries).toHaveLength(files);
+    for (const { name, crc, usize, data } of entries) {
+      expect(data.length).toBe(usize);
+      expect(bitwiseCrc32(data)).toBe(crc); // not skill.crc32: a function cannot vouch for its own output
+      expect(name.startsWith("omniroute-mcp/")).toBe(true);
+      expect(data.equals(fs.readFileSync(path.join(skillDir, ...name.slice("omniroute-mcp/".length).split("/"))))).toBe(true);
+    }
+    const seen = entries.map((e) => e.name);
+    expect(seen).toContain("omniroute-mcp/SKILL.md");
+    expect(seen.filter((n) => n.includes("/references/"))).toHaveLength(Object.keys(skill.REFERENCES).length);
+    expect(skill.packageZip(out).files).toBe(files);
+    expect(fs.readFileSync(out).equals(zip)).toBe(true); // the same input gives the same bytes
+  });
+
+  it("stores what does not compress and deflates what does, each with the matching method flag (empty, random, repetitive, non-ASCII names)", () => {
+    const random = require("crypto").randomBytes(512);
+    const text = Buffer.from("abc ".repeat(500));
+    const entries = readZip(skill.zip([["empty.txt", Buffer.alloc(0)], ["random.bin", random], ["text.txt", text], ["ünï/cødé.md", Buffer.from("x")]]));
+    const by = Object.fromEntries(entries.map((e) => [e.name, e]));
+    expect(by["empty.txt"].method).toBe(0);
+    expect(by["random.bin"].method).toBe(0);
+    expect(by["text.txt"].method).toBe(8);
+    expect(by["random.bin"].data.equals(random)).toBe(true);
+    expect(by["text.txt"].data.equals(text)).toBe(true);
+    expect(Object.keys(by)).toContain("ünï/cødé.md");
+    for (const e of entries) {
+      expect(bitwiseCrc32(e.data)).toBe(e.crc);
+      expect(e.flags & 0x0800).toBe(0x0800); // names are UTF-8, in the central directory and in the local header
+      expect(e.localFlags & 0x0800).toBe(0x0800);
+    }
+  });
+
+  it("installs into the folder it owns only: a dry run writes nothing, a real run replaces the old copy and leaves other skills alone", () => {
+    const target = tmp();
+    fs.mkdirSync(path.join(target, "other-skill"));
+    fs.writeFileSync(path.join(target, "other-skill", "SKILL.md"), "keep me");
+    skill.install(target, true);
+    expect(fs.existsSync(path.join(target, "omniroute-mcp"))).toBe(false);
+    fs.mkdirSync(path.join(target, "omniroute-mcp"));
+    fs.writeFileSync(path.join(target, "omniroute-mcp", "stale.txt"), "old");
+    const { files } = skill.install(target, false);
+    expect(files).toBe(1 + Object.keys(skill.REFERENCES).length);
+    expect(fs.existsSync(path.join(target, "omniroute-mcp", "stale.txt"))).toBe(false);
+    expect(fs.readFileSync(path.join(target, "omniroute-mcp", "SKILL.md"), "utf8")).toBe(text);
+    expect(fs.readFileSync(path.join(target, "other-skill", "SKILL.md"), "utf8")).toBe("keep me");
+  });
+});

@@ -1,7 +1,7 @@
 # Increadible: context for Claude sessions
 
 Read this first, then `ROADMAP.md` (status, plan, open decisions: the source of truth for *what is done*),
-`DEPLOYMENT.md` (how it runs), `PERFORMANCE.md` (what has been measured, and what the numbers do not say), `COMPANIONS.md` (third-party tools that run beside this server, never inside it) and `GATEWAY.md` (the decision record for a universal API gateway: researched, proposed, not built, waiting on the owner); `AUDIT.md` is the account of the code audit: what was found, fixed and left open). This file holds the stable facts and the working rules; it deliberately holds no test
+`DEPLOYMENT.md` (how it runs), `PERFORMANCE.md` (what has been measured, and what the numbers do not say), `COMPANIONS.md` (third-party tools that run beside this server, never inside it) and `GATEWAY.md` (the decision record for a universal API gateway: researched, proposed, not built, waiting on the owner); `AUDIT.md` is the account of the code audit: what was found, fixed and left open). The index of every document is `docs/README.md`; `CONTRIBUTING.md` and `SECURITY.md` cover how to change the code and its security posture; the global skill `skills/omniroute-mcp/` carries all of it into any Claude session. This file holds the stable facts and the working rules; it deliberately holds no test
 counts, no commit hashes and no status, because those go stale with every PR.
 
 ## What this is
@@ -30,6 +30,7 @@ targets, not results).
 | `npm test` | Jest over `tests/` (add `-- --coverage`; no coverage threshold is configured) |
 | `npm run build` | compile to `dist/` (a cleaner script runs first: `scripts/clean.js`, because `rm -rf` is not portable to `cmd.exe`) |
 | `npm run smoke` | `scripts/smoke.sh`: real processes over stdio and HTTP (lock, crash safety, refusal to start open, drain, deadline) |
+| `node scripts/skill.js sync`, `check`, `package`, `install` | keep the global skill `skills/omniroute-mcp/` in step with the documents; zip it for upload; install it for Claude Code |
 | `npm run verify` | type-check, lint, tests (fails if fewer suites ran than `tests/*.test.ts` files), build, smoke, plus Docker build and `promtool` when present; prints the commit and tree it tested and reports `NOT AVAILABLE` for what it cannot run |
 | `bash scripts/cleanroom.sh [commit]` | `verify` on a `git archive` of `HEAD` (or the commit given) after `npm ci`: only what is committed, nothing from the working copy. Use it for any claim of the form "it passes on commit X" |
 | `bash scripts/probe-image.sh <image>` | the image the way a deployment runs it: needs Docker, curl, jq. **Only CI has a Docker daemon**; locally it can be tried against a stubbed `docker`, which proves the script's logic but not the image |
@@ -73,6 +74,7 @@ Details and defaults: `README.md` and `DEPLOYMENT.md`.
 5. **Tests that open sockets:** read the response (`resume()`), or the socket never emits `close` and Jest hangs. Give every such test a failsafe.
 6. **Docs move with code.** Every env var the code reads is documented and tested; ROADMAP rows cite evidence (run id, command).
 7. **Secrets:** never print, commit or log values (variable names only).
+8. **After every step, update the record**: the documents the step changed (`docs/README.md` is the index), a row in `docs/BUILD-HISTORY.md`, `ROADMAP.md`, `CHANGELOG.md`, the status table in `skills/omniroute-mcp/SKILL.md`, then `node scripts/skill.js sync` (the global skill carries copies of the documents; `npm test` fails when they differ). Install guide for Claude Desktop: `docs/INSTALL-CLAUDE-DESKTOP.md`.
 
 ## Environment gotchas (authoring sandbox)
 
