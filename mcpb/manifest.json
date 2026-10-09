@@ -8,7 +8,7 @@
   "author": {
     "name": "Increadible Team"
   },
-  "license": "MIT",
+  "license": "UNLICENSED",
   "keywords": ["routing", "ab-testing", "experiments", "api-gateway", "mcp"],
   "server": {
     "type": "node",
