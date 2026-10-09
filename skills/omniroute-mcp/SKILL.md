@@ -21,7 +21,7 @@ Features #1 to #6 (`features/01` to `06`) are third-party submodules. They run b
 |---|---|
 | Last recorded: 2026-10-09 | `main` includes PR #34 (the fix that makes the Claude Desktop package answer, version 1.0.1) after PR #32 (the package) and PR #31 (this skill and the documentation set); PR #33 recorded PR #32. The 1.0.1 file was handed to the owner; the owner's retest is the next thing to settle |
 | Last merged PR | #34 |
-| Open PR / handover | draft [#36](https://github.com/nitro0dust-pixel/Increadible/pull/36) (tool schemas: item shapes, bounds, examples; branch `ccr-5b8e0f6b-j2aqvn`), CI not read yet. The project moved from the Claude Pro account `hsharma.gxi@gmail.com` (weekly limit reached, resets 2026-10-12 16:00 UTC) to `ashiurvi786@gmail.com` on 2026-10-09; see "Session continuity" in `references/roadmap.md` |
+| Open PR / handover | draft [#36](https://github.com/nitro0dust-pixel/Increadible/pull/36) (tool schemas: item shapes, bounds, examples; **version 1.0.2**; branch `ccr-5b8e0f6b-j2aqvn`): CI logs read, reviews done by probe, three findings fixed; next: CI on the new head, then merge and record. The project moved from the Claude Pro account `hsharma.gxi@gmail.com` (weekly limit reached, resets 2026-10-12 16:00 UTC) to `ashiurvi786@gmail.com` on 2026-10-09; see "Session continuity" in `references/roadmap.md` |
 | Tests | `main` at PR #34: 22 suites, 798 passed, 6 todo; CI green, run 37878301365 (all six jobs, pull-by-digest probe read) |
 | Audit | done: `references/audit.md` (7 parts; mutation testing 78.7% to 90.0%, every remaining mutant read) |
 | Container image | built, probed, pushed to GHCR (private), pulled back by digest and probed again, in CI |

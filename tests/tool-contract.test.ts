@@ -129,7 +129,7 @@ const EXPECTED: Array<[string, Record<string, unknown>, string[] | undefined]> =
   ["get_experiment_results", { experiment_id: string }, ["experiment_id"]],
   ["recommend_winner", { experiment_id: string }, ["experiment_id"]],
   ["discover_apis", { query: string }, undefined],
-  ["call_api", { api_id: string, endpoint: string, params: { type: "object" } }, ["api_id", "endpoint"]],
+  ["call_api", { api_id: string, endpoint: string, params: { type: ["object", "null"] } }, ["api_id", "endpoint"]],
   ["aggregate_apis", { apis: aggregateSchema }, ["apis"]],
   ["get_api_stats", {}, undefined],
 ];

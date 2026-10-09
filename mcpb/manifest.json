@@ -2,7 +2,7 @@
   "manifest_version": "0.2",
   "name": "increadible",
   "display_name": "Increadible",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Routing rules, A/B testing and a public-API gateway as one local MCP server. The gateway answers mock data unless live calls are switched on.",
   "long_description": "Increadible is one local MCP server with three components: routing plugins (apply team routing rules, see statistics, update and suggest rules), A/B testing (experiments with two to ten variants, sticky assignment, a Welch t-test with Holm correction, guardrail metrics, a winner only when it is significantly better) and an API gateway (discover, call and aggregate public APIs; it answers built-in mock data unless live calls are enabled, and live calls have never been run against a real provider). Everything stays on this computer. Your rules and all A/B measurements are kept in the folder you choose when you install it.",
   "author": {
