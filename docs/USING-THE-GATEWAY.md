@@ -105,7 +105,7 @@ In a test with a client that saw only the tool list of package 1.0.1, 3 of 10 fi
 
 This section is time-bound: delete it, and the version hints above, once 1.0.2 has been tested in Claude Desktop.
 
-Package 1.0.2 adds item schemas and bounds to the tool list (and worked examples and default values, unless you decided to leave them out: the ROADMAP row "Retest the package in Claude Desktop" records that decision). It also contains the start-up fix of 1.0.1, which the app has not yet answered either. If, after installing 1.0.2, Increadible shows an error, the tools are missing, or the app says it did not respond:
+Package 1.0.2 adds item schemas, bounds, worked examples and one default value to the tool list. It also contains the start-up fix of 1.0.1, which the app has not yet answered either. If, after installing 1.0.2, Increadible shows an error, the tools are missing, or the app says it did not respond:
 
 1. Remove the extension, then install the **1.0.1** file again (the one you already have). Whether the app replaces an installed extension in place is **NOT VERIFIED**, so remove the old one first.
 2. Open Settings, Developer, choose Increadible, **View logs**, and send the lines around `increadible <version>: ready on stdio`, where `<version>` is the version you installed (1.0.1 or 1.0.2). See `docs/INSTALL-CLAUDE-DESKTOP.md`, section 5.5.

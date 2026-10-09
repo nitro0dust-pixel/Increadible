@@ -558,7 +558,7 @@ export const callAPITool = {
           "for wikipedia and wikidata). Not the base URL that discover_apis shows in its endpoint field.",
       },
       params: {
-        type: "object",
+        type: ["object", "null"],
         description: "Query parameters (optional; null counts as none), e.g. {ids: 'bitcoin', vs_currencies: 'usd'}.",
       },
     },
