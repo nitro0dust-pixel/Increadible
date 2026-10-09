@@ -19,10 +19,10 @@ Features #1 to #6 (`features/01` to `06`) are third-party submodules. They run b
 
 | Item | State |
 |---|---|
-| Last recorded: 2026-10-09 | `main` includes PR #42 (records #29; history tests in merge order) after PR #29 (Dependabot: secret-scanner action 3.99.0, image still pinned by digest); first release **`v1.0.2`** tagged on `64cdefb`; PR #42 recorded #29; the release procedure (`references/releasing.md`) is in the next PR |
-| Last merged PR | #42 |
-| Open PR / handover | the release-procedure PR (`docs/RELEASING.md`; records PR #42). **Next release must be 1.0.3 or later**: `main` still says 1.0.2 but builds a different file (`2cdbf12f...`) from the tagged `v1.0.2` (`3594d5fd...`). Handover from `hsharma.gxi@gmail.com` (weekly limit reached on 2026-10-09) to `ashiurvi786@gmail.com`: **complete** |
-| Tests | `main` at PR #42: 24 suites, 870 passed, 6 todo; CI green on the PR head (run 38000787676); last `main` run read: 38000233078 (pull-by-digest probe read); a second push to `main` waits instead of being cancelled (observed) |
+| Last recorded: 2026-10-09 | `main` includes PR #44 (the release procedure, `references/releasing.md`) after PR #43 (the unknown-variant error lists the variant ids); first release **`v1.0.2`** tagged on `64cdefb` |
+| Last merged PR | #44 |
+| Open PR / handover | the record PR for #43 and #44. **Next release must be 1.0.3 or later**: `main` still says 1.0.2 but builds a different file (`e02337fb...` after #43) from the tagged `v1.0.2` (`3594d5fd...`). Handover from `hsharma.gxi@gmail.com` (weekly limit reached on 2026-10-09) to `ashiurvi786@gmail.com`: **complete** |
+| Tests | `main` at PR #44: 24 suites, 871 passed, 6 todo (local run of the merged tree); `main` run 38002470893 for #43 green, pull-by-digest probe read |
 | Audit | done: `references/audit.md` (7 parts; mutation testing 78.7% to 90.0%, every remaining mutant read) |
 | Container image | built, probed, pushed to GHCR (private), pulled back by digest and probed again, in CI |
 | Production / cluster | **NOT DONE**: needs the owner's explicit approval and a cluster target |

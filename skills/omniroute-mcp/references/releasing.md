@@ -69,9 +69,10 @@ code did not change. This has already happened: **`main` still says 1.0.2, but b
 |---|---|---|---|
 | `64cdefb` (tag `v1.0.2`) | 1.0.2 | `3594d5fd878053f0c53a38b1a9850d440a65df9f4cb036e663c895f12e103aee` | the released, installed file |
 | `main` at `fa9fa6b` (PR #42) | 1.0.2 | `2cdbf12ffa080df256fba3574f36369e6e91842f6c102b492f8295cd0ccd5dcc` | PR #39 made the license proprietary: the package carries the new `LICENSE` and the manifest's `license` field |
+| `main` at `e1263f1` (PR #43) | 1.0.2 | `e02337fbbceba6b21377d71a8e8f7afcb49f65f70b023b65890daf0d32d205c1` | PR #43 changed the server code (the unknown-variant error); from the CI log of `main` run 38002470893 |
 
-Both were built in the authoring sandbox on 2026-10-09 with `npm ci && npm run mcpb`. Both files are called
-`increadible-1.0.2.mcpb`. So: **the next release is 1.0.3 or later**, never a second 1.0.2, and a file is identified by its SHA-256,
+The first two were built in the authoring sandbox on 2026-10-09 with `npm ci && npm run mcpb` (the second also by CI, run
+38001341055, with the same SHA-256); the third is CI's build. All three files are called `increadible-1.0.2.mcpb`. So: **the next release is 1.0.3 or later**, never a second 1.0.2, and a file is identified by its SHA-256,
 not its name.
 
 ## 5. Not done
