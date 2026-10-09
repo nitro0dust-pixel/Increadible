@@ -6,7 +6,7 @@ macOS and Windows. Everything here that I could run is marked **Verified**; ever
 
 | Path | Best for | Needs Node on your PATH | State |
 |---|---|---|---|
-| **A. One-click `.mcpb` package** | most people; Claude Desktop ships its own Node.js | no (only to build the file yourself) | Installs and enables in Claude Desktop on Windows (**Verified** by the owner's screenshots, 2026-10-09). Version 1.0.0 then **failed to answer** in the app; 1.0.1 removes the known causes and is **NOT VERIFIED** until it is retested (section 5.4). Version 1.0.2 (the current sources, PR #36) contains everything of 1.0.1 and adds item schemas, bounds, examples and a default value to the tool list; it is **NOT VERIFIED** in the app too |
+| **A. One-click `.mcpb` package** | most people; Claude Desktop ships its own Node.js | no (only to build the file yourself) | Installs and enables in Claude Desktop on Windows (**Verified** by the owner's screenshots, 2026-10-09). Version 1.0.0 then **failed to answer** in the app; **version 1.0.2 answers** (verified by the owner on 2026-10-09, section 5.4): it contains the start-up fixes of 1.0.1 and adds item schemas, bounds, examples and a default value to the tool list |
 | **B. Edit `claude_desktop_config.json`** | developers; works today | yes | **Verified** up to the stdio handshake; **NOT VERIFIED** inside Claude Desktop |
 
 Remote servers are a different mechanism (Settings, Connectors). This server speaks stdio locally; its HTTP mode is for containers
@@ -183,7 +183,7 @@ certificate that only the owner can decide on. If Claude Desktop refuses the fil
 
 Both were seen with version 1.0.0 (section 5.4). Install version 1.0.1 or later (remove the old extension first if the app does not replace it). If it still happens, open Settings, Developer, choose Increadible, **View logs**, and look for the line `increadible <version>: ready on stdio`, where `<version>` is the version you installed (the server writes it to stderr when it starts; whether the app's log shows stderr is not verified): present means our process started and the app is waiting for something else; absent means it never got that far. Send the lines around it.
 
-If the tools are missing, or Increadible shows an error, after you install 1.0.2 (the version that adds the schemas to the tool list): remove the extension, install the 1.0.1 file again (the one you already have), and send the log lines around `increadible <version>: ready on stdio`. Whether the app replaces an installed extension in place is **NOT VERIFIED**, so remove the old one first. How to read the result: if 1.0.1 works and 1.0.2 does not, the cause is what 1.0.2 added to the tool list; if neither works, the cause is the start-up problem that 1.0.1 was meant to fix. Both readings are **NOT VERIFIED** until you try. Best order: retest 1.0.1 first, then 1.0.2.
+If the tools are missing, or Increadible shows an error, after you install a new version: remove the extension, install it again (whether the app replaces an installed extension in place is **NOT VERIFIED**, so remove the old one first), and send the log lines around `increadible <version>: ready on stdio`. Version 1.0.2 itself is verified in the app (section 5.4).
 
 ## 6. Verify it works
 

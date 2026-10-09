@@ -19,15 +19,15 @@ Features #1 to #6 (`features/01` to `06`) are third-party submodules. They run b
 
 | Item | State |
 |---|---|
-| Last recorded: 2026-10-09 | `main` includes PR #36 (tool schemas with item shapes, bounds and examples; **version 1.0.2**) after PR #34 (the fix that makes the package answer, 1.0.1); PR #35 recorded PR #34. The owner's retest (1.0.1 first, then 1.0.2) is the next thing to settle |
-| Last merged PR | #36 |
-| Open PR / handover | the record of PR #36 only (merged as `7de40c2`).  The project moved from the Claude Pro account `hsharma.gxi@gmail.com` (weekly limit reached, resets 2026-10-12 16:00 UTC) to `ashiurvi786@gmail.com` on 2026-10-09; see "Session continuity" in `references/roadmap.md` |
-| Tests | `main` at PR #36: 24 suites, 868 passed, 6 todo; CI green, run 37970177739 (all six jobs, pull-by-digest probe read); clean room of `7de40c2` on Node 22.22.0 |
+| Last recorded: 2026-10-09 | `main` includes PR #39 (owner decisions; version 1.0.2 verified in Claude Desktop) after PR #38 (the Windows build fix) and PR #36 (version 1.0.2); PR #40 re-verified everything and records #38 and #39 |
+| Last merged PR | #39 |
+| Open PR / handover | the re-verification and record of PRs #38 and #39 (PR #40). Handover from the Claude Pro account `hsharma.gxi@gmail.com` (weekly limit reached on 2026-10-09) to `ashiurvi786@gmail.com`: **complete** (`references/roadmap.md`, "Session continuity") |
+| Tests | `main` at PR #39: 24 suites, 870 passed, 6 todo; CI green, `main` run 37997988270; clean room of `4cd722c` on Node 22.22.0 |
 | Audit | done: `references/audit.md` (7 parts; mutation testing 78.7% to 90.0%, every remaining mutant read) |
 | Container image | built, probed, pushed to GHCR (private), pulled back by digest and probed again, in CI |
 | Production / cluster | **NOT DONE**: needs the owner's explicit approval and a cluster target |
 | Installed in the owner's Claude Desktop | **YES, version 1.0.2 answers** (owner, Windows, 2026-10-09): built locally (SHA-256 `3594d5fd...`), installed, and `get_api_stats` answered in a chat; the app accepted the 1.0.2 tool list. 1.0.0 had installed but never answered. Also working in the app: `discover_apis`, `create_experiment` (duplicate refused), `assign_variant`, `get_experiment_results`, and `record_metric`'s errors; an experiment's definition survives a restart. Not yet verified: a recorded measurement surviving a restart; 7 tools not exercised in the app |
-| One-click `.mcpb` package | **merged** (PR #32, fixed by PR #34 as version 1.0.1, SHA-256 `bc24224c...`; schemas added by PR #36 as version 1.0.2, SHA-256 `3594d5fd...`): `npm run mcpb`, or the CI artifact `increadible-mcpb`; manifest accepted by the vendor's validator; started from the unpacked bundle in a test; CI-built bytes equal the sandbox build. **Claude Desktop installing it: NOT VERIFIED** (step C in `references/build-history.md`) |
+| One-click `.mcpb` package | **merged** (PR #32, fixed by PR #34 as version 1.0.1, SHA-256 `bc24224c...`; schemas added by PR #36 as version 1.0.2, SHA-256 `3594d5fd...`): `npm run mcpb`, or the CI artifact `increadible-mcpb`; manifest accepted by the vendor's validator; started from the unpacked bundle in a test; CI-built bytes equal the sandbox build. **Claude Desktop installs and runs version 1.0.2: verified** by the owner on Windows, 2026-10-09 (`references/install-claude-desktop.md`, section 5.4) |
 | Owner decisions open | code signing; gateway direction (option A expanded in `docs/GATEWAY-GATED-CATALOG.md`); security contact; cluster target; image scanner; rate limit; latency alert threshold. **Decided 2026-10-09:** license proprietary (`UNLICENSED`, all rights reserved) and the secret scanner pinned by digest (PR #39); default branch `main` (switched by the owner, verified); release tag after a verified install: the install is now verified (1.0.2) |
 
 ## Operating rules (non-negotiable)
@@ -78,11 +78,11 @@ Node 24 in the image and CI; `engines` is `>=22`. The authoring sandbox has no D
 5. Quit Claude Desktop completely, start it, check Settings, Developer shows it running, and that 13 tools are listed.
 6. Without `AB_DATA_FILE` all A/B data is lost at every restart. The gateway answers mock data unless `GATEWAY_LIVE_APIS` is set. The one-click route: `npm run mcpb` builds `dist/mcpb/increadible-<version>.mcpb`; double-click it (or drag it into Claude Desktop, or Settings, Extensions, Advanced settings, Install Extension), choose a **Data folder**, leave the durable-writes setting on. It needs no Node on the PATH to run. Details and what was verified: Path A in the install guide.
 
-Only the owner can do and confirm steps 4 and 5. Until they report back, installation is `NOT VERIFIED`.
+These steps are Path B (the config file): verified only up to the handshake, **NOT VERIFIED** inside Claude Desktop. Path A (the `.mcpb` package) is verified in the app for version 1.0.2 (owner, Windows, 2026-10-09).
 
 ## How to continue the build
 
-0. **Handover:** the work moved from `hsharma.gxi@gmail.com` to `ashiurvi786@gmail.com` (weekly limit of the first account). Read "Session continuity (account handover)" in `references/roadmap.md` first: it lists the open draft PR #36, what is not verified, and the planned next steps in order. A new session starts from the committed files, not from the previous conversation.
+0. **Handover (complete):** the work moved from `hsharma.gxi@gmail.com` to `ashiurvi786@gmail.com` on 2026-10-09 (weekly limit of the first account). A new session starts from the committed files, not from a previous conversation: read `references/roadmap.md` ("Open decisions", "Backlog") first.
 1. Read `references/roadmap.md` ("Open decisions", "Backlog") and the last rows of `references/build-history.md`.
 2. Pick the next step that is **not blocked on the owner** (a blocked step is listed, not started). State the plan in phases before deep work; keep each pull request one reviewable change.
 3. Verify the baseline (`git status`, branch, `npm run verify` or a clean room), work on `claude/nice-keller-aoooos`, commit in logical pieces, open a ready pull request against `main`, read the real CI logs, merge when green, then sync the branch with `main`.
