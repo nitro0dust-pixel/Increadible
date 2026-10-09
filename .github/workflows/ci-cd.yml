@@ -88,6 +88,10 @@ jobs:
         with:
           path: ./
           extra_args: --only-verified
+          # The action runs ghcr.io/trufflesecurity/trufflehog:<version>; the default is the moving "latest". Pinned by digest
+          # (audit D-5, owner decision 2026-10-09) to the image CI ran on 2026-10-09 (run 37985795436, TruffleHog 3.99.2).
+          # Bump on purpose: take the digest from a run's "Digest:" line and update this line and its test.
+          version: 3.99.2@sha256:47a84bc18a0d04a165498bbbd3bacfd84176661cbc91f8e0f85467f6a771e99a
 
   prometheus:
     name: Prometheus alert rules (promtool)

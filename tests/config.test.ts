@@ -318,13 +318,14 @@ describe("Dockerfile and package.json", () => {
     expect(undocumented).toEqual([]);
   });
 
-  it("ships the license package.json declares, in the name of the author it declares", () => {
+  it("is proprietary (owner decision, 2026-10-09): package.json says UNLICENSED and private, LICENSE reserves all rights for the author", () => {
     const pkg = JSON.parse(read("package.json"));
-    expect(pkg.license).toBe("MIT");
+    expect(pkg.license).toBe("UNLICENSED"); // npm's marker for "no licence granted"
+    expect(pkg.private).toBe(true); // npm refuses to publish it
     const license = read("LICENSE");
-    expect(license).toMatch(/^MIT License\n/);
-    expect(license).toContain(`Copyright (c) 2026 ${pkg.author}`);
-    // the MIT notice must travel with every copy, and the image is a copy
+    expect(license).toMatch(new RegExp(`^Copyright \\(c\\) 2026 ${pkg.author}\\. All rights reserved\\.\\n`));
+    expect(license).not.toMatch(/Permission is hereby granted|MIT License/);
+    // the notice must travel with every copy, and the image is a copy
     const runtime = dockerfile.slice(dockerfile.indexOf("# ---- runtime ----"));
     expect(runtime).toMatch(/^COPY .*\bLICENSE\b/m);
   });
@@ -351,6 +352,12 @@ describe(".github/workflows/ci-cd.yml", () => {
   const docker = wf.jobs.docker;
   const verify = wf.jobs["verify-published-image"];
   const allRuns = (job: any) => job.steps.map((s: any) => s.run ?? "").join("\n");
+
+  it("runs the secret scanner from an image pinned by digest, never the moving latest (audit D-5)", () => {
+    const scan = wf.jobs.security.steps.find((s: any) => /^trufflesecurity\/trufflehog@/.test(s.uses ?? ""));
+    expect(scan).toBeDefined();
+    expect(String(scan.with?.version)).toMatch(/^\d+\.\d+\.\d+@sha256:[0-9a-f]{64}$/);
+  });
 
   it("only references scripts that exist", () => {
     const refs = [...JSON.stringify(wf).matchAll(/scripts\/[a-z-]+\.sh/g)].map((m) => m[0]);
