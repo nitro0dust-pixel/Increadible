@@ -301,15 +301,71 @@ export const getRoutingStatsTool = {
 };
 
 // Tool: Update routing rules
+// The rule shape and the bound are schema keywords, checked against the handler by tests/schema-no-narrowing.test.ts; the example is
+// run by tests/schema-examples.test.ts. Optional keys the handler does not check (name, reason, tags) have no type on purpose.
 export const updateRulesTool = {
   name: "update_rules",
-  description: "Update routing rules configuration",
+  description:
+    "Update routing rules configuration. Replaces the whole rule set (send every rule to keep); if any rule is " +
+    "refused, nothing changes.",
   inputSchema: {
     type: "object" as const,
     properties: {
       rules: {
         type: "array",
-        description: "New routing rules array",
+        maxItems: 500,
+        description:
+          "The complete new rule set; it REPLACES all current rules, so include the ones to keep. [] is accepted " +
+          "and leaves none (every request then gets claude-sonnet, rule_id 'default'). Tried in ascending " +
+          "priority number (ties keep array order); the first enabled rule whose match fits wins. Rule ids must " +
+          "be unique. If any rule is refused nothing changes.",
+        items: {
+          type: "object",
+          required: ["id", "provider", "priority", "enabled", "match"],
+          properties: {
+            id: { type: "string", minLength: 1, description: "Unique, non-empty." },
+            name: { description: "Optional label; not checked." },
+            enabled: { type: "boolean", description: "false keeps the rule but skips it." },
+            priority: {
+              type: "number",
+              description: "Evaluation order, lowest first. Not the request's priority property.",
+            },
+            match: {
+              type: "object",
+              description:
+                "Property: value pairs compared with the request. A value matches by exact equality, so a number " +
+                "never matches text that looks like it; a list matches any of its entries. Every property named " +
+                "must be present in the request. {} matches everything. An object, not a list; no operators such " +
+                "as < or >.",
+            },
+            provider: {
+              type: "string",
+              description: "Provider name returned on a match, e.g. claude-haiku.",
+            },
+            fallback: {
+              type: "array",
+              items: { type: "string" },
+              description: "Optional provider names returned as given.",
+            },
+            reason: { description: "Optional text returned with a match; not checked." },
+            tags: { description: "Optional; stored, not used." },
+          },
+        },
+        examples: [
+          [
+            {
+              id: "simple-tasks",
+              name: "Simple questions",
+              enabled: true,
+              priority: 10,
+              match: { task_type: ["qa", "summary"], task_complexity: "low" },
+              provider: "claude-haiku",
+              fallback: ["claude-sonnet"],
+              reason: "Low-cost model for simple tasks",
+            },
+            { id: "default", enabled: true, priority: 100, match: {}, provider: "claude-sonnet" },
+          ],
+        ],
       },
     },
     required: ["rules"],

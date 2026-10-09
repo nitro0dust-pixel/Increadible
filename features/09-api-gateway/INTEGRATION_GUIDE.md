@@ -22,6 +22,12 @@ wikipedia, wikidata (reference); thesportsdb (sports). Add more at runtime from 
 | `aggregate_apis` | `apis`: up to 100 of `[{id, endpoint, params?}]` | `{data: [...], count}`, order preserved, five calls at a time. A call that fails holds `{error}` in its place and the reply adds `failed: n`; only when every call failed is the reply an error (`error: "all n calls failed"`, with the `data` still attached). A wrong type or too many calls is a plain `{error}` |
 | `get_api_stats` | none | `{total_calls, successful, failed, cache_hit_rate: "0.50", api_distribution, cached_items, cache_evictions, live_calls, live_apis}` |
 
+What a model reading the tool list needs to know, because it does not follow from the table alone:
+
+- The `endpoint` field of a `discover_apis` entry is the provider's base URL, not a value for `call_api`'s `endpoint`. The `id` of the entry is the `api_id` of `call_api` and the `id` of an `aggregate_apis` item.
+- Mock mode accepts any endpoint and any `params`, so a mock success proves nothing about what the real provider would accept. Six of the nine mock answers only echo the params back as `{status: "success", data: <params>, timestamp}`; the other three (coingecko, openweathermap, newsapi) are fixed placeholders that ignore the request.
+- `source` is present on `call_api` answers and on the successful items of an `aggregate_apis` answer. The answers of `discover_apis` and `get_api_stats` have none.
+
 Responses are cached for a fixed 300 seconds, keyed on `api_id + endpoint + params` (a failed call is never cached).
 The cache and stats are in memory. The cache is bounded (a caller chooses the arguments of every call, and each distinct call used to add an entry for good): at most 500 entries and about 16 MiB of data, expired and then the oldest entries are dropped first (`cache_evictions` counts the latter), a result larger than 4 MiB is returned but not cached, and a long key is stored as its SHA-256. Live calls are limited to 10 at once across the gateway; 100 more may wait, and a call beyond that is refused with `the gateway is busy`.
 

@@ -91,3 +91,5 @@ Details and defaults: `README.md` and `DEPLOYMENT.md`.
 
 `ROADMAP.md` lists what is done, what is blocked on the owner (cluster, scanner choice, default branch, rate limit, release tag) and the
 unscheduled backlog. Start from its "Open decisions" and "Backlog".
+
+Account handover (2026-10-09): the first Claude Pro account reached its weekly limit and the work continues under the second; the details, the open draft PR and the ordered next steps are in `ROADMAP.md`, "Session continuity (account handover)". The status is kept there, not here.

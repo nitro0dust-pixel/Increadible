@@ -1081,6 +1081,9 @@ function openABTesting(): ABTestingFramework {
 }
 
 // Tool: Create experiment
+// The item shapes, bounds and examples below are advisory for a client and binding for the tests: tests/schema-no-narrowing.test.ts
+// keeps them from refusing what the handler accepts, and tests/schema-examples.test.ts runs each example. Limits are keywords, never
+// numbers in a description. Properties the handler does not type-check (name, config) have no type on purpose.
 export const createExperimentTool = {
   name: "create_experiment",
   description:
@@ -1094,11 +1097,87 @@ export const createExperimentTool = {
       id: { type: "string" },
       name: { type: "string" },
       hypothesis: { type: "string" },
-      variants: { type: "array" },
+      variants: {
+        type: "array",
+        minItems: 2,
+        maxItems: 10,
+        description:
+          "The variants (arms) to compare. Each is an object with a required unique id (the key is id, not " +
+          "name); name and config are optional.",
+        items: {
+          type: "object",
+          required: ["id"],
+          properties: {
+            id: {
+              type: "string",
+              minLength: 1,
+              maxLength: 200,
+              description:
+                "Unique within the experiment, not '__proto__'; assign_variant returns it and record_metric " +
+                "takes it as variant_id.",
+            },
+            name: { description: "Label shown in the results; optional, not checked." },
+            config: {
+              description:
+                "Free-form settings of this arm; optional. Stored as given in the append-only data file (never " +
+                "edited or removed) and never used by the server: no secrets.",
+            },
+          },
+        },
+        examples: [[{ id: "control", name: "Current checkout" }, { id: "new-button", name: "New button" }]],
+      },
       traffic_split: { type: "number" },
-      metrics: { type: "array" },
+      metrics: {
+        type: "array",
+        description:
+          "The metrics to track; record_metric takes their ids as keys. Each is an object with a required unique " +
+          "id (name alone is refused). The first metric decides the winner unless primary_metric names another. " +
+          "[] is accepted, but then no metric values can be recorded and no winner is chosen. Other keys (type, " +
+          "aggregation) are accepted and ignored: every metric is analysed as a continuous mean.",
+        items: {
+          type: "object",
+          required: ["id"],
+          properties: {
+            id: {
+              type: "string",
+              minLength: 1,
+              maxLength: 200,
+              description: "Unique within the experiment, not '__proto__'.",
+            },
+            name: { description: "Label; optional, not checked." },
+            direction: {
+              type: "string",
+              enum: ["higher_is_better", "lower_is_better"],
+              default: "higher_is_better",
+              description: "Which way is better; use lower_is_better for cost, time or error rate.",
+            },
+            guardrail: {
+              type: "boolean",
+              description:
+                "true: can withhold a winner but never picks one. It withholds when the leading variant is " +
+                "significantly worse on it, and also when it has too little data to judge, so record it for " +
+                "every variant. Cannot be the primary metric, nor the first metric unless primary_metric names " +
+                "another.",
+            },
+          },
+        },
+        examples: [
+          [
+            { id: "quality", name: "Quality score" },
+            { id: "cost", name: "Cost per task", direction: "lower_is_better", guardrail: true },
+          ],
+        ],
+      },
       primary_metric: { type: "string" },
-      weights: { type: "array" },
+      weights: {
+        type: "array",
+        minItems: 2,
+        maxItems: 10,
+        items: { type: "number" },
+        description:
+          "Optional relative traffic per variant, in variants order. Only the ratios matter, so any scale works. " +
+          "One positive number per variant, so exactly as many as variants. Overrides traffic_split.",
+      },
     },
     required: ["id", "name", "hypothesis", "variants", "metrics"],
   },
@@ -1122,13 +1201,23 @@ export const assignVariantTool = {
 // Tool: Record metric
 export const recordMetricTool = {
   name: "record_metric",
-  description: "Record a metric for an experiment variant",
+  description:
+    "Record a metric for an experiment variant. Send one number per metric id defined by create_experiment (any " +
+    "subset).",
   inputSchema: {
     type: "object" as const,
     properties: {
       experiment_id: { type: "string" },
       variant_id: { type: "string" },
-      metrics: { type: "object" },
+      metrics: {
+        type: "object",
+        description:
+          "Measurements as {metric id: number}, e.g. {quality: 8.5, cost: 0.02}. Keys must be metric ids of the " +
+          "experiment (the error lists them); values must be finite numbers within the minimum and maximum of " +
+          "this schema. Any subset may be given; {} is accepted and counts as one sample with no values.",
+        additionalProperties: { type: "number", minimum: -1e15, maximum: 1e15 },
+        examples: [{ quality: 8.5, cost: 0.02 }],
+      },
     },
     required: ["experiment_id", "variant_id", "metrics"],
   },

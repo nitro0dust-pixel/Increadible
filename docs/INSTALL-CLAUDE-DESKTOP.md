@@ -6,7 +6,7 @@ macOS and Windows. Everything here that I could run is marked **Verified**; ever
 
 | Path | Best for | Needs Node on your PATH | State |
 |---|---|---|---|
-| **A. One-click `.mcpb` package** | most people; Claude Desktop ships its own Node.js | no (only to build the file yourself) | Installs and enables in Claude Desktop on Windows (**Verified** by the owner's screenshots, 2026-10-09). Version 1.0.0 then **failed to answer** in the app; 1.0.1 removes the known causes and is **NOT VERIFIED** until it is retested (section 5.4) |
+| **A. One-click `.mcpb` package** | most people; Claude Desktop ships its own Node.js | no (only to build the file yourself) | Installs and enables in Claude Desktop on Windows (**Verified** by the owner's screenshots, 2026-10-09). Version 1.0.0 then **failed to answer** in the app; 1.0.1 removes the known causes and is **NOT VERIFIED** until it is retested (section 5.4). Version 1.0.2 (the current sources, PR #36) contains everything of 1.0.1 and adds item schemas, bounds, examples and a default value to the tool list; it is **NOT VERIFIED** in the app too |
 | **B. Edit `claude_desktop_config.json`** | developers; works today | yes | **Verified** up to the stdio handshake; **NOT VERIFIED** inside Claude Desktop |
 
 Remote servers are a different mechanism (Settings, Connectors). This server speaks stdio locally; its HTTP mode is for containers
@@ -122,7 +122,7 @@ against Anthropic's documentation on 2026-10-09 ([Build a desktop extension with
 | From CI | open the run of the latest commit on `main` in the repository's Actions tab, and download the artifact `increadible-mcpb` (made by the job *Type-check, lint, build, smoke*) (a zip that holds the `.mcpb`; you need to be signed in to GitHub because the repository is private) | **Verified**: the runs of PR #32 and of `main` uploaded it, and the file built in CI has the same SHA-256 as the one built in the authoring sandbox |
 | From the person who built it | any copy of the file; compare `node scripts/mcpb.js inspect <file>` and the SHA-256 | |
 
-Before you install a file you did not build, check it: `node scripts/mcpb.js inspect increadible-1.0.1.mcpb` lists the problems it
+Before you install a file you did not build, check it: `node scripts/mcpb.js inspect increadible-<version>.mcpb` lists the problems it
 finds (a damaged entry, an unsafe file name, a missing manifest or entry point) and prints `mcpb: OK` when there are none.
 
 ### 5.2 Install it
@@ -168,6 +168,7 @@ certificate that only the owner can decide on. If Claude Desktop refuses the fil
 | Version 1.0.0 answers the app | **FAILED**. The app's log shows `initialize` sent at 02:17:20 UTC and never answered (the app cancelled it 60 s later: "Request timed out", shown to the user as "didn't respond within a minute"); its probe copies gave up after 4 s each, and one closed during a `server/discover` probe. The cause was not proven. Known suspects, all removed in 1.0.1: opening the data file at start-up (a second copy crashes on the lock; a lock left by a killed copy froze start-up for up to 17 s; a retry loop without a deadline), and the entry check `require.main === module` (false if a launcher loads the file) |
 | Version 1.0.1 built in CI equals the one built here | **Verified**: SHA-256 `bc24224c6876a7e17377283a10518b1edd30ab4377927e782f4d7387fd13ea81` from the PR run 37878004117 and from a build of the merged tree |
 | Version 1.0.1 answers the app | **NOT VERIFIED**: tested here with the installed bundle and several copies side by side (`tests/mcpb.test.ts`), not in the app. The owner's retest decides |
+| Version 1.0.2 (PR #36), built from the committed sources | **NOT VERIFIED** in the app, including its new input-schema keywords (`items`, `examples`, `default`, `additionalProperties` as a schema, nested `required`). Checked here: the official MCP SDK client lists the tools and runs the example; the unpacked bundle runs the example (`tests/mcpb.test.ts`). Its SHA-256 is recorded only from the CI run of the exact merged head: the `bc24224c...` value above belongs to 1.0.1 only |
 | The Windows build (`npm run mcpb` on Windows) | **NOT VERIFIED** |
 
 ### 5.5 If the app says "didn't respond within a minute" or "Couldn't start for Cowork and Code sessions"
@@ -177,7 +178,9 @@ certificate that only the owner can decide on. If Claude Desktop refuses the fil
 | "Increadible didn't respond within a minute, so Claude can't use it" (the log: `Request timed out`) | the app sent its first request (`initialize`) and got no answer for 60 s |
 | "Couldn't start for Cowork and Code sessions. ... Version negotiation failed: the connection closed during the server/discover probe" | the app starts a second copy to probe it for Cowork and Code sessions; that copy ended before it answered |
 
-Both were seen with version 1.0.0 (section 5.4). Install version 1.0.1 or later (remove the old extension first if the app does not replace it). If it still happens, open Settings, Developer, choose Increadible, **View logs**, and look for the line `increadible 1.0.1: ready on stdio` (the server writes it to stderr when it starts; whether the app's log shows stderr is not verified): present means our process started and the app is waiting for something else; absent means it never got that far. Send the lines around it.
+Both were seen with version 1.0.0 (section 5.4). Install version 1.0.1 or later (remove the old extension first if the app does not replace it). If it still happens, open Settings, Developer, choose Increadible, **View logs**, and look for the line `increadible <version>: ready on stdio`, where `<version>` is the version you installed (the server writes it to stderr when it starts; whether the app's log shows stderr is not verified): present means our process started and the app is waiting for something else; absent means it never got that far. Send the lines around it.
+
+If the tools are missing, or Increadible shows an error, after you install 1.0.2 (the version that adds the schemas to the tool list): remove the extension, install the 1.0.1 file again (the one you already have), and send the log lines around `increadible <version>: ready on stdio`. Whether the app replaces an installed extension in place is **NOT VERIFIED**, so remove the old one first. How to read the result: if 1.0.1 works and 1.0.2 does not, the cause is what 1.0.2 added to the tool list; if neither works, the cause is the start-up problem that 1.0.1 was meant to fix. Both readings are **NOT VERIFIED** until you try. Best order: retest 1.0.1 first, then 1.0.2.
 
 ## 6. Verify it works
 
@@ -188,6 +191,8 @@ Both were seen with version 1.0.0 (section 5.4). Install version 1.0.1 or later 
 | The tools are available in a chat | the `+` button under the chat box, Connectors, lists the 13 tools | **NOT VERIFIED** (your machine) |
 | A real call works | ask: "Use the increadible tool get_api_stats." The answer is JSON with `total_calls: 0` | **NOT VERIFIED** (your machine) |
 | Your data persists | create an experiment, quit Claude Desktop, start it, ask for its results; it is still there, and `ab-data.jsonl` has lines | **NOT VERIFIED** (your machine); the replay itself is **Verified** by tests |
+
+To try the four gateway tools from a chat, step by step, and to read what each answer means (the extension as shipped answers sample data, never a real price or headline), see [USING-THE-GATEWAY.md](USING-THE-GATEWAY.md).
 
 You can run the handshake yourself, without Claude Desktop, with the same environment:
 

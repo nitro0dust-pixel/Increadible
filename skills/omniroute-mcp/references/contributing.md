@@ -47,6 +47,8 @@ Node 22 or newer (24 recommended). On Windows the `*.sh` scripts need Git Bash o
 7. **Secrets:** names only, never values, in code, documents, logs and pull requests.
 8. **After every step, update the record:** the documents the step changed ([docs/README.md](docs/README.md) lists them), a row in [docs/BUILD-HISTORY.md](docs/BUILD-HISTORY.md), the status in `ROADMAP.md`, an entry in `CHANGELOG.md`, and the global skill (`node scripts/skill.js sync`). The tests fail if the skill and the documents differ.
 
+When a tool schema changes (`tools/list` is the interface a client builds its calls from): edit its row in `tests/tool-contract.test.ts` on purpose, keep every example running (`tests/schema-examples.test.ts` executes them), put a limit in a schema keyword (`maxItems`, `maxLength`, `minimum`, ...) and never as a number in a description (a test fails on one), and add a row to `tests/schema-no-narrowing.test.ts` for any place where the schema could refuse what the handler accepts.
+
 ## A new dependency, tool or service
 
 Do not add a framework, runtime, database, scanner or other major dependency without first writing down why it is needed, what the

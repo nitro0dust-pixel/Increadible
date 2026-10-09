@@ -515,13 +515,20 @@ const apiGateway = new UniversalAPIGateway(gatewayOptionsFromEnv());
 // Tool: Discover APIs
 export const discoverAPIsTool = {
   name: "discover_apis",
-  description: "Discover available public APIs by category or search term",
+  description:
+    "Discover available public APIs by category or search term. Each entry's id is the api_id for call_api (and " +
+    "the id in aggregate_apis); its endpoint field is the provider's base URL, not a value for call_api's " +
+    "endpoint.",
   inputSchema: {
     type: "object" as const,
     properties: {
       query: {
         type: "string",
-        description: "Search query (optional): category, name, or description",
+        description:
+          "Search query (optional): one contiguous, case-insensitive piece of text from an API's name, category " +
+          "or description. Names are single words (hackernews, coingecko) and words are not split, so 'hacker " +
+          "news' and 'bitcoin' find none. Categories today: weather, finance, news, reference, sports. Empty or " +
+          "left out lists every API; no match gives [] (not an error).",
       },
     },
   },
@@ -530,15 +537,29 @@ export const discoverAPIsTool = {
 // Tool: Call API
 export const callAPITool = {
   name: "call_api",
-  description: "Call a specific public API with parameters",
+  description:
+    "Call a specific public API with parameters. Answers built-in sample (mock) data unless the server operator " +
+    "switched that API to live calls; the result's source field says which. Sample answers are fixed or echo " +
+    "your params back: they are not real prices, weather or news.",
   inputSchema: {
     type: "object" as const,
     properties: {
-      api_id: { type: "string", description: "The API identifier" },
-      endpoint: { type: "string", description: "API endpoint path" },
+      api_id: {
+        type: "string",
+        description:
+          "The API identifier: the id of a discover_apis entry, case-sensitive. Today openweathermap, " +
+          "weatherapi, coingecko, finnhub, newsapi, hackernews, wikipedia, wikidata or thesportsdb. An unknown " +
+          "id is an error (API not found). In aggregate_apis the same value is called id.",
+      },
+      endpoint: {
+        type: "string",
+        description:
+          "Path under the API's base URL, e.g. '/simple/price'; '' or '/' means the base URL itself (use that " +
+          "for wikipedia and wikidata). Not the base URL that discover_apis shows in its endpoint field.",
+      },
       params: {
-        type: "object",
-        description: "Query parameters (optional)",
+        type: ["object", "null"],
+        description: "Query parameters (optional; null counts as none), e.g. {ids: 'bitcoin', vs_currencies: 'usd'}.",
       },
     },
     required: ["api_id", "endpoint"],
@@ -546,15 +567,59 @@ export const callAPITool = {
 };
 
 // Tool: Aggregate APIs
+// The item shape and the limit on the list are schema keywords (items, maxItems), not prose: tests/schema-no-narrowing.test.ts ties
+// them to the handler, and tests/schema-examples.test.ts runs the example and forbids a limit written as a number in a description.
 export const aggregateAPIsTool = {
   name: "aggregate_apis",
-  description: "Call multiple APIs in parallel and combine results",
+  description:
+    "Call multiple APIs in parallel and combine results. Results come back in the order given; each item names " +
+    "the API with id (not api_id). A failed call holds {error} in its place and the reply adds failed: n. " +
+    "Answers are built-in sample (mock) data unless the server operator switched an API to live calls; each " +
+    "successful result's source field says which.",
   inputSchema: {
     type: "object" as const,
     properties: {
       apis: {
         type: "array",
-        description: "Array of API calls to aggregate",
+        maxItems: 100,
+        description:
+          "Array of API calls to aggregate ([] is accepted). Each item is an object {id, endpoint, params?}. The " +
+          "key is id here (NOT api_id as in call_api; api_id is not read in this list). Every item is checked " +
+          "before any call is made, and one item of the wrong shape refuses the whole request. The calls run in " +
+          "parallel, but results come back in the order asked and do not name their API, so match them by " +
+          "position. A failed call holds {error} in its place and the reply adds failed: n; only when every call " +
+          "fails is the whole reply an error.",
+        items: {
+          type: "object",
+          required: ["id", "endpoint"],
+          properties: {
+            id: {
+              type: "string",
+              description: "The API identifier: the id of a discover_apis entry (call_api calls this value api_id).",
+            },
+            endpoint: {
+              type: "string",
+              description: "As in call_api: a path under the API's base URL; an empty string is allowed.",
+            },
+            params: {
+              description: "As in call_api: an object of query parameters (optional; null counts as none).",
+            },
+          },
+        },
+        examples: [
+          [
+            {
+              id: "coingecko",
+              endpoint: "/simple/price",
+              params: { ids: "bitcoin", vs_currencies: "usd" },
+            },
+            {
+              id: "wikipedia",
+              endpoint: "",
+              params: { action: "query", list: "search", srsearch: "MCP", format: "json" },
+            },
+          ],
+        ],
       },
     },
     required: ["apis"],
@@ -564,7 +629,11 @@ export const aggregateAPIsTool = {
 // Tool: Get gateway stats
 export const getStatsTool = {
   name: "get_api_stats",
-  description: "Get statistics on API gateway usage and caching",
+  description:
+    "Get statistics on API gateway usage and caching. Counters are kept in the memory of this server process and " +
+    "reset when it restarts. total_calls includes cache hits and unknown ids (invalid arguments are not " +
+    "counted); cache_hit_rate is a string, not a number; live_apis is [] while every answer is sample data, " +
+    "otherwise the ids of the APIs switched to live calls, or the single value \"*\" when all are.",
   inputSchema: {
     type: "object" as const,
     properties: {},

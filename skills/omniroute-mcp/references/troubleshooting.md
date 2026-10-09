@@ -40,6 +40,7 @@ You should see one JSON line listing 13 tools. Logs appear on stderr. Press Ctrl
 | "Increadible didn't respond within a minute, so Claude can't use it", or "Couldn't start for Cowork and Code sessions" (`Request timed out`, or `connection closed during the server/discover probe`) | version 1.0.0 of the package: the app starts several copies and kills them at will, and a copy that opened the data file at start-up crashed on the lock, froze behind a lock a killed copy had left, or never began listening | install 1.0.1 or later (it opens the data only on the first A/B call). Details and what to look for in the log: the install guide, section 5.5 |
 | An A/B tool says "Cannot use A/B data file ... in use by pid ..." | another copy of the server (the app starts several) holds the data file | close the other session or wait: the tool tries again on its next call, and the data file is released when the other copy ends. Routing and gateway tools are not affected |
 | An A/B tool says its lock "could not be checked from here ... try again" | a copy that was killed left its lock, which expires 15 s after its last refresh | wait 15 s and call again (nothing needs deleting) |
+| The tools are missing, or Increadible shows an error, after installing 1.0.2 (the version that adds item schemas, bounds, examples and default values to the tool list) | either what 1.0.2 added to the tool list (whether the app accepts those input-schema keywords is **NOT VERIFIED**), or the start-up problem of 1.0.0 that 1.0.1 was meant to fix | remove the extension, install the 1.0.1 file again and send the log lines around `increadible <version>: ready on stdio`: if 1.0.1 works and 1.0.2 does not, it is the tool-list schema; if neither works, it is the start-up (`docs/INSTALL-CLAUDE-DESKTOP.md`, section 5.5) |
 | I want live API calls or API keys | the package does not offer those settings yet | use Path B (`GATEWAY_LIVE_APIS`, `GATEWAY_KEY_<API>`); live mode has never run against a real provider |
 
 ## 3. Start-up messages from the server
@@ -71,6 +72,9 @@ You should see one JSON line listing 13 tools. Logs appear on stderr. Press Ctrl
 | `<api>: this API needs a credential: set GATEWAY_KEY_<API>` | live mode for a key-based API without its key |
 | `<api>: network error (<code>)`, `timed out after N ms`, `the response is not JSON (content-type: ...)`, `HTTP 429 (retry after N)` | live mode failures; messages never contain the credential |
 | `all N calls failed` | every call in an `aggregate_apis` request failed; the per-call errors are in `data` |
+| `apis[0].id must be a string` | an item of `aggregate_apis` named the API with `api_id`; inside that list the key is `id` (`call_api` itself uses `api_id`). Nothing was run |
+| `api_id must be a string` | `call_api` was given `id`; its key is `api_id` |
+| `get_api_stats` shows 0 after calls (not an error message) | the counters live in the memory of one server process and start at 0 after a restart; a zero after calls means the server process was restarted, or you are talking to another copy. That a chat's calls and its statistics reach different copies was not observed in Claude Desktop (**NOT VERIFIED**; an inference). Ask for the statistics in the same chat, soon after the calls |
 
 ## 5. Data questions
 
@@ -79,7 +83,7 @@ You should see one JSON line listing 13 tools. Logs appear on stderr. Press Ctrl
 | Everything is gone after I restart Claude Desktop | `AB_DATA_FILE` is not set in the config: A/B data lives in memory only |
 | `get_experiment_results` says it needs more samples | at least 100 measurements in total and 30 per variant before a result is given |
 | No winner although one variant looks better | a winner must be significantly better (p < 0.05, Holm-corrected) than every other variant, and no guardrail may be significantly worse or have no data |
-| Prices or weather look fake | the gateway answers **mock data** unless you set `GATEWAY_LIVE_APIS`; every result says `source: "mock"` or `"live"` |
+| Prices or weather look fake | the gateway answers **mock data** unless you set `GATEWAY_LIVE_APIS`; every `call_api` result, and every successful `aggregate_apis` item, has a `source` field (`mock` or `live`); `discover_apis` and `get_api_stats` answers have none (`docs/USING-THE-GATEWAY.md`) |
 | Where is my rules file? | the path in `RULES_FILE`; if unset, built-in rules only |
 
 ## 6. Still stuck

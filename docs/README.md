@@ -23,6 +23,7 @@ third-party projects (or are our integration guides for them) and are not listed
 | The audit: findings, fixes, what was not verified | [AUDIT.md](../AUDIT.md) |
 | What was measured and what the numbers do not say | [PERFORMANCE.md](../PERFORMANCE.md) |
 | Third-party tools that run beside this server | [COMPANIONS.md](../COMPANIONS.md) |
+| Calling the API gateway from a Claude chat: prompts, answers, mock versus real, the statistics | [USING-THE-GATEWAY.md](USING-THE-GATEWAY.md) |
 | The universal API gateway decision (proposed, not built) | [GATEWAY.md](../GATEWAY.md) |
 | Working on the code | [CONTRIBUTING.md](../CONTRIBUTING.md) |
 | Context for Claude sessions (stable facts and working rules) | [CLAUDE.md](../CLAUDE.md) |
