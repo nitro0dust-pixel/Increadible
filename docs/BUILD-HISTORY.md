@@ -86,6 +86,14 @@ exercised), each got a stronger test, and all 27 are now caught. Guards for C: 3
 writer, the CI step); two survived at first (the final sort, three of the four unsafe-name rules) and got stronger tests. Guards for D: 21 breakages (lazy open, error paths, lock deadline, retry pause, entry point, Windows flush, manifest checks); the retry pause survived twice (a loop that never sleeps, then a pause of seconds) until the test counted attempts and bounded elapsed time in a child process.
 **Installation in the owner's Claude Desktop is `NOT VERIFIED`**: only the owner can do and confirm it.
 
+### Session handover (account change)
+
+**Session handover, 2026-10-09 (UTC).** The Claude Pro account `hsharma.gxi@gmail.com` reached its weekly usage limit (resets 2026-10-12 16:00 UTC) while the schema-fix workflow was running, so the project continues under the Claude Pro account `ashiurvi786@gmail.com`. Nothing else about the project, the repository or its rules changed.
+
+State at the handover: the previous account left the WIP checkpoint `b4b3850` ("unreviewed") on `claude/nice-keller-aoooos`: additive tool-schema descriptions, item shapes, bounds and executable examples, with two new test files. The continuing session reviewed the whole diff against `d15106e`, reverted the engineer's out-of-scope edit of `AUDIT.md` (a historical record; the change is in `CHANGELOG.md` instead), found `ROADMAP.md` and the version untouched, ran type-check, lint, `npm test` (24 suites, 868 passed, 6 todo), build and smoke locally, broke four of the new guards on purpose (each failed as it should), and opened draft [PR #36](https://github.com/nitro0dust-pixel/Increadible/pull/36) from branch `ccr-5b8e0f6b-j2aqvn` (the branch this session was given; `claude/nice-keller-aoooos` holds only the checkpoint). CI on PR #36: not read yet. Not verified: Claude Desktop accepting the new schema keywords; the security, docs and naive-client reviews of the original workflow never ran.
+
+Planned next, in order (a plan, not done): (1) read the real CI logs of PR #36 and fix anything red; (2) run the independent reviews that did not run (security of the schema text, documents against code, a naive client against `tools/list`); (3) merge PR #36 only with CI green on its exact head; (4) record it (row in `docs/BUILD-HISTORY.md` section 2, numbered line in `ROADMAP.md`, status table of the skill, then `node scripts/skill.js sync`; the tests require a numbered row only for a merged PR, so none exists for #36 yet); (5) bring `main` into `claude/nice-keller-aoooos` with `git fetch origin main && git merge origin/main` (never force-push); (6) the owner's open decisions stay open (see "Open decisions" in `ROADMAP.md`).
+
 ## 5. How to add a step
 
 After every step: add a row here, update `ROADMAP.md` (status with evidence) and `CHANGELOG.md`, run `node scripts/skill.js sync`

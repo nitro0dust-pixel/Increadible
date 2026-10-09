@@ -105,6 +105,16 @@ Statuses: DONE, PARTIAL, NOT STARTED, BLOCKED, N/A. A DONE needs evidence (PR, c
 | SOC2 / GDPR scans | NOT STARTED (no claim of compliance is made anywhere) |
 | Production deployment | NOT DONE; requires explicit owner approval |
 
+## Session continuity (account handover)
+
+**Session handover, 2026-10-09 (UTC).** The Claude Pro account `hsharma.gxi@gmail.com` reached its weekly usage limit (resets 2026-10-12 16:00 UTC) while the schema-fix workflow was running, so the project continues under the Claude Pro account `ashiurvi786@gmail.com`. Nothing else about the project, the repository or its rules changed.
+
+State at the handover: the previous account left the WIP checkpoint `b4b3850` ("unreviewed") on `claude/nice-keller-aoooos`: additive tool-schema descriptions, item shapes, bounds and executable examples, with two new test files. The continuing session reviewed the whole diff against `d15106e`, reverted the engineer's out-of-scope edit of `AUDIT.md` (a historical record; the change is in `CHANGELOG.md` instead), found `ROADMAP.md` and the version untouched, ran type-check, lint, `npm test` (24 suites, 868 passed, 6 todo), build and smoke locally, broke four of the new guards on purpose (each failed as it should), and opened draft [PR #36](https://github.com/nitro0dust-pixel/Increadible/pull/36) from branch `ccr-5b8e0f6b-j2aqvn` (the branch this session was given; `claude/nice-keller-aoooos` holds only the checkpoint). CI on PR #36: not read yet. Not verified: Claude Desktop accepting the new schema keywords; the security, docs and naive-client reviews of the original workflow never ran.
+
+Planned next, in order (a plan, not done): (1) read the real CI logs of PR #36 and fix anything red; (2) run the independent reviews that did not run (security of the schema text, documents against code, a naive client against `tools/list`); (3) merge PR #36 only with CI green on its exact head; (4) record it (row in `docs/BUILD-HISTORY.md` section 2, numbered line in `ROADMAP.md`, status table of the skill, then `node scripts/skill.js sync`; the tests require a numbered row only for a merged PR, so none exists for #36 yet); (5) bring `main` into `claude/nice-keller-aoooos` with `git fetch origin main && git merge origin/main` (never force-push); (6) the owner's open decisions stay open (see "Open decisions" in `ROADMAP.md`).
+
+This section is a record of a handover, not a status table: the status stays in "What has been done". Remove it when the plan above is finished.
+
 ## Backlog (unscheduled)
 
 - **Release process:** a CHANGELOG exists (`CHANGELOG.md`, everything under *Unreleased*); the local `v1.0.0` tag still points at an old commit and was never pushed; the first release is an owner decision.

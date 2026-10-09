@@ -21,6 +21,7 @@ Features #1 to #6 (`features/01` to `06`) are third-party submodules. They run b
 |---|---|
 | Last recorded: 2026-10-09 | `main` includes PR #34 (the fix that makes the Claude Desktop package answer, version 1.0.1) after PR #32 (the package) and PR #31 (this skill and the documentation set); PR #33 recorded PR #32. The 1.0.1 file was handed to the owner; the owner's retest is the next thing to settle |
 | Last merged PR | #34 |
+| Open PR / handover | draft [#36](https://github.com/nitro0dust-pixel/Increadible/pull/36) (tool schemas: item shapes, bounds, examples; branch `ccr-5b8e0f6b-j2aqvn`), CI not read yet. The project moved from the Claude Pro account `hsharma.gxi@gmail.com` (weekly limit reached, resets 2026-10-12 16:00 UTC) to `ashiurvi786@gmail.com` on 2026-10-09; see "Session continuity" in `references/roadmap.md` |
 | Tests | `main` at PR #34: 22 suites, 798 passed, 6 todo; CI green, run 37878301365 (all six jobs, pull-by-digest probe read) |
 | Audit | done: `references/audit.md` (7 parts; mutation testing 78.7% to 90.0%, every remaining mutant read) |
 | Container image | built, probed, pushed to GHCR (private), pulled back by digest and probed again, in CI |
@@ -81,6 +82,7 @@ Only the owner can do and confirm steps 4 and 5. Until they report back, install
 
 ## How to continue the build
 
+0. **Handover:** the work moved from `hsharma.gxi@gmail.com` to `ashiurvi786@gmail.com` (weekly limit of the first account). Read "Session continuity (account handover)" in `references/roadmap.md` first: it lists the open draft PR #36, what is not verified, and the planned next steps in order. A new session starts from the committed files, not from the previous conversation.
 1. Read `references/roadmap.md` ("Open decisions", "Backlog") and the last rows of `references/build-history.md`.
 2. Pick the next step that is **not blocked on the owner** (a blocked step is listed, not started). State the plan in phases before deep work; keep each pull request one reviewable change.
 3. Verify the baseline (`git status`, branch, `npm run verify` or a clean room), work on `claude/nice-keller-aoooos`, commit in logical pieces, open a ready pull request against `main`, read the real CI logs, merge when green, then sync the branch with `main`.
