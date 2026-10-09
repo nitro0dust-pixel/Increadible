@@ -629,3 +629,26 @@ describe("lint and test tooling", () => {
     expect(read("features/08-ab-testing/src/mcp-server.ts")).toContain("{ cause: error }");
   });
 });
+
+describe("AUDIT.md", () => {
+  const doc = read("AUDIT.md");
+
+  it("is linked from README.md, CLAUDE.md and ROADMAP.md", () => {
+    for (const f of ["README.md", "CLAUDE.md", "ROADMAP.md"]) expect({ file: f, links: read(f).includes("AUDIT.md") }).toEqual({ file: f, links: true });
+  });
+
+  it("is finished: nothing left to do in it, and it keeps its list of what was not verified and the decisions it asks of the owner", () => {
+    expect(doc).not.toMatch(/TODO\(/);
+    expect(doc).toContain("NOT VERIFIED");
+    expect(doc).toContain("## 5. Not verified, and blocked on the owner");
+    expect(doc).toContain("## 8. Decisions the owner is asked for");
+    // the decisions stay unticked until the owner makes them
+    expect(doc.split("## 8. Decisions the owner is asked for")[1]).not.toMatch(/- \[x\]/i);
+  });
+
+  it("names every test file the mutation-testing section says it added, and each exists", () => {
+    const named = [...doc.matchAll(/`(tests\/[a-z0-9-]+\.test\.ts)`/g)].map((m) => m[1]);
+    expect(named.length).toBeGreaterThan(0);
+    for (const file of new Set(named)) expect({ file, exists: fs.existsSync(path.join(root, file)) }).toEqual({ file, exists: true });
+  });
+});

@@ -320,6 +320,21 @@ describe("what replaying a data file does with each line", () => {
     expect(expected.samples).toBe(12);
   });
 
+  it("reads the file in reads of the size asked for, and of 1 MiB when nothing is asked", () => {
+    const file = prepare([experimentLine(exp()), ...Array.from({ length: 30 }, (_, i) => measurementLine(i % 2 ? "A" : "B", { quality: i }))]);
+    const size = fs.statSync(file).size;
+    const readsFor = (options?: { replayChunkBytes: number }) => {
+      const spy = jest.spyOn(realFs, "readSync");
+      open(file, options).close();
+      const calls = spy.mock.calls.length;
+      spy.mockRestore();
+      return calls;
+    };
+    expect(readsFor({ replayChunkBytes: 100 })).toBe(Math.ceil(size / 100) + 1); // every read, and the one that finds the end
+    expect(readsFor({ replayChunkBytes: size })).toBe(2);
+    expect(readsFor()).toBe(2); // a file of a few KiB is one read of 1 MiB
+  });
+
   it("passes on a last line that has no newline, ends it with one, and counts that byte", () => {
     const file = prepare([experimentLine(exp()), measurementLine("A", { quality: 1 })], ""); // torn: no final newline
     const size = fs.statSync(file).size;
@@ -542,14 +557,14 @@ describe("results for several variants and for guardrails", () => {
   const variants = ["A", "B", "C"];
   type Plan = Record<string, { score?: number | null; cost?: number | null }>;
   /** `null` leaves the metric out for that variant; a number is its mean, with a little noise (or none when `flat`). */
-  function run(plan: Plan, options: { two?: boolean; flat?: boolean; guard?: boolean; lowerPrimary?: boolean } = {}) {
+  function run(plan: Plan, options: { two?: boolean; flat?: boolean; guard?: boolean; lowerPrimary?: boolean; n?: number } = {}) {
     const ids = options.two ? ["A", "B"] : variants;
     const metricList: any[] = [{ id: "score", name: "score", type: "continuous", aggregation: "mean", ...(options.lowerPrimary ? { direction: "lower_is_better" } : {}) }];
     if (options.guard !== false) metricList.push({ id: "cost", name: "cost", type: "continuous", aggregation: "mean", direction: "lower_is_better", guardrail: true });
     const ab = open();
     ab.createExperiment(exp({ variants: ids.map((id) => ({ id, name: id, config: {} })), metrics: metricList }));
     for (const id of ids) {
-      for (let i = 0; i < (options.two ? 60 : 40); i++) {
+      for (let i = 0; i < (options.n ?? (options.two ? 60 : 40)); i++) {
         const noise = options.flat ? 0 : NOISE[i % 5];
         const m: Record<string, number> = {};
         const p = plan[id] ?? {};
@@ -719,6 +734,76 @@ describe("results for several variants and for guardrails", () => {
     expect(build(1, 2).extra).toBeUndefined();
     expect(build(2, 1).extra).toBeUndefined();
     expect(typeof build(2, 2).quality).toBe("number");
+  });
+
+  describe("a p-value of exactly 0.05 is not significant (the rule is p < 0.05)", () => {
+    // p-values are rounded to 4 digits, so 0.05 exactly is a value that occurs. Two groups with the same pattern of values, one shifted by
+    // `d`, give a p-value that falls as d grows; for a d in the middle of the stretch where it reads 0.05, the p-value is exactly 0.05.
+    const pOf = (d: number, n: number) => {
+      // Three variants, so that even 40 values each reach the minimum total; the pair under test is A against B.
+      const ab = open();
+      ab.createExperiment(exp({ variants: ["A", "B", "C"].map((id) => ({ id, name: id, config: {} })) }));
+      for (let i = 0; i < n; i++) {
+        ab.recordMetric("exp-1", "A", { quality: 10 + NOISE[i % 5] });
+        ab.recordMetric("exp-1", "B", { quality: 10 + d + NOISE[i % 5] });
+        ab.recordMetric("exp-1", "C", { quality: 10 + NOISE[i % 5] });
+      }
+      const r = ab.getExperimentResults("exp-1")!;
+      const pair = r.statistical_analysis.comparisons?.find((c: any) => c.metric === "quality" && c.a === "A" && c.b === "B");
+      return pair ? (pair.p_value as number) : NaN;
+    };
+    /** The smallest d for which `past(p)` holds, by bisection (p falls as d grows). */
+    const edge = (n: number, past: (p: number) => boolean) => {
+      let [lo, hi] = [0, 1];
+      for (let i = 0; i < 60; i++) {
+        const mid = (lo + hi) / 2;
+        if (past(pOf(mid, n))) hi = mid;
+        else lo = mid;
+      }
+      return hi;
+    };
+    const middleOfPlateau = (n: number) => (edge(n, (p) => p <= 0.05) + edge(n, (p) => p < 0.05)) / 2;
+    let d60 = 0;
+    let d40 = 0;
+    beforeAll(() => {
+      d60 = middleOfPlateau(60);
+      d40 = middleOfPlateau(40);
+    });
+
+    it("finds data whose p-value is exactly 0.05", () => {
+      expect(pOf(d60, 60)).toBe(0.05);
+      expect(pOf(d40, 40)).toBe(0.05);
+      expect(pOf(d60 * 0.99, 60)).toBeGreaterThan(0.05);
+      expect(pOf(d60 * 1.01, 60)).toBeLessThan(0.05);
+    });
+
+    it("names no winner on the primary metric, and one just past it", () => {
+      const plan = (d: number): Plan => ({ A: { score: 10 }, B: { score: 10 + d } });
+      const at = run(plan(d60), { two: true, guard: false });
+      expect(at.statistical_analysis.p_values.score).toBe(0.05);
+      expect(at.winner).toBeUndefined();
+      expect(run(plan(d60 * 1.01), { two: true, guard: false }).winner).toBe("B");
+    });
+
+    it("does not call a guardrail worse at 0.05 (two variants), and does just past it", () => {
+      const plan = (d: number): Plan => ({ A: { score: 20, cost: 1 + d }, B: { score: 10, cost: 1 } }); // A wins; A is dearer by d
+      const at = run(plan(d60), { two: true });
+      expect(at.statistical_analysis.guardrails.cost).toEqual({ p_value: 0.05, significantly_worse_variant: null });
+      expect(at.winner).toBe("A");
+      const past = run(plan(d60 * 1.01), { two: true });
+      expect(past.statistical_analysis.guardrails.cost.significantly_worse_variant).toBe("A");
+      expect(past.winner).toBeUndefined();
+    });
+
+    it("does not call the leader worse on a guardrail at 0.05 (three variants), and does just past it", () => {
+      const plan = (d: number): Plan => ({ A: { score: 10, cost: 1 }, B: { score: 20, cost: 1 + d }, C: { score: 10, cost: 1 } });
+      const at = run(plan(d40), { n: 40 });
+      expect(at.statistical_analysis.guardrails.cost.comparisons.map((c: any) => [c.p_value, c.leader_significantly_worse])).toEqual([[0.05, false], [0.05, false]]);
+      expect(at.winner).toBe("B");
+      const past = run(plan(d40 * 1.01), { n: 40 });
+      expect(past.statistical_analysis.guardrails.cost.comparisons.every((c: any) => c.leader_significantly_worse)).toBe(true);
+      expect(past.winner).toBeUndefined();
+    });
   });
 
   it("reports the 95% interval of a variant with the t value of its size: the table up to 29 degrees of freedom, the formula from 30", () => {
