@@ -16,6 +16,7 @@ node dist/src/index.js                      # stdio (Claude Desktop)
 PORT=3000 AUTH_TOKEN=change-me node dist/src/index.js   # HTTP
 npm run verify                              # type-check, lint, tests, build, smoke, docker build and alert rules if available
 bash scripts/cleanroom.sh                   # the same on a clean export of HEAD (only what is committed)
+npm run mcpb                                # the one-click Claude Desktop package, dist/mcpb/increadible-<version>.mcpb (docs/INSTALL-CLAUDE-DESKTOP.md, Path A)
 ```
 
 ## Docker

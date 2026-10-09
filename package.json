@@ -12,6 +12,7 @@
     "type-check": "tsc --noEmit",
     "start": "node dist/src/index.js",
     "dev": "ts-node src/index.ts",
+    "mcpb": "node scripts/mcpb.js build",
     "verify": "bash scripts/verify.sh",
     "smoke": "bash scripts/smoke.sh",
     "loadtest": "node scripts/loadtest.js",

@@ -19,14 +19,14 @@ Features #1 to #6 (`features/01` to `06`) are third-party submodules. They run b
 
 | Item | State |
 |---|---|
-| Last recorded: 2026-10-09 | `main` includes PR #30 (the audit's last part). On branch `claude/nice-keller-aoooos`, built and tested: this skill and the documentation set (their pull request is the next to merge). Next step: the Claude Desktop package |
-| Last merged PR | #30 |
-| Tests | on the branch: 20 suites, 735 passed, 6 todo (`npm test`, 2026-10-09). On `main` at PR #30: 718 passed, CI green, run 37866668125 |
+| Last recorded: 2026-10-09 | `main` includes PR #31 (this skill and the documentation set). On branch `claude/nice-keller-aoooos`, built and tested, in its own pull request: the one-click Claude Desktop package (`.mcpb`) |
+| Last merged PR | #31 |
+| Tests | `main` at PR #31: 20 suites, 735 passed, 6 todo; CI green, run 37869228542 (all six jobs, pull-by-digest probe read). The branch adds the bundle tests: 21 suites, 773 passed, 6 todo (`npm test`, 2026-10-09) |
 | Audit | done: `references/audit.md` (7 parts; mutation testing 78.7% to 90.0%, every remaining mutant read) |
 | Container image | built, probed, pushed to GHCR (private), pulled back by digest and probed again, in CI |
 | Production / cluster | **NOT DONE**: needs the owner's explicit approval and a cluster target |
 | Installed in the owner's Claude Desktop | **NOT VERIFIED**: only the owner can do it on their machine; steps in `references/install-claude-desktop.md` |
-| One-click `.mcpb` package | next; not started (step C in `references/build-history.md`) |
+| One-click `.mcpb` package | **built and tested** (`npm run mcpb`; manifest accepted by the vendor's validator; started from the unpacked bundle in a test). **Claude Desktop installing it: NOT VERIFIED** (step C in `references/build-history.md`) |
 | Owner decisions open | license and holder; gateway direction; scanner pin policy; security contact; cluster target; image scanner; default branch to `main`; rate limit; latency alert threshold; release tag |
 
 ## Operating rules (non-negotiable)
@@ -52,6 +52,7 @@ Features #1 to #6 (`features/01` to `06`) are third-party submodules. They run b
 | `bash scripts/cleanroom.sh [commit]` | `verify` on a `git archive` of a commit after `npm ci`: only what is committed. Use for any "it passes on commit X" claim |
 | `bash scripts/probe-image.sh <image>` | the image as a deployment runs it (needs Docker; only CI has a daemon) |
 | `node scripts/skill.js` with `sync`, `check`, `package` or `install` | keep this skill in step with the documents; zip it for upload; install it globally |
+| `npm run mcpb` (`node scripts/mcpb.js` with `build`, `inspect FILE` or `problems`) | build the one-click Claude Desktop package `dist/mcpb/increadible-<version>.mcpb` from the committed sources (needs `npm ci` first); check a bundle; check `mcpb/manifest.json` against `package.json` |
 
 Node 24 in the image and CI; `engines` is `>=22`. The authoring sandbox has no Docker daemon and no cluster, and cannot reach GitHub release pages or Docker Hub.
 
@@ -64,6 +65,7 @@ Node 24 in the image and CI; `engines` is `>=22`. The authoring sandbox has no D
 | `tests/` | Jest suites; `config.test.ts` holds the documents to the code; `tool-contract.test.ts` pins the 13 tool schemas |
 | `k8s/`, `monitoring/`, `Dockerfile`, `.github/workflows/ci-cd.yml` | cluster manifests (never applied), alert rules (promtool-tested), image, CI |
 | `docs/`, `ROADMAP.md`, `CHANGELOG.md`, `AUDIT.md`, ... | the document set; `docs/README.md` is the index |
+| `mcpb/manifest.json`, `scripts/mcpb.js`, `scripts/zip.js` | the Claude Desktop package: its manifest, the build and check script, the zip writer (shared with `scripts/skill.js`) |
 | `skills/omniroute-mcp/` | this skill (`references/` are synced copies; never edit them) |
 
 ## Deploy to Claude Desktop (short form; the full guide is `references/install-claude-desktop.md`)
@@ -73,7 +75,7 @@ Node 24 in the image and CI; `engines` is `>=22`. The authoring sandbox has no D
 3. Pick a data folder; **every path in the config must be absolute**.
 4. Settings, Developer, Edit Config: add `increadible` under `mcpServers` with `command` = full path of `node`, `args` = the absolute path of `dist/src/index.js`, and `env` with `RULES_FILE` and `AB_DATA_FILE` (and `AB_FSYNC=1` if wanted).
 5. Quit Claude Desktop completely, start it, check Settings, Developer shows it running, and that 13 tools are listed.
-6. Without `AB_DATA_FILE` all A/B data is lost at every restart. The gateway answers mock data unless `GATEWAY_LIVE_APIS` is set. The one-click `.mcpb` route is described in the install guide when built.
+6. Without `AB_DATA_FILE` all A/B data is lost at every restart. The gateway answers mock data unless `GATEWAY_LIVE_APIS` is set. The one-click route: `npm run mcpb` builds `dist/mcpb/increadible-<version>.mcpb`; double-click it (or drag it into Claude Desktop, or Settings, Extensions, Advanced settings, Install Extension), choose a **Data folder**, leave the durable-writes setting on. It needs no Node on the PATH to run. Details and what was verified: Path A in the install guide.
 
 Only the owner can do and confirm steps 4 and 5. Until they report back, installation is `NOT VERIFIED`.
 

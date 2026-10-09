@@ -4,6 +4,7 @@ import * as path from "path";
 import * as yaml from "yaml";
 import { RoutingPluginsMCP } from "../features/07-routing-plugins/src/mcp-server";
 import { fsyncFromEnv } from "../features/08-ab-testing/src/mcp-server";
+import { bitwiseCrc32, readZip } from "./helpers/zip";
 
 const root = path.join(__dirname, "..");
 const read = (p: string) => fs.readFileSync(path.join(root, p), "utf-8");
@@ -789,16 +790,6 @@ describe("the global skill omniroute-mcp", () => {
     expect(skill.problems()).toEqual([]);
   });
 
-  /** The textbook bit-by-bit CRC-32, written apart from scripts/skill.js so that the two can disagree. */
-  const bitwiseCrc32 = (buf: Buffer): number => {
-    let c = 0xffffffff;
-    for (const byte of buf) {
-      c ^= byte;
-      for (let k = 0; k < 8; k++) c = c & 1 ? (c >>> 1) ^ 0xedb88320 : c >>> 1;
-    }
-    return (c ^ 0xffffffff) >>> 0;
-  };
-
   it("computes CRC-32 as the standard defines it (the published check value for \"123456789\", and the empty input)", () => {
     expect(skill.crc32(Buffer.from("123456789"))).toBe(0xcbf43926);
     expect(skill.crc32(Buffer.alloc(0))).toBe(0);
@@ -811,7 +802,7 @@ describe("the global skill omniroute-mcp", () => {
       fs.mkdirSync(path.dirname(path.join(copy, rel)), { recursive: true });
       fs.copyFileSync(path.join(root, rel), path.join(copy, rel));
     };
-    for (const rel of ["scripts/skill.js", "skills/omniroute-mcp/SKILL.md", ...Object.keys(skill.REFERENCES)]) put(rel);
+    for (const rel of ["scripts/skill.js", "scripts/zip.js", "skills/omniroute-mcp/SKILL.md", ...Object.keys(skill.REFERENCES)]) put(rel);
     const run = (command: string) => require("child_process").spawnSync(process.execPath, [path.join(copy, "scripts", "skill.js"), command], { encoding: "utf8" });
     const reference = path.join(copy, "skills", "omniroute-mcp", "references", "roadmap.md");
 
@@ -826,32 +817,6 @@ describe("the global skill omniroute-mcp", () => {
     expect(run("check").status).toBe(0);
     expect(fs.readFileSync(reference, "utf8")).toContain("a line added to the source");
   });
-
-  /** A zip reader written for the test (central directory only, as unzip does): name, method, stored checksum and inflated content of each entry. */
-  const readZip = (zip: Buffer) => {
-    const end = zip.lastIndexOf(Buffer.from([0x50, 0x4b, 0x05, 0x06]));
-    expect(end).toBeGreaterThan(0);
-    const count = zip.readUInt16LE(end + 10);
-    let pos = zip.readUInt32LE(end + 16);
-    const entries: { name: string; method: number; flags: number; localFlags: number; crc: number; usize: number; data: Buffer }[] = [];
-    for (let i = 0; i < count; i++) {
-      expect(zip.readUInt32LE(pos)).toBe(0x02014b50);
-      const flags = zip.readUInt16LE(pos + 8);
-      const method = zip.readUInt16LE(pos + 10);
-      const crc = zip.readUInt32LE(pos + 16);
-      const csize = zip.readUInt32LE(pos + 20);
-      const usize = zip.readUInt32LE(pos + 24);
-      const nameLen = zip.readUInt16LE(pos + 28);
-      const offset = zip.readUInt32LE(pos + 42);
-      const name = zip.subarray(pos + 46, pos + 46 + nameLen).toString("utf8");
-      const dataStart = offset + 30 + zip.readUInt16LE(offset + 26) + zip.readUInt16LE(offset + 28);
-      const body = zip.subarray(dataStart, dataStart + csize);
-      expect([0, 8]).toContain(method);
-      entries.push({ name, method, flags, localFlags: zip.readUInt16LE(offset + 6), crc, usize, data: method === 8 ? require("zlib").inflateRawSync(body) : body });
-      pos += 46 + nameLen;
-    }
-    return entries;
-  };
 
   it("packages to a zip that an independent reader accepts: every file, its content, the folder name, and a matching checksum", () => {
     const out = path.join(tmp(), "skill.zip");

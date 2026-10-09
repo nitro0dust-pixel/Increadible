@@ -6,7 +6,7 @@ macOS and Windows. Everything here that I could run is marked **Verified**; ever
 
 | Path | Best for | Needs Node on your PATH | State |
 |---|---|---|---|
-| **A. One-click `.mcpb` package** | most people; Claude Desktop ships its own Node.js | no | being built (step C of `BUILD-HISTORY.md`); this section is completed when it exists |
+| **A. One-click `.mcpb` package** | most people; Claude Desktop ships its own Node.js | no (only to build the file yourself) | **Verified** up to starting the server from the unpacked file with the manifest's own settings; **NOT VERIFIED** inside Claude Desktop |
 | **B. Edit `claude_desktop_config.json`** | developers; works today | yes | **Verified** up to the stdio handshake; **NOT VERIFIED** inside Claude Desktop |
 
 Remote servers are a different mechanism (Settings, Connectors). This server speaks stdio locally; its HTTP mode is for containers
@@ -110,10 +110,60 @@ Every setting the server reads is in `README.md` and `DEPLOYMENT.md`.
 
 ## 5. Path A: the one-click package
 
-Completed when the package exists (step C). It will be one `.mcpb` file that you double-click (or drag into Claude Desktop, or choose
-Settings, Extensions, Advanced settings, Install Extension). Claude Desktop includes a built-in Node.js, so Node is not needed to run it; the
-installer asks where to keep your data. The format and install flow were checked against Anthropic's current documentation on 2026-10-09
-([Build a desktop extension with MCPB](https://claude.com/docs/connectors/building/mcpb)).
+One file, `increadible-<version>.mcpb`, that Claude Desktop installs for you and runs with its own built-in Node.js. The installer asks
+where to keep your data, so section 3 is done in a dialog instead of in a config file. The format and the install flow were checked
+against Anthropic's documentation on 2026-10-09 ([Build a desktop extension with MCPB](https://claude.com/docs/connectors/building/mcpb)).
+
+### 5.1 Get the file
+
+| Way | Steps | State |
+|---|---|---|
+| Build it yourself | do section 2 (`git clone`, `npm ci`), then `npm run mcpb`. It compiles the committed sources into a clean staging folder, installs the production dependencies exactly as `package-lock.json` pins them (no install scripts), and writes `dist/mcpb/increadible-<version>.mcpb`, printing its SHA-256. The same commit gives the same bytes | **Verified** on Linux (Node 22 and 24); Windows **NOT VERIFIED** (the script runs `npm.cmd`) |
+| From CI | open the run of the latest commit on `main` in the repository's Actions tab, and download the artifact `increadible-mcpb` (made by the job *Type-check, lint, build, smoke*) (a zip that holds the `.mcpb`; you need to be signed in to GitHub because the repository is private) | **Verified** once the pull request that added it has run (see `BUILD-HISTORY.md`) |
+| From the person who built it | any copy of the file; compare `node scripts/mcpb.js inspect <file>` and the SHA-256 | |
+
+Before you install a file you did not build, check it: `node scripts/mcpb.js inspect increadible-1.0.0.mcpb` lists the problems it
+finds (a damaged entry, an unsafe file name, a missing manifest or entry point) and prints `mcpb: OK` when there are none.
+
+### 5.2 Install it
+
+1. Open Claude Desktop. Double-click the `.mcpb` file, or drag it into the window, or open Settings, Extensions,
+   Advanced settings, Install Extension and choose it.
+2. Claude Desktop shows an install dialog (what it displays is **NOT VERIFIED** here) and asks for the settings that the manifest declares:
+
+   | Setting | What to enter | Default |
+   |---|---|---|
+   | **Data folder** (required) | an existing folder that you back up. The server keeps `rules.yaml`, `experiments.yaml` (optional) and `ab-data.jsonl` there | none: you must choose |
+   | **Flush every A/B measurement to disk** | leave on unless you have measured that you need the speed (about 0.2 ms per write on a local disk) | on |
+
+3. Confirm, and make sure the extension is switched on. Then do section 6.
+
+The extension is **unsigned** (the vendor's tool reports "Not signed"); Claude Desktop may say so before installing. Signing needs a
+certificate that only the owner can decide on. If Claude Desktop refuses the file, use Path B: nothing else in this guide changes.
+
+### 5.3 What the file contains, and what it cannot do
+
+| Contains | Does not contain |
+|---|---|
+| `manifest.json`, `LICENSE`, `package.json`; the compiled server (`dist/`); the one production dependency (`yaml`) | source code, tests, development tools, source maps, `.env` files, the lockfile, any key or token |
+
+| Behaviour | State |
+|---|---|
+| Starts with `node`, with `RULES_FILE`, `EXPERIMENTS_FILE` and `AB_DATA_FILE` inside your data folder and `AB_FSYNC` from the setting | **Verified**: a test unpacks the bundle into a folder whose path contains a space, substitutes the manifest's variables, starts the server from there and checks the handshake, the 13 tools, and that the files land in the chosen folder |
+| Keeps its data across a restart | **Verified** by the same test with a second, fresh process |
+| The gateway answers mock data; no network | by default. The package does **not** offer settings for live API calls or API keys yet: those need `GATEWAY_LIVE_APIS` and `GATEWAY_KEY_<API>` (Path B), and live mode has never been run against a real provider (`GATEWAY.md` is waiting on the owner) |
+| Needs Node 22 or newer at run time | the manifest says `>=22.0.0`; whether Claude Desktop's built-in Node meets it is **NOT VERIFIED**. If Claude Desktop reports a runtime problem, use Path B with your own Node |
+
+### 5.4 What was checked, and what was not
+
+| Check | Result |
+|---|---|
+| The manifest against the vendor's own validator (`@anthropic-ai/mcpb` 2.1.2, `validate`, run in a scratch folder: it is not a dependency of this project) | **Verified**: accepted; three deliberately broken copies were refused |
+| The bundle read by the vendor's `info` and `unpack`, by Python's `zipfile` (checksum of every entry) and by `unzip -t` | **Verified**: all accept it |
+| Two builds of the same commit | **Verified**: identical SHA-256 |
+| The manifest's tool list against what the server lists, and its settings against what the code reads | **Verified** by `tests/mcpb.test.ts` |
+| Claude Desktop installs the file, shows the settings dialog, substitutes `${user_config...}` and `${/}`, and starts the server | **NOT VERIFIED**: needs the app on your machine |
+| The Windows build | **NOT VERIFIED** |
 
 ## 6. Verify it works
 
@@ -141,10 +191,10 @@ Two JSON lines come back; stdout carries only JSON, logs go to stderr.
 | See the logs | macOS `~/Library/Logs/Claude/` (files named `mcp*.log`); Windows `%APPDATA%\Claude\logs`; also Settings, Developer. (Locations from the MCP quickstart, **NOT VERIFIED here**) |
 | Back up the A/B data | quit Claude Desktop, copy `ab-data.jsonl` (the log is append-only; the lock file is not needed) |
 | Start fresh | quit Claude Desktop, move `ab-data.jsonl` and `ab-data.jsonl.lock` away |
-| Update the server | `git pull`, `npm ci`, `npm run build`, quit and restart Claude Desktop. Stored data still loads (the golden-master tests keep that true) |
-| Roll back | `git checkout <earlier commit>`, rebuild, restart |
+| Update the server | Path B: `git pull`, `npm ci`, `npm run build`, quit and restart Claude Desktop. Path A: build or download the newer `.mcpb` and install it the same way (whether Claude Desktop replaces the old copy in place is **NOT VERIFIED**; remove the old one first if it asks). Stored data still loads either way (the golden-master tests keep that true) |
+| Roll back | Path B: `git checkout <earlier commit>`, rebuild, restart. Path A: install the earlier `.mcpb` |
 | Remove it | delete the `increadible` entry from the config (or uninstall the extension), restart; your data folder stays until you delete it |
-| Turn on real API calls | not by default. Set `GATEWAY_LIVE_APIS` (for example `coingecko,hackernews`) and, for the four key-based APIs, `GATEWAY_KEY_<API>`. Keys placed in this config file sit there in plain text; the `.mcpb` package can keep them in the operating system's keychain. Live mode has **never been run against a real provider** (`NOT VERIFIED`); read `DEPLOYMENT.md` first |
+| Turn on real API calls | not by default. Set `GATEWAY_LIVE_APIS` (for example `coingecko,hackernews`) and, for the four key-based APIs, `GATEWAY_KEY_<API>`. Keys placed in this config file sit there in plain text. The `.mcpb` format can keep a setting in the operating system's keychain (a setting marked sensitive), but this package does not offer key settings yet. Live mode has **never been run against a real provider** (`NOT VERIFIED`); read `DEPLOYMENT.md` first |
 
 ## 8. What the server can touch on your machine
 

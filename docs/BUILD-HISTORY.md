@@ -52,6 +52,7 @@ skill is called `omniroute-mcp` and covers this whole repository.
 | 26 | 2026-10-08 01:37 UTC (07:07 IST) | [#27](https://github.com/nitro0dust-pixel/Increadible/pull/27) | Audit part 5: tests for behaviour that never ran, documents, `LICENSE`, `GATEWAY.md` | 35 tests; two real defects found (`.nan` split, empty experiments file) |
 | 27 | 2026-10-08 01:46 UTC (07:16 IST) | [#28](https://github.com/nitro0dust-pixel/Increadible/pull/28) | Audit part 6: development toolchain (Jest 30, ESLint 10, typescript-eslint 8); 42 advisories to 20, none high | Same 490 tests before and after; clean rooms on Node 22 and 24 |
 | 28 | 2026-10-09 00:48 UTC (06:18 IST) | [#30](https://github.com/nitro0dust-pixel/Increadible/pull/30) | Audit part 7: mutation testing (78.7% to 90.0%), six new test files, the process entry point tested as a real process, `AUDIT.md` | 718 tests; `main` run 37866668125, pull-by-digest log read |
+| 29 | 2026-10-09 01:19 UTC (06:49 IST) | [#31](https://github.com/nitro0dust-pixel/Increadible/pull/31) | The global skill `omniroute-mcp` and `scripts/skill.js`; the documentation set (`docs/`, `CONTRIBUTING.md`, `SECURITY.md`, the pull request template); working rule 8 | 735 tests; 27 guard breakages caught (4 survived at first and got stronger tests); PR run 37868919376, `main` run 37869228542 (pull-by-digest log read, `probe: OK`) |
 
 ## 3. The audit in one table
 
@@ -72,9 +73,9 @@ reproduced before it was fixed, every fix got a test, and every new guard was br
 
 | Step | What | State |
 |---|---|---|
-| A | Global skill `omniroute-mcp` (`skills/omniroute-mcp/`), with `scripts/skill.js` to sync, check, package and install it | built and tested on branch `claude/nice-keller-aoooos`; its row in section 2 is added once its pull request has merged |
-| B | The documentation set from scratch to Claude Desktop: `docs/`, `CONTRIBUTING.md`, `SECURITY.md`, the pull request template | built and tested in the same pull request as step A |
-| C | One-click Claude Desktop package (`.mcpb`) | next; not started |
+| A | Global skill `omniroute-mcp` (`skills/omniroute-mcp/`), with `scripts/skill.js` to sync, check, package and install it | done: [#31](https://github.com/nitro0dust-pixel/Increadible/pull/31), row 29 in section 2 |
+| B | The documentation set from scratch to Claude Desktop: `docs/`, `CONTRIBUTING.md`, `SECURITY.md`, the pull request template | done: the same pull request as step A |
+| C | One-click Claude Desktop package (`.mcpb`) | built and tested on branch `claude/nice-keller-aoooos` (pull request open or about to be): `mcpb/manifest.json`, `scripts/mcpb.js`, `scripts/zip.js`, `tests/mcpb.test.ts`, a CI artifact, Path A of the install guide. 30 deliberate breakages caught (2 survived at first). **Claude Desktop installing the file is `NOT VERIFIED`**. Its row in section 2 is added after it has merged |
 
 Guards for A and B: 27 deliberate breakages of the new tests and of `scripts/skill.js`; four survived at first (the checksum test
 compared the function with itself, `sync` was never run on a stale state, the stored-or-deflated switch and the UTF-8 flag were never

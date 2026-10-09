@@ -30,6 +30,7 @@ targets, not results).
 | `npm test` | Jest over `tests/` (add `-- --coverage`; no coverage threshold is configured) |
 | `npm run build` | compile to `dist/` (a cleaner script runs first: `scripts/clean.js`, because `rm -rf` is not portable to `cmd.exe`) |
 | `npm run smoke` | `scripts/smoke.sh`: real processes over stdio and HTTP (lock, crash safety, refusal to start open, drain, deadline) |
+| `npm run mcpb` (`node scripts/mcpb.js build`, `inspect FILE`, `problems`) | build the one-click Claude Desktop package `dist/mcpb/increadible-<version>.mcpb` from the committed sources (`mcpb/manifest.json`; the zip writer is `scripts/zip.js`); check a bundle; check the manifest against `package.json`. Needs `npm ci` first. Claude Desktop accepting the file is NOT VERIFIED |
 | `node scripts/skill.js sync`, `check`, `package`, `install` | keep the global skill `skills/omniroute-mcp/` in step with the documents; zip it for upload; install it for Claude Code |
 | `npm run verify` | type-check, lint, tests (fails if fewer suites ran than `tests/*.test.ts` files), build, smoke, plus Docker build and `promtool` when present; prints the commit and tree it tested and reports `NOT AVAILABLE` for what it cannot run |
 | `bash scripts/cleanroom.sh [commit]` | `verify` on a `git archive` of `HEAD` (or the commit given) after `npm ci`: only what is committed, nothing from the working copy. Use it for any claim of the form "it passes on commit X" |

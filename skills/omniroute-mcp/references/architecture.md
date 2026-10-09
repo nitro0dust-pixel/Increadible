@@ -33,6 +33,7 @@ One Node.js process, one MCP server, three components we wrote. This page is the
 | Routing Plugins (#7) | `features/07-routing-plugins/src/mcp-server.ts` | first matching enabled rule by priority; stats; `update_rules` validates, writes a temporary file, renames it, then switches | the rules (file) and per-rule counters (memory) |
 | A/B Testing (#8) | `features/08-ab-testing/src/mcp-server.ts` | experiments with 2 to 10 variants, sticky hash assignment, Welch t-test, Holm correction, guardrails | `AB_DATA_FILE` (append-only JSON lines) and, in memory, counts plus a running mean and variance per variant and metric |
 | API Gateway (#9) | `features/09-api-gateway/src/mcp-server.ts`, `live.ts` | discovery, cached `call_api`, bounded `aggregate_apis`; mock data unless an API is made live | a bounded result cache (500 entries, about 16 MiB) |
+| Packaging (Claude Desktop) | `mcpb/manifest.json`, `scripts/mcpb.js`, `scripts/zip.js` | builds the one-click `.mcpb` bundle from the committed sources (compile into a clean stage, `npm ci --omit=dev --ignore-scripts` from the lockfile, sorted entries, fixed timestamps) and checks a bundle; `scripts/zip.js` is the zip writer it shares with `scripts/skill.js` | none |
 | Vendored third-party | `features/01` to `06` | OmniRoute, claude-mem, token-optimizer-mcp, gstack, agentacct | **not integrated or tested here**; they run beside this server, never inside it (`COMPANIONS.md`) |
 
 ## Request flow (one tool call)
@@ -54,6 +55,7 @@ One Node.js process, one MCP server, three components we wrote. This page is the
 | The 13 tools and their input schemas do not change by accident | `tests/tool-contract.test.ts` |
 | A server reachable beyond loopback refuses to start without `AUTH_TOKEN` | `tests/server.test.ts`, smoke, image probe |
 | One Node major across the image, CI and `@types/node` | `tests/config.test.ts` |
+| The Claude Desktop manifest lists the tools the server lists, sets only settings the code reads, and agrees with `package.json`; the bundle holds the compiled server and its production dependencies only, is the same bytes when built again, and starts from its unpacked files with the data in the folder the user chose | `tests/mcpb.test.ts` |
 
 ## Trust boundaries
 
@@ -63,6 +65,7 @@ One Node.js process, one MCP server, three components we wrote. This page is the
 | The rules file and the experiments file | operator-controlled, still validated | the same validator as `update_rules`; an invalid rules file falls back to the built-in rules with a message |
 | The A/B data file | written only by this server | replay skips torn or invalid lines and says how many |
 | Environment variables | operator-controlled | integers are bounds-checked; a bad value falls back with a message |
+| The `.mcpb` bundle | built here, not downloaded | compiled from the committed sources; dependencies installed from the lockfile with install scripts off; `.env` files, source maps and the lockfile left out; `inspect` refuses unsafe names and bad checksums. It is **unsigned** |
 | Provider responses (live gateway) | untrusted | JSON only, size and time capped, redirects refused, error bodies scrubbed of the credential |
 
 ## Limits you should know

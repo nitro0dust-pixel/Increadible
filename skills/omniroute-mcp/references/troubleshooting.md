@@ -27,6 +27,18 @@ You should see one JSON line listing 13 tools. Logs appear on stderr. Press Ctrl
 | On Windows the path looks right but fails | single backslashes in JSON (`\U` is an escape) | use forward slashes or double the backslashes |
 | Node prints syntax errors from `dist/` | Node older than 22 | install Node 22 or 24 |
 
+### If you use the `.mcpb` package (Path A)
+
+| Symptom | Likely cause | Fix |
+|---|---|---|
+| `npm run mcpb` says `typescript is not installed` | `npm ci` has not been run in this checkout | run `npm ci`, then again |
+| `npm run mcpb` fails inside `npm ci --omit=dev` | no network and a cold npm cache (the build prefers the cache) | connect once and run `npm ci`; the next build works offline |
+| `mcpb: mcpb/manifest.json has problems:` | the manifest and `package.json` or the server drifted (a version, a tool, a setting); the message names which | fix the manifest (`tests/mcpb.test.ts` shows the same message) |
+| `node scripts/mcpb.js inspect` reports `checksum mismatch`, `unsafe name`, a missing manifest or entry point | the file was damaged in transfer, or was not made by `scripts/mcpb.js` | download or build it again and compare the SHA-256 |
+| Claude Desktop refuses the file, or says the runtime is too old (**NOT VERIFIED wording**) | its built-in Node is older than the manifest's `>=22.0.0`, or it does not accept an unsigned extension | use Path B with your own Node 22 or newer |
+| The tools are listed but my experiments are gone after I changed the data folder | the data stays in the old folder; a new folder is an empty store | switch the setting back, or, with Claude Desktop quit, move `ab-data.jsonl` and `rules.yaml` into the new folder |
+| I want live API calls or API keys | the package does not offer those settings yet | use Path B (`GATEWAY_LIVE_APIS`, `GATEWAY_KEY_<API>`); live mode has never run against a real provider |
+
 ## 3. Start-up messages from the server
 
 | Message (stderr) | Meaning | What to do |

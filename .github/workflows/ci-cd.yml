@@ -31,6 +31,14 @@ jobs:
       - run: npm run lint
       - run: npm run build
       - run: npm run smoke
+      # The one-click Claude Desktop package, built from this commit, checked, and kept so that it can be downloaded without a build toolchain.
+      - run: npm run mcpb
+      - run: node scripts/mcpb.js inspect dist/mcpb/increadible-*.mcpb
+      - uses: actions/upload-artifact@v7
+        with:
+          name: increadible-mcpb
+          path: dist/mcpb/*.mcpb
+          if-no-files-found: error
 
   test:
     name: Tests
