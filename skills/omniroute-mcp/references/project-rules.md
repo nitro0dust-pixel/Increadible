@@ -85,7 +85,7 @@ Details and defaults: `README.md` and `DEPLOYMENT.md`.
   no cluster. So scanners or images cannot be looked up and pinned from there: that needs the owner's approval to look them up.
 - `go install pkg@version` does not work for Prometheus (`replace` directives); `scripts/install-promtool.sh` documents the workaround.
 - GitHub-hosted runners were starved on 2026-10-05 (queued jobs cancelled after 15 minutes, no step run); retry once, do not change the workflow for it.
-- Windows: `type-check`, `lint`, `test`, `build` work in PowerShell; the `*.sh` scripts need Git Bash or WSL; LF line endings are forced by `.gitattributes`.
+- Windows: `type-check`, `lint`, `build` work in PowerShell; `test` runs, but 8 tests in four suites (`ab-boundaries`, `entry-point`, `mcpb`, `scripts`: signals, file modes, directory fsync, promtool) fail on Windows, on unchanged `main` too (reported from the owner's machine on 2026-10-09 by the session that made PR #43; not reproduced here, no Windows), so CI on Linux is the test run that counts; the `*.sh` scripts need Git Bash or WSL; LF line endings are forced by `.gitattributes`.
 
 ## Resume point
 
