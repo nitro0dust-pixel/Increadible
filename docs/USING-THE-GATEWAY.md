@@ -5,7 +5,7 @@
 1. The gateway knows **9 public APIs**. In the Claude Desktop extension **as shipped (with no `GATEWAY_*` setting in its environment)**, every `call_api` and `aggregate_apis` answer is **built-in sample ("mock") data**. Nothing is fetched from the internet. Prices, weather and headlines are placeholders, not real data. (`discover_apis` and `get_api_stats` answers are the list of known APIs and a usage count, not sample data.)
 2. `call_api` answers, and each successful result inside an `aggregate_apis` answer, carry a field `source`: `mock` is sample data, `live` is a real call. As shipped you will only ever see `mock`. (`discover_apis` and `get_api_stats` answers have no `source` field.)
 3. **How this was checked.** The mock-mode answers below come from running the server the way the extension starts it (the code of package 1.0.1, as tested at the time of writing). It was **NOT VERIFIED inside Claude Desktop itself** (`docs/INSTALL-CLAUDE-DESKTOP.md`, section 5.4). The live-mode statements were checked offline only: by reading the code, and by runs in which the network call was replaced by a stub (no outbound call was made). **Never against a real provider.** The config-file route (Path B) and the Windows environment variable were **not run**. Claude may phrase its own tool calls differently, so name the tool in your prompt as shown.
-4. **Which version?** The prompts below are written for package 1.0.1, the version you are retesting. The sources of package 1.0.2 are in this repository, not yet installed or tested by you; they describe the item shapes in the tool list, so the hints in the prompts should become unnecessary. Keep the hints until 1.0.2 is installed and tested. That it removes the retries is **NOT VERIFIED**.
+4. **Which version?** Package 1.0.2 is installed and answers in Claude Desktop (verified by the owner on 2026-10-09: `docs/INSTALL-CLAUDE-DESKTOP.md`, section 5.4). The prompts were first written for 1.0.1, whose tool list did not describe item shapes, so some carry a hint (for example "the key is id, not api_id"); 1.0.2 describes the shapes in its tool list. The hints are harmless; that 1.0.2 makes them unnecessary is **NOT VERIFIED**.
 
 ## Step 0: is the extension answering?
 
@@ -44,7 +44,7 @@ An answer has the shape `{"data": <the answer>, "source": "mock", "cached": fals
 
 `Use the increadible tool aggregate_apis with two calls: first coingecko, endpoint /simple/price, params ids=bitcoin and vs_currencies=usd; second wikipedia, endpoint "" (an empty string), params action=query, list=search, srsearch=MCP, format=json. In aggregate_apis each call names the API with the key id, not api_id. Show me the raw result.`
 
-- The last sentence is needed with package 1.0.1 and earlier: the tool's schema does not describe the items, and a model that guesses `api_id` is refused (`apis[0].id must be a string`). Package 1.0.2 (in this repository, not yet installed or tested by you) describes them. That this removes the retry is **NOT VERIFIED**.
+- The last sentence is needed with package 1.0.1 and earlier: the tool's schema does not describe the items, and a model that guesses `api_id` is refused (`apis[0].id must be a string`). Package 1.0.2 (installed and verified to answer, 2026-10-09) describes them; that this removes the retry is **NOT VERIFIED** (`aggregate_apis` has not been called in the app yet).
 - Reply: `{"data":[ {...}, {...} ],"count":2}`. Each item is a `call_api` answer with its own `source`. Results come back in the order asked and do not name their API: match them by position.
 - One call fails (for example an unknown id): that slot holds `{"error":"API not found: x"}` and the reply adds `"failed":1`. This is **not** flagged as an error. All calls fail: the whole reply is an error. One badly formed item: the whole request is refused and nothing runs.
 
@@ -99,16 +99,8 @@ A call that works in mock mode can therefore be refused, or fail, in live mode.
 
 ## Why Claude sometimes retries
 
-In a test with a client that saw only the tool list of package 1.0.1, 3 of 10 first attempts were refused: `aggregate_apis` (item key `id`), `create_experiment` (metric `id`) and `update_rules` (rule shape). Each worked after one retry because the error names the required keys. Package 1.0.2 (in this repository, not yet installed or tested by you) puts these item shapes into the tool list; that it removes the retries is **NOT VERIFIED** until re-tested.
+In a test with a client that saw only the tool list of package 1.0.1, 3 of 10 first attempts were refused: `aggregate_apis` (item key `id`), `create_experiment` (metric `id`) and `update_rules` (rule shape). Each worked after one retry because the error names the required keys. Package 1.0.2 (installed and verified to answer, 2026-10-09) puts these item shapes into the tool list; that it removes the retries is **NOT VERIFIED** until the same test is repeated.
 
-## If something is wrong after you install 1.0.2
+## If the tools are missing or the app reports an error
 
-This section is time-bound: delete it, and the version hints above, once 1.0.2 has been tested in Claude Desktop.
-
-Package 1.0.2 adds item schemas, bounds, worked examples and one default value to the tool list. It also contains the start-up fix of 1.0.1, which the app has not yet answered either. If, after installing 1.0.2, Increadible shows an error, the tools are missing, or the app says it did not respond:
-
-1. Remove the extension, then install the **1.0.1** file again (the one you already have). Whether the app replaces an installed extension in place is **NOT VERIFIED**, so remove the old one first.
-2. Open Settings, Developer, choose Increadible, **View logs**, and send the lines around `increadible <version>: ready on stdio`, where `<version>` is the version you installed (1.0.1 or 1.0.2). See `docs/INSTALL-CLAUDE-DESKTOP.md`, section 5.5.
-3. How to read the result: if 1.0.1 works and 1.0.2 does not, the cause is what 1.0.2 added to the tool list; if neither works, the cause is the start-up problem 1.0.1 was meant to fix. Both readings are **NOT VERIFIED** until you try.
-
-Best order: retest 1.0.1 first (it is your pending retest), then 1.0.2.
+Open Settings, Developer, choose Increadible, **View logs**, and look for the line `increadible <version>: ready on stdio`: its absence means the server never started. Then follow `docs/TROUBLESHOOTING.md` and `docs/INSTALL-CLAUDE-DESKTOP.md`, section 5.5. (A time-bound section on rolling back from 1.0.2 to 1.0.1 stood here; it was removed once 1.0.2 was verified in the app on 2026-10-09.)

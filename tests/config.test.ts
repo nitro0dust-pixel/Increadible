@@ -322,6 +322,8 @@ describe("Dockerfile and package.json", () => {
     const pkg = JSON.parse(read("package.json"));
     expect(pkg.license).toBe("UNLICENSED"); // npm's marker for "no licence granted"
     expect(pkg.private).toBe(true); // npm refuses to publish it
+    const lock = JSON.parse(read("package-lock.json"));
+    expect([lock.packages[""].license, lock.packages[""].version]).toEqual([pkg.license, pkg.version]); // the lockfile's root entry must not lag behind package.json
     const license = read("LICENSE");
     expect(license).toMatch(new RegExp(`^Copyright \\(c\\) 2026 ${pkg.author}\\. All rights reserved\\.\\n`));
     expect(license).not.toMatch(/Permission is hereby granted|MIT License/);
