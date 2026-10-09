@@ -889,7 +889,7 @@ describe("owner-facing diagnostics that name the running version", () => {
       expect({ file, literals: [...read(file).matchAll(literal)].map((m) => m[1]) }).toEqual({ file, literals: [] });
     }
     expect(read("docs/INSTALL-CLAUDE-DESKTOP.md")).toContain("increadible <version>: ready on stdio");
-    const open = read("ROADMAP.md").split("\n").find((l) => l.startsWith("- [ ] **Retest the package in Claude Desktop"));
+    const open = read("ROADMAP.md").split("\n").find((l) => /^- \[[ x]\] \*\*Retest the package in Claude Desktop/.test(l)); // open until the owner retests, then done (2026-10-09)
     expect(open).toBeDefined();
     for (const [, v] of open!.matchAll(literal)) expect(v).toBe(pkg.version);
   });
