@@ -38,7 +38,7 @@ This is the report the owner asked for: each gap with the fix made, and the obse
 | S6 | | Gateway research (three tracks) and verification of the decisive claims | `GATEWAY.md` (proposed, not built); PR #27 |
 | S7 | | Development toolchain | F-03; PR #28 |
 | S8 | 8-9 Oct | Whole-code-base mutation testing (StrykerJS in a scratch copy: two full runs of about an hour each), new tests for what it showed, and every mutant that still survived applied by hand | Section 6; PR #30 |
-| S9 | 9 Oct | This report; roadmap and changelog; CI on the final head; merge | PR #30 |
+| S9 | 9 Oct | This report; roadmap and changelog; CI on the final head; merge | PR #30. CI run 37865895943 (head `37a2e96`): all jobs passed; the logs of Tests (20 suites, 718 passed, 6 todo; coverage 97.22% / 95.24% / 95.1% / 97.95%), the Docker probe (`probe: OK`) and promtool (`prometheus: OK`) were read |
 
 ### The ways to pinpoint the 189-versus-337 discrepancy
 
