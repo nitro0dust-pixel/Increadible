@@ -91,6 +91,9 @@ candidate when run (none was installed or run).
 
 ## Decisions requested from the owner
 
+The gated catalog of option A, as components and an order of work: [`docs/GATEWAY-GATED-CATALOG.md`](docs/GATEWAY-GATED-CATALOG.md) (proposed, not built).
+
+
 - [ ] Approve the direction: **build the core, no giant** (option A).
 - [ ] Approve starting the **gated catalog** (the seeding and gating pipeline) after the audit.
 - [ ] Say whether option D (a hosted platform beside the server for SaaS actions) is wanted.
