@@ -10,12 +10,15 @@ Entries marked **behaviour change** can affect an existing deployment.
 
 ## [Unreleased]
 
+The version in `package.json` and the package is **1.0.3** (not tagged: it waits for the check in Claude Desktop, `docs/RELEASING.md`).
+
 ### Fixed
 - **A critical advisory in a development dependency** (`handlebars` 4.7.9, reached through `ts-jest`): updated to 4.7.10; `npm audit` now reports 0 critical and 0 high (20 moderate, development only). The production tree was and is at 0. ([#40](https://github.com/nitro0dust-pixel/Increadible/pull/40))
 - **`package-lock.json` still declared `MIT` at its root** after PR #39 made the package `UNLICENSED`; it is regenerated, and a test now holds the lockfile's root `license` and `version` to `package.json`. ([#40](https://github.com/nitro0dust-pixel/Increadible/pull/40))
 - **Documents that still called version 1.0.2 untested in Claude Desktop** (`docs/USING-THE-GATEWAY.md`, `docs/INSTALL-CLAUDE-DESKTOP.md`, `docs/TROUBLESHOOTING.md`, `SECURITY.md`, `CLAUDE.md`, the skill): corrected after the owner's verification; the time-bound 1.0.1 roll-back section is removed. ([#40](https://github.com/nitro0dust-pixel/Increadible/pull/40))
 
 ### Added
+- **Live gateway calls can be switched on in the Claude Desktop package** (version 1.0.3): two optional settings, **Live APIs (real calls)** (`GATEWAY_LIVE_APIS`) and **Contact for providers** (`GATEWAY_USER_AGENT`), both empty by default, so a fresh install still answers sample data. No API key is asked for, so this covers the four keyless APIs. `mcpb.js problems` now refuses an optional setting used without a default (the runtime would pass the literal `${user_config...}` text). A real call from Claude Desktop is **NOT VERIFIED**.
 - `docs/RELEASING.md`: how a version becomes a release (version bump, CHANGELOG, two builds that must give the same package SHA-256, the check in Claude Desktop, the owner's tag, the tag check, the records), written from the `v1.0.2` release. It records that `main` still says 1.0.2 but builds a different file from the tagged `v1.0.2`, so the next release is 1.0.3 or later. ([#44](https://github.com/nitro0dust-pixel/Increadible/pull/44))
 - `docs/GATEWAY-GATED-CATALOG.md`: option A of `GATEWAY.md` (the gated catalog) as components and an order of work. **Proposed, not built**; drafted in a separate session from the owner's local copy and corrected against `main` (four statements were wrong, listed in its section 8). ([#39](https://github.com/nitro0dust-pixel/Increadible/pull/39))
 

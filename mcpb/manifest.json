@@ -2,7 +2,7 @@
   "manifest_version": "0.2",
   "name": "increadible",
   "display_name": "Increadible",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "Routing rules, A/B testing and a public-API gateway as one local MCP server. The gateway answers mock data unless live calls are switched on.",
   "long_description": "Increadible is one local MCP server with three components: routing plugins (apply team routing rules, see statistics, update and suggest rules), A/B testing (experiments with two to ten variants, sticky assignment, a Welch t-test with Holm correction, guardrail metrics, a winner only when it is significantly better) and an API gateway (discover, call and aggregate public APIs; it answers built-in mock data unless live calls are enabled, and live calls have never been run against a real provider). Everything stays on this computer. Your rules and all A/B measurements are kept in the folder you choose when you install it.",
   "author": {
@@ -21,7 +21,9 @@
         "EXPERIMENTS_FILE": "${user_config.data_directory}${/}experiments.yaml",
         "AB_DATA_FILE": "${user_config.data_directory}${/}ab-data.jsonl",
         "AB_FSYNC": "${user_config.durable_writes}",
-        "AB_LAZY_OPEN": "true"
+        "AB_LAZY_OPEN": "true",
+        "GATEWAY_LIVE_APIS": "${user_config.live_apis}",
+        "GATEWAY_USER_AGENT": "${user_config.contact}"
       }
     }
   },
@@ -52,6 +54,20 @@
       "title": "Flush every A/B measurement to disk",
       "description": "On (recommended): each measurement is forced to disk before it is acknowledged, so a power cut or crash cannot lose an acknowledged measurement. It costs about 0.2 ms per write on a local disk. Off: faster, but a crash can lose the last few measurements.",
       "default": true,
+      "required": false
+    },
+    "live_apis": {
+      "type": "string",
+      "title": "Live APIs (real calls)",
+      "description": "Leave empty to keep the API gateway on built-in sample data. To make real calls, list API ids separated by commas. The four that need no key: coingecko,hackernews,wikipedia,wikidata. The others need a key, which this package does not ask for, so they answer an error. Real calls go from this computer to the provider; live calls have not yet been run against a real provider.",
+      "default": "",
+      "required": false
+    },
+    "contact": {
+      "type": "string",
+      "title": "Contact for providers (User-Agent)",
+      "description": "Sent as the User-Agent of real calls, so that a provider can reach you, for example: increadible (you@example.com). Wikipedia and Wikidata ask for one. Leave empty to send increadible-gateway. Used only when Live APIs is set.",
+      "default": "",
       "required": false
     }
   },

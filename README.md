@@ -156,7 +156,8 @@ First enabled rule whose `match` fits wins; an empty `match` matches everything.
 returns **generated mock data** and makes no network calls (every `call_api` result and every successful `aggregate_apis` item says `"source": "mock"`). Real HTTP calls are **opt-in per
 API**: set `GATEWAY_LIVE_APIS` to a comma-separated list of API ids (or `*`); `GATEWAY_TIMEOUT_MS`, `GATEWAY_MAX_RESPONSE_BYTES` and
 `GATEWAY_USER_AGENT` tune them, and the four key-based APIs read their key from `GATEWAY_KEY_<API>` (names and the security rules in
-`DEPLOYMENT.md`). Live mode has been tested against a local HTTP server only, **not against the real providers**. Results are cached for 5 minutes, at most 500 results and about 16 MiB (the oldest go first). At most 10 live calls run at once across the gateway, up to 100 more wait for a slot and anything beyond that is refused at once; an `aggregate_apis` request takes up to 100 calls and a call that fails holds its own `{error}` in the result instead of failing the request.
+`DEPLOYMENT.md`). In the Claude Desktop package (1.0.3 and later) the same switch is the setting **Live APIs (real calls)**, empty by default
+(`docs/INSTALL-CLAUDE-DESKTOP.md`, section 5.3). Live mode has been tested against a local HTTP server only, **not against the real providers**. Results are cached for 5 minutes, at most 500 results and about 16 MiB (the oldest go first). At most 10 live calls run at once across the gateway, up to 100 more wait for a slot and anything beyond that is refused at once; an `aggregate_apis` request takes up to 100 calls and a call that fails holds its own `{error}` in the result instead of failing the request.
 
 ## Development
 
