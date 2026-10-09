@@ -113,6 +113,7 @@ Evidence: 15 tests that run both scripts against stubs and a throwaway git repos
 | ID | Sev. | Finding | Fix / evidence |
 |---|---|---|---|
 | C-1 | | Flakiness | None: 3 runs as is, 3 in band, 3 with 8 busy loops on 4 cores, and `--randomize` with two seeds, all passed |
+| C-1b | | Flakiness of the 222 tests added later, which include tests that start real processes and use timers | None: on the final tree, 2 runs as is, 1 in band, `--randomize` with two seeds, and 1 with 8 busy loops on 4 cores: 718 passed every time. Clean rooms on commit `9709aba`, Node 22.22.0 and 24.21.0: type-check, lint, tests, build, smoke and promtool PASS |
 | C-2 | Med | The coverage report listed behaviour no test had run, including two whole documented behaviours: the route taken when no routing rule matches, and the entire `suggest_rules` tool | 35 tests; 24 breakages caught |
 | C-3 | Low | One vacuous assertion (`not.toBe(undefined)`) | Strengthened. A scan of 345 tests found none without an assertion |
 | C-4 | Low | My first `suggest_rules` tests depended on running in order | Fresh module per test; passes under `--randomize` |
