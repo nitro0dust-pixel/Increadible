@@ -55,6 +55,7 @@ skill is called `omniroute-mcp` and covers this whole repository.
 | 27 | 2026-10-08 01:46 UTC (07:16 IST) | [#28](https://github.com/nitro0dust-pixel/Increadible/pull/28) | Audit part 6: development toolchain (Jest 30, ESLint 10, typescript-eslint 8); 42 advisories to 20, none high | Same 490 tests before and after; clean rooms on Node 22 and 24 |
 | 28 | 2026-10-09 00:48 UTC (06:18 IST) | [#30](https://github.com/nitro0dust-pixel/Increadible/pull/30) | Audit part 7: mutation testing (78.7% to 90.0%), six new test files, the process entry point tested as a real process, `AUDIT.md` | 718 tests; `main` run 37866668125, pull-by-digest log read |
 | 29 | 2026-10-09 01:19 UTC (06:49 IST) | [#31](https://github.com/nitro0dust-pixel/Increadible/pull/31) | The global skill `omniroute-mcp` and `scripts/skill.js`; the documentation set (`docs/`, `CONTRIBUTING.md`, `SECURITY.md`, the pull request template); working rule 8 | 735 tests; 27 guard breakages caught (4 survived at first and got stronger tests); PR run 37868919376, `main` run 37869228542 (pull-by-digest log read, `probe: OK`) |
+| 30 | 2026-10-09 01:39 UTC (07:09 IST) | [#32](https://github.com/nitro0dust-pixel/Increadible/pull/32) | The one-click Claude Desktop package: `mcpb/manifest.json`, `scripts/mcpb.js` (`npm run mcpb`), `scripts/zip.js`, `tests/mcpb.test.ts`, a CI artifact, Path A of the install guide; PR #31 recorded | 773 tests; 30 guard breakages caught (2 survived at first); PR run 37870522705 (the CI-built bundle has the same SHA-256 as the sandbox build); `main` run 37870809491 (pull-by-digest log read, `probe: OK`) |
 
 ## 3. The audit in one table
 
@@ -77,12 +78,13 @@ reproduced before it was fixed, every fix got a test, and every new guard was br
 |---|---|---|
 | A | Global skill `omniroute-mcp` (`skills/omniroute-mcp/`), with `scripts/skill.js` to sync, check, package and install it | done: [#31](https://github.com/nitro0dust-pixel/Increadible/pull/31), row 29 in section 2 |
 | B | The documentation set from scratch to Claude Desktop: `docs/`, `CONTRIBUTING.md`, `SECURITY.md`, the pull request template | done: the same pull request as step A |
-| C | One-click Claude Desktop package (`.mcpb`) | built and tested on branch `claude/nice-keller-aoooos` (pull request open or about to be): `mcpb/manifest.json`, `scripts/mcpb.js`, `scripts/zip.js`, `tests/mcpb.test.ts`, a CI artifact, Path A of the install guide. 30 deliberate breakages caught (2 survived at first). **Claude Desktop installing the file is `NOT VERIFIED`**. Its row in section 2 is added after it has merged |
+| C | One-click Claude Desktop package (`.mcpb`) | done: [#32](https://github.com/nitro0dust-pixel/Increadible/pull/32), row 30 in section 2. **Installing it in Claude Desktop is `NOT VERIFIED`** (owner only) |
 
 Guards for A and B: 27 deliberate breakages of the new tests and of `scripts/skill.js`; four survived at first (the checksum test
 compared the function with itself, `sync` was never run on a stale state, the stored-or-deflated switch and the UTF-8 flag were never
-exercised), each got a stronger test, and all 27 are now caught. **Installation in the owner's Claude Desktop is `NOT VERIFIED`**:
-only the owner can do and confirm it.
+exercised), each got a stronger test, and all 27 are now caught. Guards for C: 30 breakages (the manifest, the build script, the zip
+writer, the CI step); two survived at first (the final sort, three of the four unsafe-name rules) and got stronger tests.
+**Installation in the owner's Claude Desktop is `NOT VERIFIED`**: only the owner can do and confirm it.
 
 ## 5. How to add a step
 
@@ -91,3 +93,5 @@ so the skill carries the same text, and run `npm test` (the guards fail when a d
 
 A pull request's own row in section 2 (its merge time and the CI run) can only be written once it has merged, so the first commit of
 the next step adds it, with the matching lines in `ROADMAP.md` ("What has been done"), `CHANGELOG.md` and the skill's status table.
+A pull request that does nothing but record the previous one (documents and the skill, no code) gets no row of its own; otherwise
+each record would need another one.

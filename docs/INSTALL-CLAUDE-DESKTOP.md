@@ -49,7 +49,7 @@ npm run smoke          # starts the built server over stdio and HTTP and checks 
 The repository is private: Git asks you to sign in. The vendored projects under `features/01` to `06` are git submodules and are not
 needed to build or run the server; skip `--recurse-submodules`.
 
-**Verified** (Linux, Node 22.22.0 and 24.21.0, clean rooms of commit `9709aba`): `npm ci`, type-check, lint, tests, build, smoke.
+**Verified** (Linux, Node 22.22.0 and 24.21.0, clean rooms of commit `3f80648`; and CI on Node 24): `npm ci`, type-check, lint, tests, build, smoke.
 **NOT VERIFIED**: Windows (`npm run build`, `type-check`, `lint` and `test` are expected to work in PowerShell; the `.sh` scripts
 need Git Bash or WSL, `ROADMAP.md` item 7).
 
@@ -119,7 +119,7 @@ against Anthropic's documentation on 2026-10-09 ([Build a desktop extension with
 | Way | Steps | State |
 |---|---|---|
 | Build it yourself | do section 2 (`git clone`, `npm ci`), then `npm run mcpb`. It compiles the committed sources into a clean staging folder, installs the production dependencies exactly as `package-lock.json` pins them (no install scripts), and writes `dist/mcpb/increadible-<version>.mcpb`, printing its SHA-256. The same commit gives the same bytes | **Verified** on Linux (Node 22 and 24); Windows **NOT VERIFIED** (the script runs `npm.cmd`) |
-| From CI | open the run of the latest commit on `main` in the repository's Actions tab, and download the artifact `increadible-mcpb` (made by the job *Type-check, lint, build, smoke*) (a zip that holds the `.mcpb`; you need to be signed in to GitHub because the repository is private) | **Verified** once the pull request that added it has run (see `BUILD-HISTORY.md`) |
+| From CI | open the run of the latest commit on `main` in the repository's Actions tab, and download the artifact `increadible-mcpb` (made by the job *Type-check, lint, build, smoke*) (a zip that holds the `.mcpb`; you need to be signed in to GitHub because the repository is private) | **Verified**: the runs of PR #32 and of `main` uploaded it, and the file built in CI has the same SHA-256 as the one built in the authoring sandbox |
 | From the person who built it | any copy of the file; compare `node scripts/mcpb.js inspect <file>` and the SHA-256 | |
 
 Before you install a file you did not build, check it: `node scripts/mcpb.js inspect increadible-1.0.0.mcpb` lists the problems it

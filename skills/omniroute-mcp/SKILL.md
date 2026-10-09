@@ -19,15 +19,15 @@ Features #1 to #6 (`features/01` to `06`) are third-party submodules. They run b
 
 | Item | State |
 |---|---|
-| Last recorded: 2026-10-09 | `main` includes PR #31 (this skill and the documentation set). On branch `claude/nice-keller-aoooos`, built and tested, in its own pull request: the one-click Claude Desktop package (`.mcpb`) |
-| Last merged PR | #31 |
-| Tests | `main` at PR #31: 20 suites, 735 passed, 6 todo; CI green, run 37869228542 (all six jobs, pull-by-digest probe read). The branch adds the bundle tests: 21 suites, 773 passed, 6 todo (`npm test`, 2026-10-09) |
+| Last recorded: 2026-10-09 | `main` includes PR #32 (the one-click Claude Desktop package) after PR #31 (this skill and the documentation set). Nothing is in flight; the install on the owner's machine is the next thing to settle |
+| Last merged PR | #32 |
+| Tests | `main` at PR #32: 21 suites, 773 passed, 6 todo; CI green, run 37870809491 (all six jobs, pull-by-digest probe read) |
 | Audit | done: `references/audit.md` (7 parts; mutation testing 78.7% to 90.0%, every remaining mutant read) |
 | Container image | built, probed, pushed to GHCR (private), pulled back by digest and probed again, in CI |
 | Production / cluster | **NOT DONE**: needs the owner's explicit approval and a cluster target |
 | Installed in the owner's Claude Desktop | **NOT VERIFIED**: only the owner can do it on their machine; steps in `references/install-claude-desktop.md` |
-| One-click `.mcpb` package | **built and tested** (`npm run mcpb`; manifest accepted by the vendor's validator; started from the unpacked bundle in a test). **Claude Desktop installing it: NOT VERIFIED** (step C in `references/build-history.md`) |
-| Owner decisions open | license and holder; gateway direction; scanner pin policy; security contact; cluster target; image scanner; default branch to `main`; rate limit; latency alert threshold; release tag |
+| One-click `.mcpb` package | **merged** (PR #32): `npm run mcpb`, or the CI artifact `increadible-mcpb`; manifest accepted by the vendor's validator; started from the unpacked bundle in a test; CI-built bytes equal the sandbox build. **Claude Desktop installing it: NOT VERIFIED** (step C in `references/build-history.md`) |
+| Owner decisions open | install the package in Claude Desktop and report back; code signing; license and holder; gateway direction; scanner pin policy; security contact; cluster target; image scanner; default branch to `main`; rate limit; latency alert threshold; release tag |
 
 ## Operating rules (non-negotiable)
 
@@ -92,7 +92,7 @@ Only the owner can do and confirm steps 4 and 5. Until they report back, install
 2. Update `ROADMAP.md` (status, with evidence: PR, run id, command) and `CHANGELOG.md` (flag behaviour changes).
 3. Update the **Status at a glance** table above (date, last merged PR, tests, what is verified).
 4. Run `node scripts/skill.js sync`, then `node scripts/skill.js check`, then `npm test` (it fails when a document and the skill differ).
-5. A pull request's own row in `docs/BUILD-HISTORY.md` can only be written after it has merged (merge time, CI run): the first commit of the next step adds it, with the matching `ROADMAP.md` and `CHANGELOG.md` lines and this status table.
+5. A pull request's own row in `docs/BUILD-HISTORY.md` can only be written after it has merged (merge time, CI run): the first commit of the next step adds it, with the matching `ROADMAP.md` and `CHANGELOG.md` lines and this status table. A pull request that only records the previous one gets no row.
 6. Re-install the skill where it is used: `node scripts/skill.js install` (Claude Code, global) or upload the zip from `node scripts/skill.js package` (claude.ai / Claude Desktop).
 
 ## Installing this skill
