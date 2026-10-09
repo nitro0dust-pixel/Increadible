@@ -732,10 +732,14 @@ describe("the documentation set", () => {
   it("records every pull request that ROADMAP.md lists as done, in order, in docs/BUILD-HISTORY.md", () => {
     const history = read("docs/BUILD-HISTORY.md");
     const listed = [...read("ROADMAP.md").matchAll(/^\d+\. \*\*\[PR #(\d+)\]/gm)].map((m) => Number(m[1]));
-    const recorded = [...history.matchAll(/^\| \d+ \| [^|]+ \| \[#(\d+)\]/gm)].map((m) => Number(m[1]));
+    const rows = [...history.matchAll(/^\| \d+ \| (\d{4}-\d{2}-\d{2} \d{2}:\d{2}) UTC[^|]* \| \[#(\d+)\]/gm)];
+    const recorded = rows.map((m) => Number(m[2]));
+    const mergedAt = rows.map((m) => m[1]);
     expect(listed.length).toBeGreaterThan(20);
+    expect(rows.length).toBe([...history.matchAll(/^\| \d+ \| [^|]+ \| \[#\d+\]/gm)].length); // every row has a UTC time
     for (const pr of listed) expect({ pr, recorded: recorded.includes(pr) }).toEqual({ pr, recorded: true });
-    expect([...recorded].sort((a, b) => a - b)).toEqual(recorded); // merged order is number order here
+    // rows are in merge order (Dependabot's #29 merged after #40, so number order is not merge order)
+    expect([...mergedAt].sort()).toEqual(mergedAt);
     expect(history).toContain("## 5. How to add a step");
   });
 
@@ -781,7 +785,7 @@ describe("the global skill omniroute-mcp", () => {
 
   it("names the last merged pull request of the build history, and states what is not verified", () => {
     const recorded = [...read("docs/BUILD-HISTORY.md").matchAll(/^\| \d+ \| [^|]+ \| \[#(\d+)\]/gm)].map((m) => Number(m[1]));
-    expect(text).toContain(`| Last merged PR | #${Math.max(...recorded)} |`);
+    expect(text).toContain(`| Last merged PR | #${recorded[recorded.length - 1]} |`); // the last row: rows are in merge order
     expect(text).toContain("## Update protocol: after every step, without exception");
     expect(text).toContain("NOT VERIFIED");
     expect(text).toContain("## Status at a glance");
