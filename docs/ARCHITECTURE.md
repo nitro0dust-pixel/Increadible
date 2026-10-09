@@ -26,7 +26,7 @@ One Node.js process, one MCP server, three components we wrote. This page is the
 
 | Part | Files | Responsibility | State it owns |
 |---|---|---|---|
-| Transports | `src/index.ts` | stdio and HTTP, timeouts, auth, rate limit, graceful shutdown, refusal to start open beyond loopback | none |
+| Transports | `src/index.ts`, `src/main.ts` | stdio and HTTP, timeouts, auth, rate limit, graceful shutdown, refusal to start open beyond loopback. `index.ts` starts itself only when it is the program (`require.main === module`); `main.ts`, the entry of the Claude Desktop bundle, always starts it (a launcher that loads `index.ts` with `require()` would get a silent process) | none |
 | Handler | `src/server.ts` | JSON-RPC 2.0 validation, tool dispatch, Prometheus text | counters and histograms |
 | Routing Plugins (#7) | `features/07-routing-plugins/src/mcp-server.ts` | first matching enabled rule by priority; stats; `update_rules` validates, writes a temporary file, renames it, then switches | the rules (file) and per-rule counters (memory) |
 | A/B Testing (#8) | `features/08-ab-testing/src/mcp-server.ts` | experiments with 2 to 10 variants, sticky hash assignment, Welch t-test, Holm correction, guardrails | `AB_DATA_FILE` (append-only JSON lines) and, in memory, counts plus a running mean and variance per variant and metric |
@@ -53,6 +53,7 @@ One Node.js process, one MCP server, three components we wrote. This page is the
 | The 13 tools and their input schemas do not change by accident | `tests/tool-contract.test.ts` |
 | A server reachable beyond loopback refuses to start without `AUTH_TOKEN` | `tests/server.test.ts`, smoke, image probe |
 | One Node major across the image, CI and `@types/node` | `tests/config.test.ts` |
+| A copy of the server that cannot have its A/B data file (held by another copy, left locked by a killed one, or on an unusable folder) still answers the handshake and every other tool, with `AB_LAZY_OPEN`; the lock loop has a deadline and never spins; the default (open at start-up, refuse at once) is unchanged | `tests/ab-lazy.test.ts`, `tests/entry-point.test.ts` (child processes with a time limit), `tests/mcpb.test.ts` (copies of the installed bundle side by side) |
 | The Claude Desktop manifest lists the tools the server lists, sets only settings the code reads, and agrees with `package.json`; the bundle holds the compiled server and its production dependencies only, is the same bytes when built again, and starts from its unpacked files with the data in the folder the user chose | `tests/mcpb.test.ts` |
 
 ## Trust boundaries

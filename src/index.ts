@@ -2,7 +2,7 @@ import * as crypto from "crypto";
 import * as http from "http";
 import * as readline from "readline";
 import { Readable, Writable } from "stream";
-import { handleMessage, internalError, metrics, renderPrometheusMetrics, startEventLoopMonitor, JsonRpcResponse } from "./server";
+import { handleMessage, internalError, metrics, renderPrometheusMetrics, startEventLoopMonitor, JsonRpcResponse, SERVER_INFO } from "./server";
 
 const MAX_BODY_BYTES = 1_000_000;
 // Time allowed to *receive* a request (not to handle it). Node's own defaults are 60 s and 300 s, which lets one slow client hold a socket for 5 minutes.
@@ -227,7 +227,12 @@ export function envInt(name: string, fallback: number): number {
   return value;
 }
 
-if (require.main === module) {
+/**
+ * What runs when this server is the program: HTTP when PORT or --http is given, otherwise stdio. It is a function so that
+ * src/main.ts can start it without relying on `require.main === module`, which a launcher that loads this file with require()
+ * would make false (the server would then load, stay alive, and never read a line: a client's first request times out).
+ */
+export function run(): void {
   const port = process.env.PORT;
   if (port || process.argv.includes("--http")) {
     const host = process.env.HOST || "127.0.0.1";
@@ -259,6 +264,10 @@ if (require.main === module) {
     // Exiting through process.exit runs the 'exit' hook that releases the A/B data file lock.
     process.on("SIGTERM", () => process.exit(0));
     process.on("SIGINT", () => process.exit(0));
+    // One line on stderr (stdout carries only JSON-RPC): a client's log then shows that this process reached its main loop.
+    console.error(`${SERVER_INFO.name} ${SERVER_INFO.version}: ready on stdio`);
     serveStdio(process.stdin, process.stdout).then(() => process.exit(0));
   }
 }
+
+if (require.main === module) run();

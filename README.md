@@ -145,6 +145,10 @@ First enabled rule whose `match` fits wins; an empty `match` matches everything.
   - **One writer:** a second process on the same file is refused at startup, naming the process that holds it
     (`<file>.lock`, refreshed every 3 s, removed on clean exit and on SIGTERM/SIGINT; the lock of a crashed process is
     taken over; every write re-checks it and fails if it was lost). Details and limits: `DEPLOYMENT.md`.
+  - **Desktop clients:** Claude Desktop starts several copies of one server with the same data folder and kills them at will, and a
+    server that opens its data file at start-up crashes or freezes before it has answered. `AB_LAZY_OPEN=1` (the `.mcpb` package sets it) opens
+    the data on the first A/B tool call instead: the handshake and the other tools never depend on the file, a held or unusable file is the
+    error of that one call, and the next call tries again. The default stays to open at start-up and refuse at once, which a container wants.
   - **Durability:** by default an append is handed to the OS, which survives a process crash but not an OS crash or power
     loss. Set `AB_FSYNC=1` to flush each append to disk first (slower: one flush per write, about 0.2 ms on a local disk; see [PERFORMANCE.md](PERFORMANCE.md)). The Kubernetes manifests set it; the image does not.
 

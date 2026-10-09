@@ -14,6 +14,7 @@ import * as crypto from "crypto";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
+import * as readline from "readline";
 import { fsyncFromEnv } from "../features/08-ab-testing/src/mcp-server";
 import { bitwiseCrc32, readZip } from "./helpers/zip";
 
@@ -87,7 +88,10 @@ describe("mcpb/manifest.json", () => {
       ["a different license", (m) => (m.license = "GPL-3.0"), /license/],
       ["a different author", (m) => (m.author = { name: "Someone" }), /author/],
       ["a server that is not node", (m) => (m.server.type = "python"), /server\.type/],
-      ["an entry point that is not the package's main", (m) => (m.server.entry_point = "dist/other.js"), /entry_point/],
+      ["an entry point other than main.js", (m) => (m.server.entry_point = "dist/other.js"), /entry_point/],
+      ["index.js as the entry (it starts itself only when it is the program, not when a launcher loads it)", (m) => (m.server.entry_point = "dist/src/index.js"), /must be "dist\/src\/main\.js"/],
+      ["lazy opening of the A/B data switched off", (m) => (m.server.mcp_config.env.AB_LAZY_OPEN = "false"), /AB_LAZY_OPEN/],
+      ["lazy opening of the A/B data missing", (m) => delete m.server.mcp_config.env.AB_LAZY_OPEN, /AB_LAZY_OPEN/],
       ["a command that is not node", (m) => (m.server.mcp_config.command = "/usr/bin/node"), /command/],
       ["arguments that do not start the entry point", (m) => (m.server.mcp_config.args = ["${__dirname}/dist/src/server.js"]), /args/],
       ["a variable that does not exist", (m) => (m.server.mcp_config.env.RULES_FILE = "${HOME}${/}rules.yaml"), /\$\{HOME\}/],
@@ -207,7 +211,7 @@ describe("the bundle (node scripts/mcpb.js build)", () => {
     const by = new Map(entries.map((e) => [e.name, e.data]));
     expect(by.get("manifest.json")!.equals(fs.readFileSync(path.join(root, "mcpb/manifest.json")))).toBe(true);
     expect(by.get("LICENSE")!.equals(fs.readFileSync(path.join(root, "LICENSE")))).toBe(true);
-    for (const needed of ["package.json", "dist/src/index.js", "dist/src/server.js", "dist/features/08-ab-testing/src/mcp-server.js", "node_modules/yaml/package.json"]) expect({ needed, present: by.has(needed) }).toEqual({ needed, present: true });
+    for (const needed of ["package.json", "dist/src/main.js", "dist/src/index.js", "dist/src/server.js", "dist/features/08-ab-testing/src/mcp-server.js", "node_modules/yaml/package.json"]) expect({ needed, present: by.has(needed) }).toEqual({ needed, present: true });
     expect(Object.keys(pkg.dependencies)).toEqual(["yaml"]); // the check above covers every production dependency
   });
 
@@ -227,9 +231,9 @@ describe("the bundle (node scripts/mcpb.js build)", () => {
   it("is refused by inspect() when damaged: a flipped byte, a missing manifest, an entry point that is not there", () => {
     const bytes = fs.readFileSync(file);
     const flipped = Buffer.from(bytes);
-    // flip a byte inside the stored or deflated body of dist/src/index.js: its local header comes first, the body follows the name
-    const nameAt = flipped.indexOf(Buffer.from("dist/src/index.js"));
-    const bodyAt = nameAt + "dist/src/index.js".length + 4;
+    // flip a byte inside the stored or deflated body of dist/src/main.js: its local header comes first, the body follows the name
+    const nameAt = flipped.indexOf(Buffer.from("dist/src/main.js"));
+    const bodyAt = nameAt + "dist/src/main.js".length + 4;
     flipped[bodyAt] ^= 0xff;
     const damaged = path.join(work, "flipped.mcpb");
     fs.writeFileSync(damaged, flipped);
@@ -243,7 +247,7 @@ describe("the bundle (node scripts/mcpb.js build)", () => {
       return mcpb.inspect(f).problems.join("\n");
     };
     expect(write("no-manifest.mcpb", without("manifest.json"))).toMatch(/manifest\.json is missing/);
-    expect(write("no-entry.mcpb", without("dist/src/index.js"))).toMatch(/entry point dist\/src\/index\.js is not in the bundle/);
+    expect(write("no-entry.mcpb", without("dist/src/main.js"))).toMatch(/entry point dist\/src\/main\.js is not in the bundle/);
     expect(write("no-yaml.mcpb", without("node_modules/yaml/package.json"))).toMatch(/node_modules\/yaml is not in the bundle/);
     for (const name of ["../escape.txt", "dir/../../escape.txt", "/etc/passwd", "dir\\file.txt", "C:/Windows/x.txt"]) {
       expect({ name, reported: /unsafe name/.test(write("unsafe.mcpb", zip([["manifest.json", Buffer.from("{}")], [name, Buffer.from("x")]]))) }).toEqual({ name, reported: true });
@@ -305,6 +309,52 @@ describe("the bundle (node scripts/mcpb.js build)", () => {
       });
     const body = (reply: any) => JSON.parse(reply.result.content[0].text);
 
+    /** A copy of the installed server that stays up, as Claude Desktop keeps one: send requests, read the replies, end it when done. */
+    const open: cp.ChildProcess[] = [];
+    afterEach(() => {
+      for (const child of open.splice(0)) child.kill("SIGKILL");
+    });
+    function openSession(userConfig: Record<string, string | boolean>) {
+      const unpacked = JSON.parse(fs.readFileSync(path.join(home, "manifest.json"), "utf8"));
+      const config = unpacked.server.mcp_config;
+      const env: Record<string, string> = { ...(process.env as Record<string, string>) };
+      for (const name of ["NODE_PATH", "RULES_FILE", "EXPERIMENTS_FILE", "AB_DATA_FILE", "AB_FSYNC", "AB_LAZY_OPEN"]) delete env[name];
+      for (const [key, value] of Object.entries(config.env as Record<string, string>)) env[key] = substitute(value, userConfig);
+      const child = cp.spawn(process.execPath, (config.args as string[]).map((a) => substitute(a, userConfig)), { cwd: home, env, stdio: ["pipe", "pipe", "pipe"] });
+      open.push(child);
+      let stderr = "";
+      child.stderr.on("data", (d) => (stderr += d));
+      const waiting = new Map<number, (reply: any) => void>();
+      readline.createInterface({ input: child.stdout }).on("line", (line) => {
+        const reply = JSON.parse(line);
+        waiting.get(reply.id)?.(reply);
+      });
+      const exited = new Promise<number | null>((resolve) => child.once("exit", (code) => resolve(code)));
+      let next = 1;
+      const rpc = (method: string, params?: unknown) =>
+        new Promise<any>((resolve, reject) => {
+          const id = next++;
+          const timer = setTimeout(() => reject(new Error(`no answer to ${method} within 20 s (stderr: ${stderr.slice(0, 400)})`)), 20_000);
+          waiting.set(id, (reply) => {
+            clearTimeout(timer);
+            resolve(reply);
+          });
+          child.stdin.write(JSON.stringify({ jsonrpc: "2.0", id, method, params }) + "\n");
+        });
+      const call = async (name: string, args: Record<string, unknown>) => body(await rpc("tools/call", { name, arguments: args }));
+      return { rpc, call, exited, stderr: () => stderr, end: () => child.stdin.end(), child };
+    }
+    const experiment = (id: string) => ({
+      id, name: "n", hypothesis: "h",
+      variants: [{ id: "A", name: "a", config: {} }, { id: "B", name: "b", config: {} }],
+      metrics: [{ id: "quality", name: "q", type: "continuous", aggregation: "mean" }],
+    });
+    const folder = (name: string) => {
+      const dir = path.join(install, name);
+      fs.mkdirSync(dir, { recursive: true });
+      return dir;
+    };
+
     it("starts, answers the handshake with the 13 tools of the manifest, and writes its data into the folder the user chose", async () => {
       const experiment = {
         id: "demo", name: "n", hypothesis: "h",
@@ -334,6 +384,69 @@ describe("the bundle (node scripts/mcpb.js build)", () => {
       expect(second.code).toBe(0);
       expect(body(second.replies[2]).statistical_analysis.current_samples).toBe(20);
       expect(fs.readFileSync(path.join(data, "rules.yaml"), "utf8")).toMatch(/id: x/);
+    });
+
+    it("answers the handshake and every tool but the A/B data ones in a second copy started while the first is running (Claude Desktop starts several), and the second copy takes over when the first ends", async () => {
+      const dir = folder("two-copies");
+      const first = openSession({ data_directory: dir, durable_writes: true });
+      expect(await first.call("create_experiment", experiment("multi"))).toEqual({ status: "success", experiment_id: "multi" }); // the first copy now holds the data file
+      const second = openSession({ data_directory: dir, durable_writes: true });
+      const hello = await second.rpc("initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "probe", version: "0" } });
+      expect(hello.result.serverInfo.name).toBe("increadible");
+      expect((await second.rpc("tools/list")).result.tools).toHaveLength(13);
+      expect((await second.rpc("server/discover")).error.code).toBe(-32601); // the probe's own question: answered, not hung
+      expect(await second.call("apply_routing_rules", { task_type: "qa", task_complexity: "low" })).toMatchObject({ provider: "claude-haiku" });
+      expect(await second.call("get_api_stats", {})).toMatchObject({ total_calls: 0 });
+      expect((await second.call("create_experiment", experiment("other"))).error).toMatch(/Cannot use A\/B data file .*in use by pid \d+/);
+      first.end();
+      expect(await first.exited).toBe(0); // a clean exit releases the lock
+      expect(fs.existsSync(path.join(dir, "ab-data.jsonl.lock"))).toBe(false);
+      expect(await second.call("get_experiment_results", { experiment_id: "multi" })).toMatchObject({ status: "incomplete" }); // it now has the first copy's data
+      expect(await second.call("create_experiment", experiment("other"))).toEqual({ status: "success", experiment_id: "other" });
+      second.end();
+      expect(await second.exited).toBe(0);
+    });
+
+    it("answers the handshake and the other tools when the data folder cannot be used, and says why on the one tool that needs it", async () => {
+      const blocker = path.join(install, "not-a-folder");
+      fs.writeFileSync(blocker, "x");
+      const copy = openSession({ data_directory: path.join(blocker, "sub"), durable_writes: true });
+      expect((await copy.rpc("initialize", {})).result.serverInfo.name).toBe("increadible");
+      expect(await copy.call("apply_routing_rules", { task_type: "qa", task_complexity: "low" })).toMatchObject({ provider: "claude-haiku" });
+      expect((await copy.call("create_experiment", experiment("x"))).error).toMatch(/Cannot use A\/B data file/);
+      copy.end();
+      expect(await copy.exited).toBe(0);
+    });
+
+    it("writes nothing into the data folder until an A/B tool is called, and holds its lock only from then on", async () => {
+      const dir = folder("nothing-at-start");
+      const copy = openSession({ data_directory: dir, durable_writes: true });
+      await copy.rpc("initialize", {});
+      await copy.rpc("tools/list");
+      await copy.call("get_api_stats", {});
+      await copy.call("apply_routing_rules", { task_type: "qa", task_complexity: "low" });
+      expect(fs.readdirSync(dir)).toEqual([]);
+      await copy.call("create_experiment", experiment("e"));
+      expect(fs.readdirSync(dir).sort()).toEqual(["ab-data.jsonl", "ab-data.jsonl.lock"]);
+      copy.end();
+      expect(await copy.exited).toBe(0);
+      expect(fs.readdirSync(dir)).toEqual(["ab-data.jsonl"]);
+    });
+
+    it("does not freeze behind the lock a killed copy left (Claude Desktop kills copies at once): it answers, says to try again, and takes the lock over once it is stale", async () => {
+      const dir = folder("killed-copy");
+      const lock = path.join(dir, "ab-data.jsonl.lock");
+      fs.writeFileSync(lock, JSON.stringify({ pid: 2147483000, host: os.hostname(), started: new Date().toISOString(), token: "left-behind" })); // a holder that no longer exists, a moment ago
+      const copy = openSession({ data_directory: dir, durable_writes: true });
+      const started = Date.now();
+      expect((await copy.rpc("initialize", {})).result.serverInfo.name).toBe("increadible");
+      expect(Date.now() - started).toBeLessThan(5000); // it used to sleep here for up to 17 s before it could answer
+      expect((await copy.call("create_experiment", experiment("e"))).error).toMatch(/try again/);
+      const backdated = new Date(Date.now() - 7000);
+      fs.utimesSync(lock, backdated, backdated); // 7 s without a refresh: the dead holder's lock is stale
+      expect(await copy.call("create_experiment", experiment("e"))).toEqual({ status: "success", experiment_id: "e" });
+      copy.end();
+      expect(await copy.exited).toBe(0);
     });
 
     it("a different data folder is a different, empty store (the folder setting really decides where the data lives)", async () => {

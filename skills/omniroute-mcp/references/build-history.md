@@ -79,6 +79,7 @@ reproduced before it was fixed, every fix got a test, and every new guard was br
 | A | Global skill `omniroute-mcp` (`skills/omniroute-mcp/`), with `scripts/skill.js` to sync, check, package and install it | done: [#31](https://github.com/nitro0dust-pixel/Increadible/pull/31), row 29 in section 2 |
 | B | The documentation set from scratch to Claude Desktop: `docs/`, `CONTRIBUTING.md`, `SECURITY.md`, the pull request template | done: the same pull request as step A |
 | C | One-click Claude Desktop package (`.mcpb`) | done: [#32](https://github.com/nitro0dust-pixel/Increadible/pull/32), row 30 in section 2. **Installing it in Claude Desktop is `NOT VERIFIED`** (owner only) |
+| D | Fix: version 1.0.0 of the package did not answer in Claude Desktop (owner's Windows machine; the app's log shows `initialize` unanswered for 60 s). Version 1.0.1: `AB_LAZY_OPEN` (the A/B data opens on the first A/B call), a deadline on the lock loop, `src/main.ts` as the package entry, no directory flush on Windows | built and tested in its own pull request; **NOT VERIFIED in the app** until the owner retests. Its row in section 2 is added after it has merged |
 
 Guards for A and B: 27 deliberate breakages of the new tests and of `scripts/skill.js`; four survived at first (the checksum test
 compared the function with itself, `sync` was never run on a stale state, the stored-or-deflated switch and the UTF-8 flag were never

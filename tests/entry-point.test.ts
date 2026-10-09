@@ -16,6 +16,8 @@ import * as path from "path";
 const root = path.join(__dirname, "..");
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "increadible-entry-"));
 const entry = path.join(tmp, "dist", "src", "index.js");
+const mainEntry = path.join(tmp, "dist", "src", "main.js");
+const abModule = path.join(tmp, "dist", "features", "08-ab-testing", "src", "mcp-server.js");
 const children: ChildProcess[] = [];
 
 beforeAll(() => {
@@ -46,8 +48,8 @@ interface Running {
 }
 
 /** Starts the server with exactly these variables (nothing from the surrounding environment) and resolves when it is listening. */
-function start(env: Record<string, string>, args: string[] = []): Promise<Running> {
-  const child = spawn(process.execPath, [entry, ...args], {
+function start(env: Record<string, string>, args: string[] = [], file: string = entry): Promise<Running> {
+  const child = spawn(process.execPath, [file, ...args], {
     env: { PATH: process.env.PATH ?? "", RULES_FILE: path.join(tmp, "rules.yaml"), EXPERIMENTS_FILE: path.join(tmp, "experiments.yaml"), ...env },
     stdio: ["ignore", "ignore", "pipe"],
   });
@@ -238,3 +240,118 @@ describe("stdio mode (no PORT, no --http)", () => {
     expect(stderr).not.toContain("listening");
   });
 });
+
+/**
+ * src/main.ts is what the Claude Desktop bundle starts. src/index.ts starts the server only when it is the program
+ * (`require.main === module`); a launcher that loads it with require() gets a process that loads everything, never reads a line,
+ * and answers nothing: the client's first request times out after 60 s. main.ts always starts the server.
+ */
+describe("src/main.ts, the entry of the Claude Desktop bundle", () => {
+  const INITIALIZE = { jsonrpc: "2.0", id: 1, method: "initialize", params: {} };
+
+  /** Runs `file` the way a launcher would: not as the program, but loaded by another script with require(). */
+  function viaLauncher(file: string, input: string) {
+    return new Promise<{ stdout: string; stderr: string; code: number | null }>((resolve, reject) => {
+      const child = spawn(process.execPath, ["-e", "require(process.argv[1])", file], {
+        env: { PATH: process.env.PATH ?? "", RULES_FILE: path.join(tmp, "rules.yaml"), EXPERIMENTS_FILE: path.join(tmp, "experiments.yaml") },
+        stdio: ["pipe", "pipe", "pipe"],
+      });
+      children.push(child);
+      let stdout = "";
+      let stderr = "";
+      child.stdout!.on("data", (c) => (stdout += c));
+      child.stderr!.on("data", (c) => (stderr += c));
+      const failsafe = setTimeout(() => reject(new Error(`no exit within 10 s (stdout: ${stdout})`)), 10_000);
+      child.once("exit", (code) => {
+        clearTimeout(failsafe);
+        resolve({ stdout, stderr, code });
+      });
+      child.stdin!.end(input);
+    });
+  }
+
+  it("serves stdio when a launcher loads it with require(), and says on stderr that it is ready", async () => {
+    const r = await viaLauncher(mainEntry, JSON.stringify(INITIALIZE) + "\n");
+    expect(r.code).toBe(0);
+    expect(JSON.parse(r.stdout.trim()).result.serverInfo.name).toBe("increadible");
+    expect(r.stderr).toContain(`increadible ${require("../package.json").version}: ready on stdio`); // the banner names the version that is running
+    expect(r.stdout.trim().split("\n")).toHaveLength(1);
+  });
+
+  it("is the reason it exists: index.js loaded the same way answers nothing", async () => {
+    const r = await viaLauncher(entry, JSON.stringify(INITIALIZE) + "\n");
+    expect(r.stdout).toBe("");
+    expect(r.stderr).not.toContain("ready on stdio");
+  });
+
+  it("answers once, not twice, when it is the program itself (the index.js guard must stay quiet when main.js started the server)", async () => {
+    const child = spawn(process.execPath, [mainEntry], { env: { PATH: process.env.PATH ?? "", RULES_FILE: path.join(tmp, "rules.yaml"), EXPERIMENTS_FILE: path.join(tmp, "experiments.yaml") }, stdio: ["pipe", "pipe", "pipe"] });
+    children.push(child);
+    let stdout = "";
+    child.stdout!.on("data", (c) => (stdout += c));
+    child.stderr!.resume();
+    child.stdin!.end(JSON.stringify(INITIALIZE) + "\n");
+    expect(await new Promise<number | null>((resolve) => child.once("exit", resolve))).toBe(0);
+    expect(stdout.trim().split("\n")).toHaveLength(1);
+  });
+
+  it("starts the HTTP server like index.js when PORT is set", async () => {
+    const port = await freePort();
+    const running = await start({ PORT: String(port), HOST: "127.0.0.1" }, [], mainEntry);
+    expect((await request(port, "GET", "/health")).status).toBe(200);
+    running.child.kill("SIGTERM");
+    expect(await running.exited).toBe(0);
+  });
+});
+
+/**
+ * The data file lock in a real process. A loop that retries without sleeping or a deadline cannot be tested in-process: it would
+ * freeze the test runner too. So each case runs in a child process with a time limit, and "it hung" is a failed test, not a stuck one.
+ */
+describe("the A/B data file lock, in a child process with a time limit", () => {
+  const script = (name: string, body: string) => {
+    const file = path.join(tmp, name);
+    fs.writeFileSync(file, body);
+    return file;
+  };
+
+  it("gives up with a clear error, within its deadline and without hammering the file system, when a stale lock cannot be removed (another program has it open on Windows)", () => {
+    const file = script("lock-deadline.js", `
+      const fs = require("fs"), path = require("path"), os = require("os");
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), "lock-deadline-"));
+      const data = path.join(dir, "ab-data.jsonl");
+      fs.writeFileSync(data + ".lock", JSON.stringify({ pid: 2147483000, host: os.hostname(), started: "x", token: "t" }));
+      const old = new Date(Date.now() - 60000); fs.utimesSync(data + ".lock", old, old); // a dead holder, long ago: stale
+      const real = fs.renameSync;
+      let attempts = 0;
+      fs.renameSync = (from, to) => { if (String(from).endsWith(".lock")) { attempts++; const e = new Error("EPERM: operation not permitted, rename"); e.code = "EPERM"; throw e; } return real(from, to); };
+      const { ABTestingFramework } = require(process.argv[2]);
+      const t0 = Date.now();
+      try { new ABTestingFramework(path.join(dir, "e.yaml"), data, { lockWaitMs: 300 }); console.log("opened"); }
+      catch (e) { console.log("threw after " + (Date.now() - t0) + " ms, " + attempts + " attempts: " + e.message.slice(0, 240)); }
+    `);
+    const r = spawnSync(process.execPath, [file, abModule], { encoding: "utf8", timeout: 15_000, env: { PATH: process.env.PATH ?? "" } });
+    expect({ timedOut: r.status === null, stdout: r.stdout.trim().slice(0, 300) }).toEqual({ timedOut: false, stdout: expect.stringMatching(/^threw after \d+ ms, \d+ attempts: .*stale lock .*could not be removed/) });
+    const [, ms, attempts] = /threw after (\d+) ms, (\d+) attempts/.exec(r.stdout)!.map(Number);
+    expect(ms).toBeLessThan(1500); // the deadline was 300 ms: a pause of seconds between attempts would run far past it
+    expect(attempts).toBeGreaterThanOrEqual(3); // it does retry (another starter may have been first), about once per 50 ms
+    expect(attempts).toBeLessThan(40); // about one attempt per 50 ms in the 300 ms it was given: a loop that never sleeps would make thousands and pin a core
+  });
+
+  it.each([["linux", true], ["darwin", true], ["win32", false]])("flushes the data folder itself on %s: %s (Windows cannot flush a directory handle)", (platform, flushes) => {
+    const file = script("dir-fsync.js", `
+      const fs = require("fs"), path = require("path"), os = require("os");
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), "dir-fsync-")); // before the platform is faked: os.tmpdir() would answer for Windows
+      const opened = [];
+      const real = fs.openSync;
+      fs.openSync = function (p, ...rest) { try { if (fs.statSync(p).isDirectory()) opened.push(path.resolve(String(p))); } catch {} return real.call(fs, p, ...rest); };
+      Object.defineProperty(process, "platform", { value: process.argv[3] });
+      const { ABTestingFramework } = require(process.argv[2]);
+      new ABTestingFramework(path.join(dir, "e.yaml"), path.join(dir, "ab-data.jsonl"), { fsync: true }).close();
+      console.log(JSON.stringify({ flushedTheFolder: opened.includes(path.resolve(dir)) }));
+    `);
+    const r = spawnSync(process.execPath, [file, abModule, platform], { encoding: "utf8", timeout: 15_000, env: { PATH: process.env.PATH ?? "" } });
+    expect(JSON.parse(r.stdout.trim().split("\n").pop()!)).toEqual({ flushedTheFolder: flushes });
+  });
+});
+

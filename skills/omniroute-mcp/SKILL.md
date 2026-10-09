@@ -19,13 +19,13 @@ Features #1 to #6 (`features/01` to `06`) are third-party submodules. They run b
 
 | Item | State |
 |---|---|
-| Last recorded: 2026-10-09 | `main` includes PR #32 (the one-click Claude Desktop package) after PR #31 (this skill and the documentation set). Nothing is in flight; the install on the owner's machine is the next thing to settle |
+| Last recorded: 2026-10-09 | `main` includes PR #32 (the one-click Claude Desktop package) after PR #31 (this skill and the documentation set); PR #33 recorded PR #32. In flight: the fix that makes the package answer in Claude Desktop (version 1.0.1, PR #34), waiting for CI and the owner's retest |
 | Last merged PR | #32 |
-| Tests | `main` at PR #32: 21 suites, 773 passed, 6 todo; CI green, run 37870809491 (all six jobs, pull-by-digest probe read) |
+| Tests | `main` at PR #32: 21 suites, 773 passed, 6 todo; CI green, run 37870809491 (all six jobs, pull-by-digest probe read). The 1.0.1 fix branch, local on Node 24: 22 suites, 798 passed, 6 todo; CI for it **NOT VERIFIED** until its run is read |
 | Audit | done: `references/audit.md` (7 parts; mutation testing 78.7% to 90.0%, every remaining mutant read) |
 | Container image | built, probed, pushed to GHCR (private), pulled back by digest and probed again, in CI |
 | Production / cluster | **NOT DONE**: needs the owner's explicit approval and a cluster target |
-| Installed in the owner's Claude Desktop | **NOT VERIFIED**: only the owner can do it on their machine; steps in `references/install-claude-desktop.md` |
+| Installed in the owner's Claude Desktop | **PARTLY**: version 1.0.0 installed and enabled on Windows and its settings were substituted correctly (owner's screenshots), but the server **did not answer** (the app's log: `initialize` unanswered for 60 s). Version 1.0.1 removes the known causes: **NOT VERIFIED** until the owner retests (`references/install-claude-desktop.md`, sections 5.4 and 5.5) |
 | One-click `.mcpb` package | **merged** (PR #32): `npm run mcpb`, or the CI artifact `increadible-mcpb`; manifest accepted by the vendor's validator; started from the unpacked bundle in a test; CI-built bytes equal the sandbox build. **Claude Desktop installing it: NOT VERIFIED** (step C in `references/build-history.md`) |
 | Owner decisions open | install the package in Claude Desktop and report back; code signing; license and holder; gateway direction; scanner pin policy; security contact; cluster target; image scanner; default branch to `main`; rate limit; latency alert threshold; release tag |
 

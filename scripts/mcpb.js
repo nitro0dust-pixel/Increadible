@@ -23,6 +23,8 @@ const { crc32, zip } = require("./zip.js");
 
 const root = path.join(__dirname, "..");
 const manifestFile = path.join(root, "mcpb", "manifest.json");
+/** What Claude Desktop starts: src/main.ts always starts the server, where src/index.ts starts itself only when it is the program. */
+const BUNDLE_ENTRY = "dist/src/main.js";
 
 /** Never packed, whatever else is present (the vendor's own tool leaves out the same kinds of files). */
 const EXCLUDE = [/(^|\/)\.DS_Store$/, /(^|\/)\.env(\.|$)/, /(^|\/)\.git(\/|$)/, /^node_modules\/\.bin(\/|$)/, /^node_modules\/\.cache(\/|$)/, /^node_modules\/\.package-lock\.json$/, /\.map$/];
@@ -44,10 +46,11 @@ function problems(manifest = readJson(manifestFile), pkg = readJson(path.join(ro
   need(typeof manifest.description === "string" && manifest.description.length > 0, "description is missing");
   const server = manifest.server || {};
   need(server.type === "node", `server.type is ${JSON.stringify(server.type)}, expected "node"`);
-  need(server.entry_point === pkg.main, `server.entry_point ${JSON.stringify(server.entry_point)} differs from package.json main ${JSON.stringify(pkg.main)}`);
+  need(server.entry_point === BUNDLE_ENTRY, `server.entry_point ${JSON.stringify(server.entry_point)} must be ${JSON.stringify(BUNDLE_ENTRY)} (src/main.ts always starts the server)`);
   const config = server.mcp_config || {};
   need(config.command === "node", `mcp_config.command is ${JSON.stringify(config.command)}, expected "node"`);
-  need(JSON.stringify(config.args) === JSON.stringify([`\${__dirname}/${pkg.main}`]), "mcp_config.args must be exactly [\"${__dirname}/" + pkg.main + "\"]");
+  need(JSON.stringify(config.args) === JSON.stringify([`\${__dirname}/${BUNDLE_ENTRY}`]), "mcp_config.args must be exactly [\"${__dirname}/" + BUNDLE_ENTRY + "\"]");
+  need((config.env || {}).AB_LAZY_OPEN === "true", "mcp_config.env.AB_LAZY_OPEN must be \"true\": a desktop client starts several copies, and the data file must not be needed to answer the handshake");
   const declared = Object.keys(manifest.user_config || {});
   for (const name of variablesIn(config)) {
     const known = name === "__dirname" || name === "/" || (name.startsWith("user_config.") && declared.includes(name.slice("user_config.".length)));
