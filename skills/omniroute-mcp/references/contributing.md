@@ -34,6 +34,7 @@ Node 22 or newer (24 recommended). On Windows the `*.sh` scripts need Git Bash o
 | `npm run build`, `npm run smoke` | compile to `dist/`; real processes over stdio and HTTP |
 | `bash scripts/cleanroom.sh [commit]` | `verify` on exactly what is committed, after `npm ci`; use it for any claim of the form "it passes on commit X" |
 | `node scripts/skill.js check` | the global skill carries the same text as the documents |
+| `npm run mcpb`, `node scripts/mcpb.js problems` | build the Claude Desktop package; check `mcpb/manifest.json` against `package.json` (change the manifest whenever a tool, a setting or the version changes: the tests fail otherwise) |
 
 ## Rules that have paid for themselves
 

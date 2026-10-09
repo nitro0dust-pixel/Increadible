@@ -39,7 +39,7 @@ npm run build
 
 ### Claude Desktop (stdio)
 
-The complete guide from nothing to a running server (prerequisites, where to keep your data, verification, upkeep) is [docs/INSTALL-CLAUDE-DESKTOP.md](docs/INSTALL-CLAUDE-DESKTOP.md); if something fails, [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md). Every path in the config must be **absolute**, and without `AB_DATA_FILE` all A/B data is lost when Claude Desktop quits.
+The complete guide from nothing to a running server (prerequisites, where to keep your data, verification, upkeep) is [docs/INSTALL-CLAUDE-DESKTOP.md](docs/INSTALL-CLAUDE-DESKTOP.md); if something fails, [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md). Every path in the config must be **absolute**, and without `AB_DATA_FILE` all A/B data is lost when Claude Desktop quits. For a one-click install build the `.mcpb` package with `npm run mcpb` (details in the guide, Path A); it asks for a data folder and sets these variables itself.
 
 ```json
 {

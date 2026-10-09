@@ -1,0 +1,63 @@
+{
+  "manifest_version": "0.2",
+  "name": "increadible",
+  "display_name": "Increadible",
+  "version": "1.0.0",
+  "description": "Routing rules, A/B testing and a public-API gateway as one local MCP server. The gateway answers mock data unless live calls are switched on.",
+  "long_description": "Increadible is one local MCP server with three components: routing plugins (apply team routing rules, see statistics, update and suggest rules), A/B testing (experiments with two to ten variants, sticky assignment, a Welch t-test with Holm correction, guardrail metrics, a winner only when it is significantly better) and an API gateway (discover, call and aggregate public APIs; it answers built-in mock data unless live calls are enabled, and live calls have never been run against a real provider). Everything stays on this computer. Your rules and all A/B measurements are kept in the folder you choose when you install it.",
+  "author": {
+    "name": "Increadible Team"
+  },
+  "license": "MIT",
+  "keywords": ["routing", "ab-testing", "experiments", "api-gateway", "mcp"],
+  "server": {
+    "type": "node",
+    "entry_point": "dist/src/index.js",
+    "mcp_config": {
+      "command": "node",
+      "args": ["${__dirname}/dist/src/index.js"],
+      "env": {
+        "RULES_FILE": "${user_config.data_directory}${/}rules.yaml",
+        "EXPERIMENTS_FILE": "${user_config.data_directory}${/}experiments.yaml",
+        "AB_DATA_FILE": "${user_config.data_directory}${/}ab-data.jsonl",
+        "AB_FSYNC": "${user_config.durable_writes}"
+      }
+    }
+  },
+  "tools": [
+    { "name": "apply_routing_rules", "description": "Apply team-specific routing rules to optimize provider selection" },
+    { "name": "get_rule_stats", "description": "Get statistics on routing rule application and provider breakdown" },
+    { "name": "update_rules", "description": "Update routing rules configuration" },
+    { "name": "suggest_rules", "description": "Suggest optimized routing rules based on current statistics" },
+    { "name": "create_experiment", "description": "Create a new A/B testing experiment with two to ten variants" },
+    { "name": "assign_variant", "description": "Assign a user to a variant in an experiment" },
+    { "name": "record_metric", "description": "Record a metric for an experiment variant" },
+    { "name": "get_experiment_results", "description": "Get statistical analysis results for an experiment" },
+    { "name": "recommend_winner", "description": "Get a recommendation for the winning variant" },
+    { "name": "discover_apis", "description": "Discover available public APIs by category or search term" },
+    { "name": "call_api", "description": "Call a specific public API with parameters" },
+    { "name": "aggregate_apis", "description": "Call multiple APIs in parallel and combine results" },
+    { "name": "get_api_stats", "description": "Get statistics on API gateway usage and caching" }
+  ],
+  "user_config": {
+    "data_directory": {
+      "type": "directory",
+      "title": "Data folder",
+      "description": "The folder where Increadible keeps its files: rules.yaml (routing rules), experiments.yaml (optional experiment definitions) and ab-data.jsonl (every A/B measurement). Choose a folder that exists and that you back up. If you change it later, your data stays in the old folder.",
+      "required": true
+    },
+    "durable_writes": {
+      "type": "boolean",
+      "title": "Flush every A/B measurement to disk",
+      "description": "On (recommended): each measurement is forced to disk before it is acknowledged, so a power cut or crash cannot lose an acknowledged measurement. It costs about 0.2 ms per write on a local disk. Off: faster, but a crash can lose the last few measurements.",
+      "default": true,
+      "required": false
+    }
+  },
+  "compatibility": {
+    "platforms": ["darwin", "win32"],
+    "runtimes": {
+      "node": ">=22.0.0"
+    }
+  }
+}
