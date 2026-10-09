@@ -34,6 +34,7 @@ const REFERENCES = {
   "ROADMAP.md": "roadmap.md",
   "AUDIT.md": "audit.md",
   "GATEWAY.md": "gateway.md",
+  "docs/RELEASING.md": "releasing.md",
 };
 
 const header = (source) =>

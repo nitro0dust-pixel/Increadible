@@ -20,6 +20,7 @@ third-party projects (or are our integration guides for them) and are not listed
 | How it is built | [ARCHITECTURE.md](ARCHITECTURE.md) |
 | Every step taken, in order | [BUILD-HISTORY.md](BUILD-HISTORY.md) |
 | What changed for an operator | [CHANGELOG.md](../CHANGELOG.md) |
+| How a version becomes a release: who tags, which commit, how the package hash is checked | [RELEASING.md](RELEASING.md) |
 | The audit: findings, fixes, what was not verified | [AUDIT.md](../AUDIT.md) |
 | What was measured and what the numbers do not say | [PERFORMANCE.md](../PERFORMANCE.md) |
 | Third-party tools that run beside this server | [COMPANIONS.md](../COMPANIONS.md) |
