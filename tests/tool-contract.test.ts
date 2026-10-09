@@ -20,6 +20,74 @@ beforeAll(() => {
 afterAll(() => jest.restoreAllMocks());
 
 const string = { type: "string" };
+// The item shapes, bounds, enums and examples are part of the contract on purpose: a client builds its calls from them. Every example is
+// also run through the handler by tests/schema-examples.test.ts, and tests/schema-no-narrowing.test.ts keeps the bounds equal to the handlers'.
+const idString = { type: "string", minLength: 1, maxLength: 200 };
+const ruleItem = {
+  type: "object",
+  required: ["id", "provider", "priority", "enabled", "match"],
+  properties: {
+    id: { type: "string", minLength: 1 },
+    name: {},
+    enabled: { type: "boolean" },
+    priority: { type: "number" },
+    match: { type: "object" },
+    provider: string,
+    fallback: { type: "array", items: string },
+    reason: {},
+    tags: {},
+  },
+};
+const ruleExample = [
+  {
+    id: "simple-tasks",
+    name: "Simple questions",
+    enabled: true,
+    priority: 10,
+    match: { task_type: ["qa", "summary"], task_complexity: "low" },
+    provider: "claude-haiku",
+    fallback: ["claude-sonnet"],
+    reason: "Low-cost model for simple tasks",
+  },
+  { id: "default", enabled: true, priority: 100, match: {}, provider: "claude-sonnet" },
+];
+const variantsSchema = {
+  type: "array",
+  minItems: 2,
+  maxItems: 10,
+  items: { type: "object", required: ["id"], properties: { id: idString, name: {}, config: {} } },
+  examples: [[{ id: "control", name: "Current checkout" }, { id: "new-button", name: "New button" }]],
+};
+const metricsSchema = {
+  type: "array",
+  items: {
+    type: "object",
+    required: ["id"],
+    properties: {
+      id: idString,
+      name: {},
+      direction: { type: "string", enum: ["higher_is_better", "lower_is_better"], default: "higher_is_better" },
+      guardrail: { type: "boolean" },
+    },
+  },
+  examples: [
+    [
+      { id: "quality", name: "Quality score" },
+      { id: "cost", name: "Cost per task", direction: "lower_is_better", guardrail: true },
+    ],
+  ],
+};
+const aggregateSchema = {
+  type: "array",
+  maxItems: 100,
+  items: { type: "object", required: ["id", "endpoint"], properties: { id: string, endpoint: string, params: {} } },
+  examples: [
+    [
+      { id: "coingecko", endpoint: "/simple/price", params: { ids: "bitcoin", vs_currencies: "usd" } },
+      { id: "wikipedia", endpoint: "", params: { action: "query", list: "search", srsearch: "MCP", format: "json" } },
+    ],
+  ],
+};
 const EXPECTED: Array<[string, Record<string, unknown>, string[] | undefined]> = [
   [
     "apply_routing_rules",
@@ -32,7 +100,7 @@ const EXPECTED: Array<[string, Record<string, unknown>, string[] | undefined]> =
     ["task_type"],
   ],
   ["get_rule_stats", {}, []],
-  ["update_rules", { rules: { type: "array" } }, ["rules"]],
+  ["update_rules", { rules: { type: "array", maxItems: 500, items: ruleItem, examples: [ruleExample] } }, ["rules"]],
   ["suggest_rules", {}, []],
   [
     "create_experiment",
@@ -40,21 +108,29 @@ const EXPECTED: Array<[string, Record<string, unknown>, string[] | undefined]> =
       id: string,
       name: string,
       hypothesis: string,
-      variants: { type: "array" },
+      variants: variantsSchema,
       traffic_split: { type: "number" },
-      metrics: { type: "array" },
+      metrics: metricsSchema,
       primary_metric: string,
-      weights: { type: "array" },
+      weights: { type: "array", minItems: 2, maxItems: 10, items: { type: "number" } },
     },
     ["id", "name", "hypothesis", "variants", "metrics"],
   ],
   ["assign_variant", { experiment_id: string, user_id: { type: ["string", "number"] } }, ["experiment_id"]],
-  ["record_metric", { experiment_id: string, variant_id: string, metrics: { type: "object" } }, ["experiment_id", "variant_id", "metrics"]],
+  [
+    "record_metric",
+    {
+      experiment_id: string,
+      variant_id: string,
+      metrics: { type: "object", additionalProperties: { type: "number", minimum: -1e15, maximum: 1e15 }, examples: [{ quality: 8.5, cost: 0.02 }] },
+    },
+    ["experiment_id", "variant_id", "metrics"],
+  ],
   ["get_experiment_results", { experiment_id: string }, ["experiment_id"]],
   ["recommend_winner", { experiment_id: string }, ["experiment_id"]],
   ["discover_apis", { query: string }, undefined],
   ["call_api", { api_id: string, endpoint: string, params: { type: "object" } }, ["api_id", "endpoint"]],
-  ["aggregate_apis", { apis: { type: "array" } }, ["apis"]],
+  ["aggregate_apis", { apis: aggregateSchema }, ["apis"]],
   ["get_api_stats", {}, undefined],
 ];
 

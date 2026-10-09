@@ -870,3 +870,20 @@ describe("the global skill omniroute-mcp", () => {
     expect(fs.readFileSync(path.join(target, "other-skill", "SKILL.md"), "utf8")).toBe("keep me");
   });
 });
+
+describe("owner-facing diagnostics that name the running version", () => {
+  // The server prints `increadible <version>: ready on stdio` (src/index.ts; tests/entry-point.test.ts pins it to package.json). The
+  // install guide tells the owner to read its absence as "the server never started", so a stale literal would send the owner to a wrong
+  // conclusion after a version bump. History rows (CHANGELOG, BUILD-HISTORY, ROADMAP numbered rows) keep their literals on purpose.
+  // docs/USING-THE-GATEWAY.md is deliberately NOT scanned: it names versions in prose and uses the placeholder for the banner.
+  const literal = /increadible (\d+\.\d+\.\d+): ready on stdio/g;
+  it("uses the placeholder, or the current version, never a stale number", () => {
+    for (const file of ["docs/INSTALL-CLAUDE-DESKTOP.md", "docs/TROUBLESHOOTING.md"]) {
+      expect({ file, literals: [...read(file).matchAll(literal)].map((m) => m[1]) }).toEqual({ file, literals: [] });
+    }
+    expect(read("docs/INSTALL-CLAUDE-DESKTOP.md")).toContain("increadible <version>: ready on stdio");
+    const open = read("ROADMAP.md").split("\n").find((l) => l.startsWith("- [ ] **Retest the package in Claude Desktop"));
+    expect(open).toBeDefined();
+    for (const [, v] of open!.matchAll(literal)) expect(v).toBe(pkg.version);
+  });
+});

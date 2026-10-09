@@ -28,17 +28,17 @@
   "tools": [
     { "name": "apply_routing_rules", "description": "Apply team-specific routing rules to optimize provider selection" },
     { "name": "get_rule_stats", "description": "Get statistics on routing rule application and provider breakdown" },
-    { "name": "update_rules", "description": "Update routing rules configuration" },
+    { "name": "update_rules", "description": "Update routing rules configuration. Replaces the whole rule set (send every rule to keep); if any rule is refused, nothing changes." },
     { "name": "suggest_rules", "description": "Suggest optimized routing rules based on current statistics" },
     { "name": "create_experiment", "description": "Create a new A/B testing experiment with two to ten variants" },
     { "name": "assign_variant", "description": "Assign a user to a variant in an experiment" },
-    { "name": "record_metric", "description": "Record a metric for an experiment variant" },
+    { "name": "record_metric", "description": "Record a metric for an experiment variant. Send one number per metric id defined by create_experiment (any subset)." },
     { "name": "get_experiment_results", "description": "Get statistical analysis results for an experiment" },
     { "name": "recommend_winner", "description": "Get a recommendation for the winning variant" },
-    { "name": "discover_apis", "description": "Discover available public APIs by category or search term" },
-    { "name": "call_api", "description": "Call a specific public API with parameters" },
-    { "name": "aggregate_apis", "description": "Call multiple APIs in parallel and combine results" },
-    { "name": "get_api_stats", "description": "Get statistics on API gateway usage and caching" }
+    { "name": "discover_apis", "description": "Discover available public APIs by category or search term. Each entry's id is the api_id for call_api (and the id in aggregate_apis); its endpoint field is the provider's base URL, not a value for call_api's endpoint." },
+    { "name": "call_api", "description": "Call a specific public API with parameters. Answers built-in sample (mock) data unless the server operator switched that API to live calls; the result's source field says which. Sample answers are fixed or echo your params back: they are not real prices, weather or news." },
+    { "name": "aggregate_apis", "description": "Call multiple APIs in parallel and combine results. Results come back in the order given; each item names the API with id (not api_id). A failed call holds {error} in its place and the reply adds failed: n. Answers are built-in sample (mock) data unless the server operator switched an API to live calls; each successful result's source field says which." },
+    { "name": "get_api_stats", "description": "Get statistics on API gateway usage and caching. Counters are kept in the memory of this server process and reset when it restarts. total_calls includes cache hits and unknown ids (invalid arguments are not counted); cache_hit_rate is a string, not a number; live_apis is [] while every answer is sample data, otherwise the ids of the APIs switched to live calls, or the single value \"*\" when all are." }
   ],
   "user_config": {
     "data_directory": {

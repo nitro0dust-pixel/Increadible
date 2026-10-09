@@ -319,6 +319,7 @@ describe("the bundle (node scripts/mcpb.js build)", () => {
       const config = unpacked.server.mcp_config;
       const env: Record<string, string> = { ...(process.env as Record<string, string>) };
       for (const name of ["NODE_PATH", "RULES_FILE", "EXPERIMENTS_FILE", "AB_DATA_FILE", "AB_FSYNC", "AB_LAZY_OPEN"]) delete env[name];
+      for (const name of Object.keys(env)) if (name.startsWith("GATEWAY_")) delete env[name]; // the gateway answers sample data, never a live call, whatever the developer's shell holds
       for (const [key, value] of Object.entries(config.env as Record<string, string>)) env[key] = substitute(value, userConfig);
       const child = cp.spawn(process.execPath, (config.args as string[]).map((a) => substitute(a, userConfig)), { cwd: home, env, stdio: ["pipe", "pipe", "pipe"] });
       open.push(child);
@@ -445,6 +446,21 @@ describe("the bundle (node scripts/mcpb.js build)", () => {
       const backdated = new Date(Date.now() - 7000);
       fs.utimesSync(lock, backdated, backdated); // 7 s without a refresh: the dead holder's lock is stale
       expect(await copy.call("create_experiment", experiment("e"))).toEqual({ status: "success", experiment_id: "e" });
+      copy.end();
+      expect(await copy.exited).toBe(0);
+    });
+
+    it("ships an example that runs: the aggregate_apis example in the installed server's own tools/list is accepted as a call and answers sample data", async () => {
+      const copy = openSession({ data_directory: folder("example-run"), durable_writes: true });
+      const listed = (await copy.rpc("tools/list")).result.tools.find((t: any) => t.name === "aggregate_apis");
+      const example = listed.inputSchema.properties.apis.examples[0];
+      expect(Array.isArray(example) && example.length > 0).toBe(true);
+      const reply = await copy.rpc("tools/call", { name: "aggregate_apis", arguments: { apis: example } });
+      expect(!!reply.result.isError).toBe(false);
+      const answer = body(reply);
+      expect(answer.count).toBe(example.length);
+      expect(answer).not.toHaveProperty("failed");
+      expect(answer.data.map((r: any) => r.source)).toEqual(Array(example.length).fill("mock"));
       copy.end();
       expect(await copy.exited).toBe(0);
     });

@@ -52,7 +52,8 @@ One Node.js process, one MCP server, three components we wrote. This page is the
 | One writer per A/B data file; a lost lock makes writes fail closed | `tests/e2e-integration.test.ts` (lock section), smoke and the image probe |
 | Memory and query cost of A/B results do not grow with the data | `tests/ab-golden.test.ts` (answers equal to the earlier array-based version), `PERFORMANCE.md` |
 | The gateway cannot reach another host or path than the API's registered URL, and a credential never appears in a result, error, log or cache key | `tests/gateway-live.test.ts` (real local server, 60 000-endpoint property test) |
-| The 13 tools and their input schemas do not change by accident | `tests/tool-contract.test.ts` |
+| The 13 tools and their input schemas (item shapes, bounds, enums, examples and defaults included) do not change by accident | `tests/tool-contract.test.ts` |
+| Every example in a tool schema is run through the handler; no description states a limit as a number (a tripwire pins the few numbers that remain; the limits are schema keywords); no schema refuses what a handler accepts (the listed places where the schema is stricter are pinned) | `tests/schema-examples.test.ts`, `tests/schema-no-narrowing.test.ts` |
 | A server reachable beyond loopback refuses to start without `AUTH_TOKEN` | `tests/server.test.ts`, smoke, image probe |
 | One Node major across the image, CI and `@types/node` | `tests/config.test.ts` |
 | A copy of the server that cannot have its A/B data file (held by another copy, left locked by a killed one, or on an unusable folder) still answers the handshake and every other tool, with `AB_LAZY_OPEN`; the lock loop has a deadline and never spins; the default (open at start-up, refuse at once) is unchanged | `tests/ab-lazy.test.ts`, `tests/entry-point.test.ts` (child processes with a time limit), `tests/mcpb.test.ts` (copies of the installed bundle side by side) |

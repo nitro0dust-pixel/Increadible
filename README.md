@@ -93,7 +93,7 @@ Emitted metrics: `increadible_uptime_seconds`, `increadible_tool_calls_total{too
 | `recommend_winner` | #8 | Winner only if statistically significant |
 | `discover_apis` | #9 | Search the API registry |
 | `call_api` | #9 | Call a registered API (cached 5 min) |
-| `aggregate_apis` | #9 | Up to 100 calls, five at a time; a call that fails does not discard the others |
+| `aggregate_apis` | #9 | Up to 100 calls, five at a time; each item names the API with `id` (not `api_id`); a call that fails does not discard the others |
 | `get_api_stats` | #9 | Call counts and cache hit rate |
 
 ## Behavior reference
@@ -153,7 +153,7 @@ First enabled rule whose `match` fits wins; an empty `match` matches everything.
     loss. Set `AB_FSYNC=1` to flush each append to disk first (slower: one flush per write, about 0.2 ms on a local disk; see [PERFORMANCE.md](PERFORMANCE.md)). The Kubernetes manifests set it; the image does not.
 
 **API gateway:** the registry has 9 APIs (weather, finance, news, reference, sports). By default `call_api`
-returns **generated mock data** and makes no network calls (every result says `"source": "mock"`). Real HTTP calls are **opt-in per
+returns **generated mock data** and makes no network calls (every `call_api` result and every successful `aggregate_apis` item says `"source": "mock"`). Real HTTP calls are **opt-in per
 API**: set `GATEWAY_LIVE_APIS` to a comma-separated list of API ids (or `*`); `GATEWAY_TIMEOUT_MS`, `GATEWAY_MAX_RESPONSE_BYTES` and
 `GATEWAY_USER_AGENT` tune them, and the four key-based APIs read their key from `GATEWAY_KEY_<API>` (names and the security rules in
 `DEPLOYMENT.md`). Live mode has been tested against a local HTTP server only, **not against the real providers**. Results are cached for 5 minutes, at most 500 results and about 16 MiB (the oldest go first). At most 10 live calls run at once across the gateway, up to 100 more wait for a slot and anything beyond that is refused at once; an `aggregate_apis` request takes up to 100 calls and a call that fails holds its own `{error}` in the result instead of failing the request.

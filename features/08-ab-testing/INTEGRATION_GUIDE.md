@@ -31,7 +31,7 @@ so an experiment written without them behaves exactly as before.
 
 | Tool | Input | Output |
 |------|-------|--------|
-| `create_experiment` | `id`, `name`, `hypothesis`, `variants` (2 to 10), `metrics`, optional `traffic_split` (0..1), optional `weights`, optional `primary_metric` | `{status, experiment_id}` |
+| `create_experiment` | `id`, `name`, `hypothesis`, `variants` (2 to 10), `metrics`, optional `traffic_split` (0..1), optional `weights`, optional `primary_metric`. For a new experiment made with this tool, the experiment, every variant and every metric needs a non-empty id (unique within the experiment, at most 200 characters, never `__proto__`); an experiments file keeps the older rule shown in the YAML example above | `{status, experiment_id}` |
 | `assign_variant` | `experiment_id`, optional `user_id` (a string or a number) | `{variant_id, experiment_id}`. Sticky per `(experiment, user_id)`; random if no `user_id` |
 | `record_metric` | `experiment_id`, `variant_id`, `metrics{metricId: finite number between -1e15 and 1e15}` | `{status: "recorded"}`; errors for an unknown experiment or variant, a metric the experiment does not define (the message lists the ones it does), a non-numeric or out-of-range value, or `metrics` that is not an object |
 | `get_experiment_results` | `experiment_id` | see below |
