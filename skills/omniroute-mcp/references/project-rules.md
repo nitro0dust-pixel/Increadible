@@ -15,8 +15,8 @@ targets, not results).
 
 ## Repository and branch workflow
 
-- Repo `nitro0dust-pixel/Increadible` (private). **PRs target `main`, but the repository's default branch is
-  `claude/nice-keller-aoooos`** (owner decision pending, see `ROADMAP.md`; Dependabot is inactive until it is `main`).
+- Repo `nitro0dust-pixel/Increadible` (private). **The default branch is `main`** (owner switched it on 2026-10-09); PRs
+  target `main`, and Dependabot reads its configuration from it.
 - Work happens on `claude/nice-keller-aoooos`, one PR at a time, squash-merged into `main`. After a squash merge the
   branch and `main` have identical content but different commits: bring `main` in with `git fetch origin main && git merge
   origin/main` and push as a fast-forward. **Never force-push or rewrite history**.
