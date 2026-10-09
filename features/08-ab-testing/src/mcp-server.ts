@@ -774,7 +774,8 @@ class ABTestingFramework {
       throw new Error(`Experiment not found: ${experimentId}`);
     }
     if (!experiment.variants.some((v) => v.id === variantId)) {
-      throw new Error(`Variant ${variantId} is not part of experiment ${experimentId}`);
+      const ids = experiment.variants.map((v) => v.id);
+      throw new Error(`Variant ${variantId} is not part of experiment ${experimentId}: its variants are ${ids.join(", ") || "(none)"}`);
     }
     const known = new Set(experiment.metrics.map((m) => m?.id));
     for (const [key, value] of Object.entries(metrics ?? {})) {

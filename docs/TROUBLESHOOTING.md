@@ -63,7 +63,7 @@ You should see one JSON line listing 13 tools. Logs appear on stderr. Press Ctrl
 | Error | Meaning |
 |---|---|
 | `Experiment not found: <id>` | wrong id, or the data file is not the one you used before (check `AB_DATA_FILE`) |
-| `Variant <v> is not part of experiment <id>` / `Unknown metric <m> for experiment <id>: its metrics are ...` | a misspelt id; the message lists the valid metrics |
+| `Variant <v> is not part of experiment <id>: its variants are ...` / `Unknown metric <m> for experiment <id>: its metrics are ...` | a misspelt or guessed id; the message lists the valid variants or metrics |
 | `Metric <m> must be a finite number` / `... must be between -1e15 and 1e15` | one huge value would spoil an experiment for good, so it is refused |
 | `Experiment already exists: <id>` | ids are unique |
 | `rules must be an array` / `duplicate rule id: <id>` / `each rule needs string id, string provider, number priority, boolean enabled and object match` | `update_rules` validation; nothing was changed |
