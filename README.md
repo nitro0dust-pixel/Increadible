@@ -8,7 +8,7 @@ MCP server) and **vendors six third-party projects as git submodules** (Features
 > independently reviewed, and it has been load-tested only on one machine ([PERFORMANCE.md](PERFORMANCE.md)). Cost and quality figures quoted by upstream
 > projects are *not* verified here. See [Limitations](#limitations).
 
-Tools that run *beside* this server (and why `agentacct` is not the savings instrument) are in [COMPANIONS.md](COMPANIONS.md); the research and recommendation for a universal API gateway (proposed, not built) are in [GATEWAY.md](GATEWAY.md). The full account of the code audit (every finding, fix and observation, in order, and what was not verified) is [AUDIT.md](AUDIT.md). Project status, the plan and open decisions are tracked in [ROADMAP.md](ROADMAP.md); what changed and when in
+Tools that run *beside* this server (and why `agentacct` is not the savings instrument) are in [COMPANIONS.md](COMPANIONS.md); the research and recommendation for a universal API gateway (proposed, not built) are in [GATEWAY.md](GATEWAY.md). The index of every document is [docs/README.md](docs/README.md); how to change the code is [CONTRIBUTING.md](CONTRIBUTING.md), the security posture [SECURITY.md](SECURITY.md), and the global Claude skill that carries all of it is [skills/omniroute-mcp/SKILL.md](skills/omniroute-mcp/SKILL.md). The full account of the code audit (every finding, fix and observation, in order, and what was not verified) is [AUDIT.md](AUDIT.md). Project status, the plan and open decisions are tracked in [ROADMAP.md](ROADMAP.md); what changed and when in
 [CHANGELOG.md](CHANGELOG.md); working rules and context for Claude sessions in [CLAUDE.md](CLAUDE.md).
 
 ## Components
@@ -38,6 +38,8 @@ npm run build
 ```
 
 ### Claude Desktop (stdio)
+
+The complete guide from nothing to a running server (prerequisites, where to keep your data, verification, upkeep) is [docs/INSTALL-CLAUDE-DESKTOP.md](docs/INSTALL-CLAUDE-DESKTOP.md); if something fails, [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md). Every path in the config must be **absolute**, and without `AB_DATA_FILE` all A/B data is lost when Claude Desktop quits.
 
 ```json
 {

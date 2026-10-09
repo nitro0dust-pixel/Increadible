@@ -1,0 +1,158 @@
+# Install the server in Claude Desktop, from scratch
+
+This guide takes a machine with nothing on it to the `increadible` MCP server running inside Claude Desktop. Claude Desktop runs on
+macOS and Windows. Everything here that I could run is marked **Verified**; everything that needs your machine is marked
+**NOT VERIFIED** until you have done it (the authoring environment is a Linux container that cannot reach your computer).
+
+| Path | Best for | Needs Node on your PATH | State |
+|---|---|---|---|
+| **A. One-click `.mcpb` package** | most people; Claude Desktop ships its own Node.js | no | being built (step C of `BUILD-HISTORY.md`); this section is completed when it exists |
+| **B. Edit `claude_desktop_config.json`** | developers; works today | yes | **Verified** up to the stdio handshake; **NOT VERIFIED** inside Claude Desktop |
+
+Remote servers are a different mechanism (Settings, Connectors). This server speaks stdio locally; its HTTP mode is for containers
+(`DEPLOYMENT.md`), not for Claude Desktop.
+
+## 0. What you get
+
+Thirteen tools, from three components we wrote:
+
+| Component | Tools | What it does |
+|---|---|---|
+| Routing Plugins (#7) | `apply_routing_rules`, `get_rule_stats`, `update_rules`, `suggest_rules` | picks a provider for a task from a rules file; counts what it picked |
+| A/B Testing (#8) | `create_experiment`, `assign_variant`, `record_metric`, `get_experiment_results`, `recommend_winner` | 2 to 10 variants, sticky assignment, Welch t-test, Holm correction, guardrails; data kept in an append-only file |
+| API Gateway (#9) | `discover_apis`, `call_api`, `aggregate_apis`, `get_api_stats` | 9 registered APIs; **mock data by default**, real GET calls only if you switch an API to live |
+
+It does **not** measure savings, route your Claude traffic, or integrate the vendored projects in `features/01` to `06`
+(including OmniRoute): nothing here has measured a cost saving (`ROADMAP.md`).
+
+## 1. Prerequisites
+
+| You need | Why | Check |
+|---|---|---|
+| Claude Desktop, latest version | it starts the server | Settings, About |
+| Git | to get the code | `git --version` |
+| Node.js 22 or newer (24 recommended) and npm | to build the code (path B also runs it with Node) | `node -v` |
+
+Install Node from nodejs.org or your package manager (the repository's CI and image use Node 24; `engines` is `>=22`).
+
+## 2. Get and build the code
+
+```bash
+git clone https://github.com/nitro0dust-pixel/Increadible.git
+cd Increadible
+git checkout main
+npm ci
+npm run build          # compiles to dist/
+npm run smoke          # starts the built server over stdio and HTTP and checks it (needs bash: Git Bash or WSL on Windows)
+```
+
+The repository is private: Git asks you to sign in. The vendored projects under `features/01` to `06` are git submodules and are not
+needed to build or run the server; skip `--recurse-submodules`.
+
+**Verified** (Linux, Node 22.22.0 and 24.21.0, clean rooms of commit `9709aba`): `npm ci`, type-check, lint, tests, build, smoke.
+**NOT VERIFIED**: Windows (`npm run build`, `type-check`, `lint` and `test` are expected to work in PowerShell; the `.sh` scripts
+need Git Bash or WSL, `ROADMAP.md` item 7).
+
+## 3. Choose where your data lives
+
+Claude Desktop starts the server with no meaningful working directory, so **every path must be absolute** and `~` or `%APPDATA%`
+are not expanded in the config file. Pick one folder and create it:
+
+| OS | Suggested folder |
+|---|---|
+| macOS | `/Users/<you>/Library/Application Support/Increadible` |
+| Windows | `C:\Users\<you>\AppData\Roaming\Increadible` (in JSON write `C:/Users/<you>/AppData/Roaming/Increadible`) |
+
+The server uses three files in it. It creates the data file when it starts and the rules file the first time `update_rules` is called; for your own rules from the start, write `rules.yaml` yourself (the "Routing rules" example in `README.md` is a valid starting point, checked by a test):
+
+| Variable | File | If unset |
+|---|---|---|
+| `RULES_FILE` | `rules.yaml` | built-in rules; `update_rules` would write to a path relative to a directory you do not control |
+| `EXPERIMENTS_FILE` | `experiments.yaml` (optional, read-only definitions) | no predefined experiments |
+| `AB_DATA_FILE` | `ab-data.jsonl` | **experiments and measurements live in memory only and are lost when Claude Desktop quits** |
+
+Set `RULES_FILE` and `AB_DATA_FILE` at least. A lock file `ab-data.jsonl.lock` appears next to the data file while the server runs; it
+makes the data file single-writer. Do not point two programs (for example Claude Desktop and Claude Code) at the same data file; the second is refused with
+`it is in use by pid ...`. Give each its own file.
+
+## 4. Path B: edit the config file
+
+1. In Claude Desktop open **Settings, Developer, Edit Config**. It opens `claude_desktop_config.json` (and creates it if needed). Third-party guides give the location as
+   `~/Library/Application Support/Claude/claude_desktop_config.json` on macOS and `%APPDATA%\Claude\claude_desktop_config.json` on Windows; the Edit Config button is the safe way to find it.
+   (**NOT VERIFIED here**: the official MCP quickstart could not be reached from the authoring environment on 2026-10-09.)
+2. Find the absolute path of Node: `which node` (macOS) or `where node` (Windows). A desktop app often does not see the PATH of your shell
+   (for example nvm), so use the full path when `node` alone does not work.
+3. Add the server under `mcpServers` (keep any servers already there; the JSON must stay valid):
+
+```json
+{
+  "mcpServers": {
+    "increadible": {
+      "command": "/usr/local/bin/node",
+      "args": ["/Users/you/code/Increadible/dist/src/index.js"],
+      "env": {
+        "RULES_FILE": "/Users/you/Library/Application Support/Increadible/rules.yaml",
+        "AB_DATA_FILE": "/Users/you/Library/Application Support/Increadible/ab-data.jsonl",
+        "AB_FSYNC": "1"
+      }
+    }
+  }
+}
+```
+
+On Windows, use forward slashes (`"C:/Users/you/code/Increadible/dist/src/index.js"`) or double the backslashes.
+
+4. **Quit Claude Desktop completely** (the menu, Quit; closing the window is not enough) and start it again.
+5. Verify, see section 6.
+
+`AB_FSYNC=1` flushes every A/B write to disk (about 0.2 ms each, measured on a local disk): a write you were told succeeded survives a power loss. Leave it out for speed.
+Every setting the server reads is in `README.md` and `DEPLOYMENT.md`.
+
+## 5. Path A: the one-click package
+
+Completed when the package exists (step C). It will be one `.mcpb` file that you double-click (or drag into Claude Desktop, or choose
+Settings, Extensions, Advanced settings, Install Extension). Claude Desktop includes a built-in Node.js, so Node is not needed to run it; the
+installer asks where to keep your data. The format and install flow were checked against Anthropic's current documentation on 2026-10-09
+([Build a desktop extension with MCPB](https://claude.com/docs/connectors/building/mcpb)).
+
+## 6. Verify it works
+
+| Check | Expected | Where it was verified |
+|---|---|---|
+| The server answers the MCP handshake over stdio with the exact command from your config | `initialize` returns `serverInfo.name` `increadible`; `tools/list` returns 13 tools | **Verified** by `npm run smoke` and `tests/entry-point.test.ts` (real processes, Linux) |
+| Claude Desktop shows it as running | Settings, Developer lists `increadible` as running; no error | **NOT VERIFIED** (your machine) |
+| The tools are available in a chat | the `+` button under the chat box, Connectors, lists the 13 tools | **NOT VERIFIED** (your machine) |
+| A real call works | ask: "Use the increadible tool get_api_stats." The answer is JSON with `total_calls: 0` | **NOT VERIFIED** (your machine) |
+| Your data persists | create an experiment, quit Claude Desktop, start it, ask for its results; it is still there, and `ab-data.jsonl` has lines | **NOT VERIFIED** (your machine); the replay itself is **Verified** by tests |
+
+You can run the handshake yourself, without Claude Desktop, with the same environment:
+
+```bash
+printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' \
+  | RULES_FILE=/tmp/rules.yaml node dist/src/index.js
+```
+
+Two JSON lines come back; stdout carries only JSON, logs go to stderr.
+
+## 7. Operate it
+
+| Task | How |
+|---|---|
+| See the logs | macOS `~/Library/Logs/Claude/` (files named `mcp*.log`); Windows `%APPDATA%\Claude\logs`; also Settings, Developer. (Locations from the MCP quickstart, **NOT VERIFIED here**) |
+| Back up the A/B data | quit Claude Desktop, copy `ab-data.jsonl` (the log is append-only; the lock file is not needed) |
+| Start fresh | quit Claude Desktop, move `ab-data.jsonl` and `ab-data.jsonl.lock` away |
+| Update the server | `git pull`, `npm ci`, `npm run build`, quit and restart Claude Desktop. Stored data still loads (the golden-master tests keep that true) |
+| Roll back | `git checkout <earlier commit>`, rebuild, restart |
+| Remove it | delete the `increadible` entry from the config (or uninstall the extension), restart; your data folder stays until you delete it |
+| Turn on real API calls | not by default. Set `GATEWAY_LIVE_APIS` (for example `coingecko,hackernews`) and, for the four key-based APIs, `GATEWAY_KEY_<API>`. Keys placed in this config file sit there in plain text; the `.mcpb` package can keep them in the operating system's keychain. Live mode has **never been run against a real provider** (`NOT VERIFIED`); read `DEPLOYMENT.md` first |
+
+## 8. What the server can touch on your machine
+
+| Resource | Access |
+|---|---|
+| Files | only the paths in `RULES_FILE`, `EXPERIMENTS_FILE`, `AB_DATA_FILE` (and the `.lock` and temporary files next to them) |
+| Network | none in the default configuration; with `GATEWAY_LIVE_APIS` set, GET requests to each API's registered host only (no redirects followed, JSON only, size and time capped) |
+| Processes | one `node` process, started and stopped by Claude Desktop; no other program is started |
+| Secrets | none stored by the server; a key you place in `env` is only read from the environment and never written to a result, error, log line or cache key (tested against a real local server) |
+
+If something does not work, see `TROUBLESHOOTING.md`.
