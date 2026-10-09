@@ -13,7 +13,7 @@ npm ci
 npm run verify          # type-check, lint, tests, build, smoke (+ Docker and promtool when present)
 ```
 
-Node 22 or newer (24 recommended). On Windows the `*.sh` scripts need Git Bash or WSL. `features/01` to `06` are git submodules that the build does not need.
+Node 22 or newer (24 recommended). On Windows the `*.sh` scripts need Git Bash or WSL, and 8 tests in four suites (`ab-boundaries`, `entry-point`, `mcpb`, `scripts`: signals, file modes, directory fsync, promtool) fail on Windows, on unchanged `main` too (reported from the owner's machine on 2026-10-09 by the session that made PR #43; not reproduced here, no Windows): CI on Linux is the test run that counts. `features/01` to `06` are git submodules that the build does not need.
 
 ## Branches and pull requests
 
