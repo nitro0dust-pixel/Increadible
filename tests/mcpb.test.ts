@@ -128,6 +128,23 @@ describe("scripts/mcpb.js, the parts that a normal build never exercises", () =>
     fs.rmSync(dir, { recursive: true, force: true });
   });
 
+  it("starts node directly and uses a shell only for a Windows .cmd file (a shell broke node at C:\\Program Files on the owner's machine)", () => {
+    expect(mcpb.spawnOptions("C:\\Program Files\\nodejs\\node.exe", "win32")).toEqual({ shell: false });
+    expect(mcpb.spawnOptions("npm.cmd", "win32")).toEqual({ shell: true });
+    expect(mcpb.spawnOptions("NPM.CMD", "win32")).toEqual({ shell: true });
+    expect(mcpb.spawnOptions("npm", "linux")).toEqual({ shell: false });
+    expect(mcpb.spawnOptions(process.execPath, "linux")).toEqual({ shell: false });
+    // The mechanism, reproduced where it can be: a program whose path has a space runs when started directly, and a shell splits it.
+    const dir = path.join(tmp(), "Program Files");
+    fs.mkdirSync(dir);
+    const exe = path.join(dir, "node");
+    fs.symlinkSync(process.execPath, exe);
+    const args = ["-e", "process.exit(7)"];
+    expect(cp.spawnSync(exe, args, mcpb.spawnOptions(exe)).status).toBe(7);
+    expect(cp.spawnSync(exe, args, { shell: true }).status).not.toBe(7);
+    fs.rmSync(path.dirname(dir), { recursive: true, force: true });
+  });
+
   it("installs the production dependencies from the lockfile without running any package script, and compiles from the committed config", () => {
     const source = read("scripts/mcpb.js");
     expect(source).toContain('"ci", "--omit=dev", "--ignore-scripts"');
