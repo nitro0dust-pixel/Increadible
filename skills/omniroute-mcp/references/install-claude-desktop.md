@@ -8,7 +8,7 @@ macOS and Windows. Everything here that I could run is marked **Verified**; ever
 
 | Path | Best for | Needs Node on your PATH | State |
 |---|---|---|---|
-| **A. One-click `.mcpb` package** | most people; Claude Desktop ships its own Node.js | no (only to build the file yourself) | **Verified** up to starting the server from the unpacked file with the manifest's own settings; **NOT VERIFIED** inside Claude Desktop |
+| **A. One-click `.mcpb` package** | most people; Claude Desktop ships its own Node.js | no (only to build the file yourself) | Installs and enables in Claude Desktop on Windows (**Verified** by the owner's screenshots, 2026-10-09). Version 1.0.0 then **failed to answer** in the app; 1.0.1 removes the known causes and is **NOT VERIFIED** until it is retested (section 5.4) |
 | **B. Edit `claude_desktop_config.json`** | developers; works today | yes | **Verified** up to the stdio handshake; **NOT VERIFIED** inside Claude Desktop |
 
 Remote servers are a different mechanism (Settings, Connectors). This server speaks stdio locally; its HTTP mode is for containers
@@ -124,18 +124,18 @@ against Anthropic's documentation on 2026-10-09 ([Build a desktop extension with
 | From CI | open the run of the latest commit on `main` in the repository's Actions tab, and download the artifact `increadible-mcpb` (made by the job *Type-check, lint, build, smoke*) (a zip that holds the `.mcpb`; you need to be signed in to GitHub because the repository is private) | **Verified**: the runs of PR #32 and of `main` uploaded it, and the file built in CI has the same SHA-256 as the one built in the authoring sandbox |
 | From the person who built it | any copy of the file; compare `node scripts/mcpb.js inspect <file>` and the SHA-256 | |
 
-Before you install a file you did not build, check it: `node scripts/mcpb.js inspect increadible-1.0.0.mcpb` lists the problems it
+Before you install a file you did not build, check it: `node scripts/mcpb.js inspect increadible-1.0.1.mcpb` lists the problems it
 finds (a damaged entry, an unsafe file name, a missing manifest or entry point) and prints `mcpb: OK` when there are none.
 
 ### 5.2 Install it
 
 1. Open Claude Desktop. Double-click the `.mcpb` file, or drag it into the window, or open Settings, Extensions,
    Advanced settings, Install Extension and choose it.
-2. Claude Desktop shows an install dialog (what it displays is **NOT VERIFIED** here) and asks for the settings that the manifest declares:
+2. Claude Desktop shows the extension and asks for the settings that the manifest declares (the dialog itself was not seen; the extension page that results was: name, description, an Uninstall button, an Enabled switch, a Configure button, and a red notice that an extension gets access to everything on the computer and that the developer information is not verified by Anthropic):
 
    | Setting | What to enter | Default |
    |---|---|---|
-   | **Data folder** (required) | an existing folder that you back up. The server keeps `rules.yaml`, `experiments.yaml` (optional) and `ab-data.jsonl` there | none: you must choose |
+   | **Data folder** (required) | an existing folder that you back up, for example `D:\Increadible-data` (Windows) or `~/Documents/Increadible-data` (Mac). The server keeps `rules.yaml`, `experiments.yaml` (optional) and `ab-data.jsonl` there | none: you must choose |
    | **Flush every A/B measurement to disk** | leave on unless you have measured that you need the speed (about 0.2 ms per write on a local disk) | on |
 
 3. Confirm, and make sure the extension is switched on. Then do section 6.
@@ -154,7 +154,8 @@ certificate that only the owner can decide on. If Claude Desktop refuses the fil
 | Starts with `node`, with `RULES_FILE`, `EXPERIMENTS_FILE` and `AB_DATA_FILE` inside your data folder and `AB_FSYNC` from the setting | **Verified**: a test unpacks the bundle into a folder whose path contains a space, substitutes the manifest's variables, starts the server from there and checks the handshake, the 13 tools, and that the files land in the chosen folder |
 | Keeps its data across a restart | **Verified** by the same test with a second, fresh process |
 | The gateway answers mock data; no network | by default. The package does **not** offer settings for live API calls or API keys yet: those need `GATEWAY_LIVE_APIS` and `GATEWAY_KEY_<API>` (Path B), and live mode has never been run against a real provider (`GATEWAY.md` is waiting on the owner) |
-| Needs Node 22 or newer at run time | the manifest says `>=22.0.0`; whether Claude Desktop's built-in Node meets it is **NOT VERIFIED**. If Claude Desktop reports a runtime problem, use Path B with your own Node |
+| Needs Node 22 or newer at run time | the manifest says `>=22.0.0`. Claude Desktop starts it with its **built-in Node.js** (**Verified**: its log says "Using built-in Node.js for MCP server"); that Node's version is not known. If Claude Desktop reports a runtime problem, use Path B with your own Node |
+| Starts several copies at once | Claude Desktop starts the server more than once (the chat, and probes for Cowork and Code sessions) and kills copies at will (**Verified** by its log). The server therefore opens the A/B data only on the first A/B tool call (`AB_LAZY_OPEN`, set by the manifest): the handshake and the other tools never depend on the data folder, and a copy that cannot have the data file says so in the one A/B call that needs it |
 
 ### 5.4 What was checked, and what was not
 
@@ -164,8 +165,20 @@ certificate that only the owner can decide on. If Claude Desktop refuses the fil
 | The bundle read by the vendor's `info` and `unpack`, by Python's `zipfile` (checksum of every entry) and by `unzip -t` | **Verified**: all accept it |
 | Two builds of the same commit | **Verified**: identical SHA-256 |
 | The manifest's tool list against what the server lists, and its settings against what the code reads | **Verified** by `tests/mcpb.test.ts` |
-| Claude Desktop installs the file, shows the settings dialog, substitutes `${user_config...}` and `${/}`, and starts the server | **NOT VERIFIED**: needs the app on your machine |
-| The Windows build | **NOT VERIFIED** |
+| Claude Desktop (Windows) installs the file and lists the extension, with an Enabled switch and a Configure button | **Verified** by the owner's screenshots, 2026-10-09 |
+| Claude Desktop substitutes the settings: its Developer page shows `RULES_FILE=D:\Increadible-data\rules.yaml`, `EXPERIMENTS_FILE`, `AB_DATA_FILE` and `AB_FSYNC=true`, and runs `node` on `...\Claude Extensions\local.mcpb.increadible-team.increadible\dist\src\index.js` (a path with a space) | **Verified** (same screenshots): `${user_config...}`, the backslash from `${/}` and the boolean as `true` all came out right |
+| Version 1.0.0 answers the app | **FAILED**. The app's log shows `initialize` sent at 02:17:20 UTC and never answered (the app cancelled it 60 s later: "Request timed out", shown to the user as "didn't respond within a minute"); its probe copies gave up after 4 s each, and one closed during a `server/discover` probe. The cause was not proven. Known suspects, all removed in 1.0.1: opening the data file at start-up (a second copy crashes on the lock; a lock left by a killed copy froze start-up for up to 17 s; a retry loop without a deadline), and the entry check `require.main === module` (false if a launcher loads the file) |
+| Version 1.0.1 answers the app | **NOT VERIFIED**: tested here with the installed bundle and several copies side by side (`tests/mcpb.test.ts`), not in the app. The owner's retest decides |
+| The Windows build (`npm run mcpb` on Windows) | **NOT VERIFIED** |
+
+### 5.5 If the app says "didn't respond within a minute" or "Couldn't start for Cowork and Code sessions"
+
+| Message | Meaning |
+|---|---|
+| "Increadible didn't respond within a minute, so Claude can't use it" (the log: `Request timed out`) | the app sent its first request (`initialize`) and got no answer for 60 s |
+| "Couldn't start for Cowork and Code sessions. ... Version negotiation failed: the connection closed during the server/discover probe" | the app starts a second copy to probe it for Cowork and Code sessions; that copy ended before it answered |
+
+Both were seen with version 1.0.0 (section 5.4). Install version 1.0.1 or later (remove the old extension first if the app does not replace it). If it still happens, open Settings, Developer, choose Increadible, **View logs**, and look for the line `increadible 1.0.1: ready on stdio` (the server writes it to stderr when it starts; whether the app's log shows stderr is not verified): present means our process started and the app is waiting for something else; absent means it never got that far. Send the lines around it.
 
 ## 6. Verify it works
 

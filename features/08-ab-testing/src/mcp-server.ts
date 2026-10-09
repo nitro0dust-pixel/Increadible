@@ -312,11 +312,19 @@ function acquireLock(lockPath: string, waitMs: number): HeldLock {
     if (verdict === "stale") {
       // Move it aside atomically so that of several starters only one removes it.
       const aside = `${lockPath}.stale-${process.pid}-${Date.now()}`;
+      let removed = false;
       try {
         fs.renameSync(lockPath, aside);
         fs.rmSync(aside, { force: true });
+        removed = true;
       } catch {
-        /* someone else took it over first; try again */
+        /* someone else took it over first, or the file is held open by another program (Windows): try again, but not for ever */
+      }
+      if (!removed) {
+        if (Date.now() >= deadline) {
+          throw new Error(`its stale lock (${lockPath}) could not be removed: another program may have it open. If no Increadible process is running, delete the lock file`);
+        }
+        sleepSync(50); // a retry loop that never sleeps would freeze the whole process, and with it the client's handshake
       }
       continue;
     }
@@ -329,7 +337,7 @@ function acquireLock(lockPath: string, waitMs: number): HeldLock {
     if (Date.now() >= deadline) {
       throw new Error(
         `its lock (${lockPath}) is held by ${describeHolder(lockPath)} and was refreshed in the last ` +
-          `${LOCK_STALE_MS / 1000}s, but that process could not be checked from here. If it is really gone, delete the lock file`
+          `${LOCK_STALE_MS / 1000}s, but that process could not be checked from here. A lock left by a process that has stopped expires ${LOCK_STALE_MS / 1000}s after its last refresh: try again then; if it is really gone, you can delete the lock file`
       );
     }
     sleepSync(500); // a crashed holder's lock ages out; wait for it rather than fail a restart
@@ -354,6 +362,7 @@ function acquireLock(lockPath: string, waitMs: number): HeldLock {
 
 /** Flush a file's data to disk; with `dir`, flush the directory entry instead (best effort, not on every OS). */
 function fsyncPath(target: string, dir = false): void {
+  if (dir && process.platform === "win32") return; // Windows cannot flush a directory handle; NTFS journals the entry anyway
   let fd: number | undefined;
   try {
     fd = fs.openSync(target, dir ? "r" : "a");
@@ -1046,15 +1055,30 @@ export function fsyncFromEnv(value: string | undefined): boolean {
   return /^(1|true|yes)$/i.test(value ?? "");
 }
 
-// Initialize framework
-const abTesting = new ABTestingFramework(
-  process.env.EXPERIMENTS_FILE || "./experiments.yaml",
-  process.env.AB_DATA_FILE || undefined,
-  {
-    fsync: fsyncFromEnv(process.env.AB_FSYNC),
-    warnBytes: Number.parseInt(process.env.AB_DATA_WARN_BYTES ?? "", 10) || undefined,
-  }
-);
+/** AB_LAZY_OPEN accepts 1, true or yes (any case). Anything else keeps the default: open the A/B data at start-up. */
+export function lazyOpenFromEnv(value: string | undefined): boolean {
+  return /^(1|true|yes)$/i.test(value ?? "");
+}
+
+// The configuration is read once, here; what it names is opened at start-up (the default) or on the first A/B tool call (AB_LAZY_OPEN).
+const abExperimentsFile = process.env.EXPERIMENTS_FILE || "./experiments.yaml";
+const abDataFile = process.env.AB_DATA_FILE || undefined;
+const abOptions: ABDataOptions = {
+  fsync: fsyncFromEnv(process.env.AB_FSYNC),
+  warnBytes: Number.parseInt(process.env.AB_DATA_WARN_BYTES ?? "", 10) || undefined,
+};
+const abLazy = lazyOpenFromEnv(process.env.AB_LAZY_OPEN);
+
+// Opened at start-up, a data file that is in use by another copy, or cannot be used, ends the whole process before it has said a word.
+// A desktop client starts several copies of one server (the chat, probes, other session types) and kills them at will, so there the
+// handshake and the other tools must not depend on the data file: with AB_LAZY_OPEN nothing is opened until an A/B tool is called, a
+// failure is that one call's error (the next call tries again), and the lock is never waited for inside a call.
+let abTesting: ABTestingFramework | undefined = abLazy ? undefined : new ABTestingFramework(abExperimentsFile, abDataFile, abOptions);
+
+function openABTesting(): ABTestingFramework {
+  if (!abTesting) abTesting = new ABTestingFramework(abExperimentsFile, abDataFile, { ...abOptions, lockWaitMs: 0 });
+  return abTesting;
+}
 
 // Tool: Create experiment
 export const createExperimentTool = {
@@ -1158,7 +1182,7 @@ async function dispatchToolCall(
 ): Promise<string> {
   switch (toolName) {
     case "create_experiment":
-      abTesting.createExperiment({
+      openABTesting().createExperiment({
         traffic_split: 0.5,
         ...toolInput,
       } as Experiment);
@@ -1171,7 +1195,7 @@ async function dispatchToolCall(
         // An object would become "[object Object]" and put every such caller in one bucket.
         throw new Error("user_id must be a string or a number");
       }
-      return JSON.stringify(abTesting.assignVariant(toolInput.experiment_id, user === undefined || user === null ? undefined : String(user)));
+      return JSON.stringify(openABTesting().assignVariant(toolInput.experiment_id, user === undefined || user === null ? undefined : String(user)));
     }
 
     case "record_metric": {
@@ -1179,13 +1203,13 @@ async function dispatchToolCall(
       mustBeString(toolInput.variant_id, "variant_id");
       const m = toolInput.metrics;
       if (!m || typeof m !== "object" || Array.isArray(m)) throw new Error("metrics must be an object of numbers, such as {\"cost\": 0.02}");
-      abTesting.recordMetric(toolInput.experiment_id, toolInput.variant_id, m);
+      openABTesting().recordMetric(toolInput.experiment_id, toolInput.variant_id, m);
       return JSON.stringify({ status: "recorded" });
     }
 
     case "get_experiment_results": {
       mustBeString(toolInput.experiment_id, "experiment_id");
-      const results = abTesting.getExperimentResults(toolInput.experiment_id);
+      const results = openABTesting().getExperimentResults(toolInput.experiment_id);
       // Every other tool answers an unknown experiment with an error; "null" looked like a result.
       if (results === null) throw new Error(`Experiment not found: ${toolInput.experiment_id}`);
       return JSON.stringify(results);
@@ -1193,9 +1217,9 @@ async function dispatchToolCall(
 
     case "recommend_winner":
       mustBeString(toolInput.experiment_id, "experiment_id");
-      if (!abTesting.hasExperiment(toolInput.experiment_id)) throw new Error(`Experiment not found: ${toolInput.experiment_id}`);
+      if (!openABTesting().hasExperiment(toolInput.experiment_id)) throw new Error(`Experiment not found: ${toolInput.experiment_id}`);
       return JSON.stringify({
-        recommendation: abTesting.recommendWinner(toolInput.experiment_id),
+        recommendation: openABTesting().recommendWinner(toolInput.experiment_id),
       });
 
     default:

@@ -29,7 +29,7 @@ curl localhost:3000/health
 
 Config via env: `PORT` (3000), `HOST` (0.0.0.0 in the image, 127.0.0.1 otherwise), `AUTH_TOKEN`,
 `RULES_FILE` (/data/rules.yaml), `EXPERIMENTS_FILE` (/data/experiments.yaml), `AB_DATA_FILE`
-(/data/ab-data.jsonl), and optionally `AB_FSYNC` (`1` flushes every A/B append to disk; off in the image, on in the manifests) and `AB_DATA_WARN_BYTES`
+(/data/ab-data.jsonl), and optionally `AB_FSYNC` (`1` flushes every A/B append to disk; off in the image, on in the manifests), `AB_LAZY_OPEN` (`1` opens the A/B data on the first A/B tool call instead of at start-up: for desktop clients, **off in the image and the manifests**, where a second copy on the volume must be refused at once) and `AB_DATA_WARN_BYTES`
 (growth warning, default 104857600). The HTTP hardening settings are in "HTTP hardening" below. Mount a volume at `/data` to keep edited rules and A/B data across container restarts
 (`docker run -v increadible-data:/data ...`). Without a volume, A/B data is lost when the container is removed.
 
@@ -87,6 +87,7 @@ Verification and limits:
   shared volume), not against a hostile or clock-skewed environment. If two processes race for the same stale lock at the same
   instant both can win; each write re-checks the lock and fails with `lock was lost` if it was taken, which keeps the data
   from interleaving. Keep one replica (`strategy: Recreate`, `ReadWriteOnce`), as the manifests do.
+- **A client that starts several copies (Claude Desktop).** A copy that cannot take the lock at start-up exits at once (a live holder) or waits up to 17 s without answering (a lock it cannot check), and the client's first request then times out. With `AB_LAZY_OPEN=1` nothing is opened until an A/B tool is called: the handshake and the routing and gateway tools always answer, and a held or unusable data file is the error of that one A/B call (the next call tries again; the lock is never waited for inside a call). Do not set it for a container: there a second copy on the volume should not start. On Windows the data folder itself is not flushed (it cannot be; the file is).
 - **Flushing.** Without `AB_FSYNC` an acknowledged write survives a process crash but may be lost in an OS crash or power
   loss. `AB_FSYNC=1` flushes every append before the call returns (and the new file's directory entry), at the cost of one
   disk flush per write: **measured at about 0.2 ms per write on a local disk**, which cuts the write ceiling from about 22 000 to about
