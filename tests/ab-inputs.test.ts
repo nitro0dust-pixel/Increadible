@@ -79,6 +79,14 @@ describe("record_metric rejects a metric the experiment does not define (AB-5)",
     expect(() => fw.recordMetric("e", "A", { cost: 1 })).not.toThrow(); // a measurement may carry only some of the metrics
   });
 
+  it("names the variants it does define when the variant is unknown", () => {
+    const fw = new ABTestingFramework(none);
+    fw.createExperiment(exp());
+    // A model that guessed "control" learns the real ids from the error instead of calling assign_variant (seen 2026-10-09).
+    expect(() => fw.recordMetric("e", "control", { cost: 1 })).toThrow("Variant control is not part of experiment e: its variants are A, B");
+    expect(() => fw.recordMetric("e", "B", { cost: 1 })).not.toThrow();
+  });
+
   it("a rejected measurement is not counted as a sample", () => {
     const fw = new ABTestingFramework(none);
     fw.createExperiment(exp());
