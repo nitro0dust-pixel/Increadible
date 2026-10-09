@@ -89,7 +89,7 @@ Details and defaults: `README.md` and `DEPLOYMENT.md`.
 
 ## Resume point
 
-`ROADMAP.md` lists what is done, what is blocked on the owner (cluster, scanner choice, default branch, rate limit, release tag) and the
+`ROADMAP.md` lists what is done, what is blocked on the owner (cluster, image scanner choice, rate limit, security contact) and the
 unscheduled backlog. Start from its "Open decisions" and "Backlog".
 
 Account handover (2026-10-09): the first Claude Pro account reached its weekly limit and the work continued under the second; the handover is complete (`ROADMAP.md`, "Session continuity"; the full account in `docs/BUILD-HISTORY.md`, section 4).

@@ -19,16 +19,16 @@ Features #1 to #6 (`features/01` to `06`) are third-party submodules. They run b
 
 | Item | State |
 |---|---|
-| Last recorded: 2026-10-09 | `main` includes PR #39 (owner decisions; version 1.0.2 verified in Claude Desktop) after PR #38 (the Windows build fix) and PR #36 (version 1.0.2); PR #40 re-verified everything and records #38 and #39 |
-| Last merged PR | #39 |
-| Open PR / handover | the re-verification and record of PRs #38 and #39 (PR #40). Handover from the Claude Pro account `hsharma.gxi@gmail.com` (weekly limit reached on 2026-10-09) to `ashiurvi786@gmail.com`: **complete** (`references/roadmap.md`, "Session continuity") |
-| Tests | `main` at PR #39: 24 suites, 870 passed, 6 todo; CI green, `main` run 37997988270; clean room of `4cd722c` on Node 22.22.0 |
+| Last recorded: 2026-10-09 | `main` includes PR #40 (re-verification and its fixes) after PR #39 (owner decisions; 1.0.2 verified in Claude Desktop); first release **`v1.0.2`** tagged on `64cdefb`; PR #41 records it |
+| Last merged PR | #40 |
+| Open PR / handover | PR #41 (records PR #40 and the `v1.0.2` release); Dependabot PR #29 (owner's call). Handover from `hsharma.gxi@gmail.com` (weekly limit reached on 2026-10-09) to `ashiurvi786@gmail.com`: **complete** |
+| Tests | `main` at PR #40: 24 suites, 870 passed, 6 todo; CI green, `main` run 37999141326 (pull-by-digest probe read) |
 | Audit | done: `references/audit.md` (7 parts; mutation testing 78.7% to 90.0%, every remaining mutant read) |
 | Container image | built, probed, pushed to GHCR (private), pulled back by digest and probed again, in CI |
 | Production / cluster | **NOT DONE**: needs the owner's explicit approval and a cluster target |
 | Installed in the owner's Claude Desktop | **YES, version 1.0.2 answers** (owner, Windows, 2026-10-09): built locally (SHA-256 `3594d5fd...`), installed, and `get_api_stats` answered in a chat; the app accepted the 1.0.2 tool list. 1.0.0 had installed but never answered. Also working in the app: `discover_apis`, `create_experiment` (duplicate refused), `assign_variant`, `get_experiment_results`, and `record_metric`'s errors; an experiment's definition survives a restart. Not yet verified: a recorded measurement surviving a restart; 7 tools not exercised in the app |
 | One-click `.mcpb` package | **merged** (PR #32, fixed by PR #34 as version 1.0.1, SHA-256 `bc24224c...`; schemas added by PR #36 as version 1.0.2, SHA-256 `3594d5fd...`): `npm run mcpb`, or the CI artifact `increadible-mcpb`; manifest accepted by the vendor's validator; started from the unpacked bundle in a test; CI-built bytes equal the sandbox build. **Claude Desktop installs and runs version 1.0.2: verified** by the owner on Windows, 2026-10-09 (`references/install-claude-desktop.md`, section 5.4) |
-| Owner decisions open | code signing; gateway direction (option A expanded in `docs/GATEWAY-GATED-CATALOG.md`); security contact; cluster target; image scanner; rate limit; latency alert threshold. **Decided 2026-10-09:** license proprietary (`UNLICENSED`, all rights reserved) and the secret scanner pinned by digest (PR #39); default branch `main` (switched by the owner, verified); release tag after a verified install: the install is now verified (1.0.2) |
+| Owner decisions open | code signing; gateway direction (option A expanded in `docs/GATEWAY-GATED-CATALOG.md`); security contact; cluster target; image scanner; rate limit; latency alert threshold. **Decided 2026-10-09:** license proprietary (`UNLICENSED`, all rights reserved) and the secret scanner pinned by digest (PR #39); default branch `main` (switched by the owner, verified); release `v1.0.2` tagged on `64cdefb` (pushed by the owner, verified through the API) |
 
 ## Operating rules (non-negotiable)
 
