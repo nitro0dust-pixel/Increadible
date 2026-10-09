@@ -51,7 +51,7 @@ npm run smoke          # starts the built server over stdio and HTTP and checks 
 The repository is private: Git asks you to sign in. The vendored projects under `features/01` to `06` are git submodules and are not
 needed to build or run the server; skip `--recurse-submodules`.
 
-**Verified** (Linux, Node 22.22.0 and 24.21.0, clean rooms of commit `3f80648`; and CI on Node 24): `npm ci`, type-check, lint, tests, build, smoke.
+**Verified** (Linux, Node 22.22.0 and 24.21.0, clean rooms of commit `5a38263`; and CI on Node 24): `npm ci`, type-check, lint, tests, build, smoke.
 **NOT VERIFIED**: Windows (`npm run build`, `type-check`, `lint` and `test` are expected to work in PowerShell; the `.sh` scripts
 need Git Bash or WSL, `ROADMAP.md` item 7).
 
@@ -168,6 +168,7 @@ certificate that only the owner can decide on. If Claude Desktop refuses the fil
 | Claude Desktop (Windows) installs the file and lists the extension, with an Enabled switch and a Configure button | **Verified** by the owner's screenshots, 2026-10-09 |
 | Claude Desktop substitutes the settings: its Developer page shows `RULES_FILE=D:\Increadible-data\rules.yaml`, `EXPERIMENTS_FILE`, `AB_DATA_FILE` and `AB_FSYNC=true`, and runs `node` on `...\Claude Extensions\local.mcpb.increadible-team.increadible\dist\src\index.js` (a path with a space) | **Verified** (same screenshots): `${user_config...}`, the backslash from `${/}` and the boolean as `true` all came out right |
 | Version 1.0.0 answers the app | **FAILED**. The app's log shows `initialize` sent at 02:17:20 UTC and never answered (the app cancelled it 60 s later: "Request timed out", shown to the user as "didn't respond within a minute"); its probe copies gave up after 4 s each, and one closed during a `server/discover` probe. The cause was not proven. Known suspects, all removed in 1.0.1: opening the data file at start-up (a second copy crashes on the lock; a lock left by a killed copy froze start-up for up to 17 s; a retry loop without a deadline), and the entry check `require.main === module` (false if a launcher loads the file) |
+| Version 1.0.1 built in CI equals the one built here | **Verified**: SHA-256 `bc24224c6876a7e17377283a10518b1edd30ab4377927e782f4d7387fd13ea81` from the PR run 37878004117 and from a build of the merged tree |
 | Version 1.0.1 answers the app | **NOT VERIFIED**: tested here with the installed bundle and several copies side by side (`tests/mcpb.test.ts`), not in the app. The owner's retest decides |
 | The Windows build (`npm run mcpb` on Windows) | **NOT VERIFIED** |
 
