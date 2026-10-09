@@ -74,8 +74,15 @@ function problems(manifest = readJson(manifestFile), pkg = readJson(path.join(ro
 }
 
 const npm = process.platform === "win32" ? "npm.cmd" : "npm";
+/**
+ * A shell only where one is required: Node refuses to start a Windows .cmd file (npm.cmd) without one. Everything else starts
+ * directly, because a shell joins the command line unquoted and a path with a space ("C:\\Program Files\\nodejs\\node.exe") breaks.
+ */
+function spawnOptions(command, platform = process.platform) {
+  return { shell: platform === "win32" && /\.cmd$/i.test(command) };
+}
 function run(command, args, cwd) {
-  const r = cp.spawnSync(command, args, { cwd, encoding: "utf8", shell: process.platform === "win32", maxBuffer: 1 << 26 });
+  const r = cp.spawnSync(command, args, { cwd, encoding: "utf8", ...spawnOptions(command), maxBuffer: 1 << 26 });
   if (r.status !== 0) throw new Error(`${command} ${args.join(" ")} failed (${r.status}):\n${(r.stdout || "") + (r.stderr || "")}`.slice(0, 4000));
 }
 
@@ -219,4 +226,4 @@ if (require.main === module) {
     process.exit(1);
   }
 }
-module.exports = { problems, build, inspect, files, EXCLUDE };
+module.exports = { problems, build, inspect, files, EXCLUDE, spawnOptions };
