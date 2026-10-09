@@ -19,10 +19,10 @@ Features #1 to #6 (`features/01` to `06`) are third-party submodules. They run b
 
 | Item | State |
 |---|---|
-| Last recorded: 2026-10-09 | `main` includes PR #29 (Dependabot: secret-scanner action 3.99.0, image still pinned by digest) after PR #41 (records PR #40 and the release); first release **`v1.0.2`** tagged on `64cdefb`; PR #42 records #29 |
-| Last merged PR | #29 |
-| Open PR / handover | PR #42 (records PR #29 and the `main` CI runs after #41 and #29). Handover from `hsharma.gxi@gmail.com` (weekly limit reached on 2026-10-09) to `ashiurvi786@gmail.com`: **complete** |
-| Tests | `main` at PR #29: 24 suites, 870 passed, 6 todo; CI green, `main` run 38000233078 (pull-by-digest probe read); a second push to `main` waits instead of being cancelled (observed) |
+| Last recorded: 2026-10-09 | `main` includes PR #42 (records #29; history tests in merge order) after PR #29 (Dependabot: secret-scanner action 3.99.0, image still pinned by digest); first release **`v1.0.2`** tagged on `64cdefb`; PR #42 recorded #29; the release procedure (`references/releasing.md`) is in the next PR |
+| Last merged PR | #42 |
+| Open PR / handover | the release-procedure PR (`docs/RELEASING.md`; records PR #42). **Next release must be 1.0.3 or later**: `main` still says 1.0.2 but builds a different file (`2cdbf12f...`) from the tagged `v1.0.2` (`3594d5fd...`). Handover from `hsharma.gxi@gmail.com` (weekly limit reached on 2026-10-09) to `ashiurvi786@gmail.com`: **complete** |
+| Tests | `main` at PR #42: 24 suites, 870 passed, 6 todo; CI green on the PR head (run 38000787676); last `main` run read: 38000233078 (pull-by-digest probe read); a second push to `main` waits instead of being cancelled (observed) |
 | Audit | done: `references/audit.md` (7 parts; mutation testing 78.7% to 90.0%, every remaining mutant read) |
 | Container image | built, probed, pushed to GHCR (private), pulled back by digest and probed again, in CI |
 | Production / cluster | **NOT DONE**: needs the owner's explicit approval and a cluster target |
@@ -119,3 +119,4 @@ These steps are Path B (the config file): verified only up to the handshake, **N
 | `references/audit.md` | what was found, fixed and left open; the mutation-testing method |
 | `references/security.md` | security posture, gaps, reporting |
 | `references/gateway.md` | the proposed universal-gateway decision (waiting on the owner) |
+| `references/releasing.md` | making a release: version bump, the package's SHA-256 from two builds, the owner's tag, the check |

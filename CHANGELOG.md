@@ -16,6 +16,7 @@ Entries marked **behaviour change** can affect an existing deployment.
 - **Documents that still called version 1.0.2 untested in Claude Desktop** (`docs/USING-THE-GATEWAY.md`, `docs/INSTALL-CLAUDE-DESKTOP.md`, `docs/TROUBLESHOOTING.md`, `SECURITY.md`, `CLAUDE.md`, the skill): corrected after the owner's verification; the time-bound 1.0.1 roll-back section is removed. ([#40](https://github.com/nitro0dust-pixel/Increadible/pull/40))
 
 ### Added
+- `docs/RELEASING.md`: how a version becomes a release (version bump, CHANGELOG, two builds that must give the same package SHA-256, the check in Claude Desktop, the owner's tag, the tag check, the records), written from the `v1.0.2` release. It records that `main` still says 1.0.2 but builds a different file from the tagged `v1.0.2`, so the next release is 1.0.3 or later.
 - `docs/GATEWAY-GATED-CATALOG.md`: option A of `GATEWAY.md` (the gated catalog) as components and an order of work. **Proposed, not built**; drafted in a separate session from the owner's local copy and corrected against `main` (four statements were wrong, listed in its section 8). ([#39](https://github.com/nitro0dust-pixel/Increadible/pull/39))
 
 ### Changed
