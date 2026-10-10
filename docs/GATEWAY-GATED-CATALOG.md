@@ -126,7 +126,10 @@ seed sources (offline) -> candidate store -> gate pipeline -> registry (gated on
   `gates` field (status, auth class, sign-off dates, terms address, probe path, contract test, live evidence; no probe history yet).
 - [x] Retries for live calls: **none for now, decided by the owner on 2026-10-10** (step 2).
 - [x] The first new APIs to gate: **one category's keyless HTTPS candidates, decided by the owner on 2026-10-10**
-  ([`GATEWAY-CANDIDATES.md`](GATEWAY-CANDIDATES.md), section 3). Which category: not chosen yet.
+  ([`GATEWAY-CANDIDATES.md`](GATEWAY-CANDIDATES.md), section 3). **Category: Cryptocurrency** (owner, 2026-10-10: the most keyless
+  HTTPS candidates, 36, and CoinGecko already answered live); **first five: CoinCap, CoinPaprika, CoinLore, DefiLlama, Mempool**
+  (proposed in the session, accepted by the owner the same day). Their gate proposals are in
+  `features/09-api-gateway/data/gate-proposals.json` (section 9).
 
 ## 7. Not verified
 
@@ -142,3 +145,21 @@ seed sources (offline) -> candidate store -> gate pipeline -> registry (gated on
 | The gaps are in a "Known limitations" section of `ROADMAP.md` | No such section; they are in `ROADMAP.md`, Backlog, "Gateway live mode", and in `DEPLOYMENT.md` |
 | `DEPLOYMENT.md` assumes an egress allowlist | `DEPLOYMENT.md` says no NetworkPolicy exists, so a pod can reach any host: a gap, not an assumption |
 | How the registry is loaded is unknown | It was hard-coded in `initializeAPIRegistry()`; step 1 therefore included a code change, not only new records (done in step 1a) |
+
+## 9. The first batch: five gate proposals waiting for the owner
+
+`features/09-api-gateway/data/gate-proposals.json` holds a proposed base URL, auth class, documentation link and health probe for
+CoinCap, CoinPaprika, CoinLore, DefiLlama and Mempool, and one thing to check first for each. **Every value was written from memory**:
+the sandbox cannot reach the providers or their documentation. They are proposals: read by no server code, not in `catalog.ts`, not
+listed or callable (`tests/gateway-candidates.test.ts`). An API moves into `catalog.ts` only after:
+
+1. **Gates 1 and 2, the owner:** check the base URL and that no key is needed against the official documentation, then sign off
+   (name and date). CoinCap first: its keyless v2 API may have been retired for a keyed v3, which would take it out of this batch.
+2. **Gate 3, terms:** licence, attribution, commercial use and rate limit, with the page's URL and the date read, signed off.
+   The owner's other assistant can fetch the pages; this session records what it is given.
+3. **Gates 4 and 6, probe and contract:** the probe's check is added to `probes.ts` and `scripts/record-contracts.js` records one
+   real answer on a machine that reaches the provider; the contract test replays it in CI.
+4. **Rate limit:** a `GATEWAY_RATE_LIMITS` value from the terms, before the API is switched to live.
+
+Only then is the entry added to `catalog.ts`, as `gated`. Until that change, nothing about these five is visible to a client.
+
