@@ -155,7 +155,7 @@ First enabled rule whose `match` fits wins; an empty `match` matches everything.
 **API gateway:** the registry has 9 APIs (weather, finance, news, reference, sports). By default `call_api`
 returns **generated mock data** and makes no network calls (every `call_api` result and every successful `aggregate_apis` item says `"source": "mock"`). Real HTTP calls are **opt-in per
 API**: set `GATEWAY_LIVE_APIS` to a comma-separated list of API ids (or `*`); `GATEWAY_TIMEOUT_MS`, `GATEWAY_MAX_RESPONSE_BYTES` and
-`GATEWAY_USER_AGENT` tune them, and the four key-based APIs read their key from `GATEWAY_KEY_<API>` (names and the security rules in
+`GATEWAY_USER_AGENT` tune them, `GATEWAY_RATE_LIMITS` (e.g. `coingecko=30`) caps the live calls per API per rolling minute (no limit unless set), and the four key-based APIs read their key from `GATEWAY_KEY_<API>` (names and the security rules in
 `DEPLOYMENT.md`). In the Claude Desktop package (1.0.3 and later) the same switch is the setting **Live APIs (real calls)**, empty by default
 (`docs/INSTALL-CLAUDE-DESKTOP.md`, section 5.3). Live mode was tested against a local HTTP server, and against the real providers only for the four keyless APIs (one call each from Claude Desktop, 2026-10-10); the key-based APIs have **never run live**. Results are cached for 5 minutes, at most 500 results and about 16 MiB (the oldest go first). At most 10 live calls run at once across the gateway, up to 100 more wait for a slot and anything beyond that is refused at once; an `aggregate_apis` request takes up to 100 calls and a call that fails holds its own `{error}` in the result instead of failing the request.
 

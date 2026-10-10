@@ -80,6 +80,11 @@ seed sources (offline) -> candidate store -> gate pipeline -> registry (gated on
        providers, summarised, signed off).
    Output of step 1: nine gated records, each with a pinned URL, an auth class, terms and a probe history.
 2. **Per-API rate limit and a retry policy** (both open in `ROADMAP.md`), before more APIs are switched to live.
+   - **Rate limit: the mechanism is built** (`GATEWAY_RATE_LIMITS`, e.g. `coingecko=30`: live calls per API in any rolling minute;
+     a call over it is refused before it reaches the provider and counted as `rate_limited` in `get_api_stats`). **No limit is
+     set**: the values depend on each provider's terms, which are not read yet (step 1b), so they are the owner's decision.
+   - **Retry policy: not built.** A retry sends a second request to a provider on the operator's behalf; whether to retry, on
+     which errors, and how often, needs a proposal and the owner's decision.
 3. **Egress allowlist at deploy time**: a NetworkPolicy limited to the pinned hosts. None exists today (`DEPLOYMENT.md`); it is a prerequisite for live mode in a cluster.
 4. **Seed import** from the catalogues, as candidates only.
 5. **Promote keyless APIs first** (coingecko, hackernews, wikipedia, wikidata), probed from a machine that can reach the providers, before any cluster.

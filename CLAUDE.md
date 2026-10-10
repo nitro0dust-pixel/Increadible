@@ -65,7 +65,7 @@ image by digest and probes it again. The package `ghcr.io/nitro0dust-pixel/incre
 Configuration (names only; values come from the environment, never commit them): `PORT`, `HOST`, `AUTH_TOKEN`,
 `ALLOW_UNAUTHENTICATED`, `RULES_FILE`, `EXPERIMENTS_FILE`, `AB_DATA_FILE`, `AB_FSYNC`, `AB_LAZY_OPEN`, `AB_DATA_WARN_BYTES`,
 `HTTP_HEADERS_TIMEOUT_MS`, `HTTP_REQUEST_TIMEOUT_MS`, `RATE_LIMIT_PER_MINUTE`, `SHUTDOWN_DRAIN_MS`, `SHUTDOWN_TIMEOUT_MS`,
-`GATEWAY_LIVE_APIS`, `GATEWAY_TIMEOUT_MS`, `GATEWAY_MAX_RESPONSE_BYTES`, `GATEWAY_USER_AGENT` (and one `GATEWAY_KEY_<API>` per key-based API, named in `DEPLOYMENT.md`).
+`GATEWAY_LIVE_APIS`, `GATEWAY_TIMEOUT_MS`, `GATEWAY_MAX_RESPONSE_BYTES`, `GATEWAY_USER_AGENT`, `GATEWAY_RATE_LIMITS` (and one `GATEWAY_KEY_<API>` per key-based API, named in `DEPLOYMENT.md`).
 Details and defaults: `README.md` and `DEPLOYMENT.md`.
 
 ## Working rules that have paid for themselves

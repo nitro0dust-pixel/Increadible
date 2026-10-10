@@ -13,7 +13,7 @@ Open a new chat and type:
 
 `Use the increadible tool get_api_stats.`
 
-A fresh server answers JSON that starts `{"total_calls":0,` and ends `"live_apis":[]}`. If Claude says it has no such tool, see `docs/TROUBLESHOOTING.md`.
+A fresh server answers JSON that starts `{"total_calls":0,` and, up to version 1.0.3, ends `"live_apis":[]}`; from the next version it ends `"rate_limits":{},"rate_limited":0}`. If Claude says it has no such tool, see `docs/TROUBLESHOOTING.md`.
 
 ## Step 1: find the API id (tool `discover_apis`)
 
@@ -52,7 +52,7 @@ An answer has the shape `{"data": <the answer>, "source": "mock", "cached": fals
 
 `Use the increadible tool get_api_stats and explain each number.`
 
-Real example after two identical Bitcoin calls in a fresh server: `{"total_calls":2,"successful":1,"failed":0,"cache_hit_rate":"0.50","api_distribution":{"coingecko":1},"cached_items":1,"cache_evictions":0,"live_calls":0,"live_apis":[]}`
+Real example (version 1.0.3, before the two rate-limit fields) after two identical Bitcoin calls in a fresh server: `{"total_calls":2,"successful":1,"failed":0,"cache_hit_rate":"0.50","api_distribution":{"coingecko":1},"cached_items":1,"cache_evictions":0,"live_calls":0,"live_apis":[]}`
 
 | Field | Meaning |
 |---|---|
@@ -62,6 +62,7 @@ Real example after two identical Bitcoin calls in a fresh server: `{"total_calls
 | `cache_hit_rate` | Text such as `"0.50"`: cache hits divided by `total_calls` |
 | `api_distribution` | Fresh successes per API |
 | `cached_items`, `cache_evictions` | Entries held now (may include expired ones), and entries pushed out because the cache was full |
+| `rate_limits`, `rate_limited` | (after 1.0.3) The per-API limits of live calls per minute set by the operator (`GATEWAY_RATE_LIMITS`; `{}` when none, which is the default and the extension's), and the live calls refused by them before reaching the provider |
 | `live_calls`, `live_apis` | Real network calls made, and the APIs switched to live: `[]` in the extension as installed (Live APIs empty); with live calls on, the ids, or the single value `"*"` when everything is live |
 
 The counters live in the memory of one server process and start at 0 after every restart. Claude Desktop starts several copies and stops them at will (`docs/INSTALL-CLAUDE-DESKTOP.md`, section 5.3), so ask for the statistics in the same chat, soon after your calls. A zero after calls means the server process was restarted, or you are talking to another copy. That a chat's calls and its statistics can reach different copies was **not observed in Claude Desktop (NOT VERIFIED)**; it is an inference.
