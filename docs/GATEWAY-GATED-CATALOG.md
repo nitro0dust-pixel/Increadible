@@ -85,7 +85,10 @@ seed sources (offline) -> candidate store -> gate pipeline -> registry (gated on
      set**: the values depend on each provider's terms, which are not read yet (step 1b), so they are the owner's decision.
    - **Retry policy: not built.** A retry sends a second request to a provider on the operator's behalf; whether to retry, on
      which errors, and how often, needs a proposal and the owner's decision.
-3. **Egress allowlist at deploy time**: a NetworkPolicy limited to the pinned hosts. None exists today (`DEPLOYMENT.md`); it is a prerequisite for live mode in a cluster.
+3. **Egress allowlist at deploy time**: a NetworkPolicy limited to the pinned hosts; a prerequisite for live mode in a cluster.
+   - **Written, NOT VERIFIED on a cluster** (`DEPLOYMENT.md`, "Egress"): the deployment manifests allow DNS only; `k8s/egress-live-cilium.yaml`
+     allows HTTPS to the four keyless providers by host name, on Cilium only, because standard NetworkPolicy cannot name hosts.
+     A test holds the host list to the catalog's keyless APIs. Other network plugins need an egress proxy: not built.
 4. **Seed import** from the catalogues, as candidates only.
 5. **Promote keyless APIs first** (coingecko, hackernews, wikipedia, wikidata), probed from a machine that can reach the providers, before any cluster.
 6. **A/B measurement** of cost (primary) and quality (guardrail) on a real workload. Blocked until a real workload exists.

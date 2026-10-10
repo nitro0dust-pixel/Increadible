@@ -1,0 +1,44 @@
+# Egress for live gateway calls, by host name: HTTPS to the four keyless providers only (the APIs verified live on
+# 2026-10-10). Opt-in, and only for a cluster whose network plugin is Cilium: standard NetworkPolicy matches IP addresses,
+# not names, and these providers sit behind CDNs whose addresses change. Apply it in the deployment's namespace together
+# with setting GATEWAY_LIVE_APIS, never on its own:
+#
+#   kubectl -n increadible apply -f k8s/egress-live-cilium.yaml
+#
+# Cilium adds policies together, so this widens the DNS-only NetworkPolicy `increadible-egress` (in the deployment
+# manifests) by exactly these hosts on port 443. The DNS rule sends lookups through Cilium's DNS proxy, which is how it
+# learns the addresses behind the names. Switching a key-based API to live needs its host added here (the hosts are in
+# DEPLOYMENT.md, "API gateway: live calls"); tests/config.test.ts holds this list to the catalog.
+#
+# NOT VERIFIED: never applied to a cluster (none is available to this project). Without Cilium the kind below does not
+# exist and `kubectl apply` refuses it; nothing else changes. On another plugin, use an egress proxy or the plugin's own
+# name-based policy instead.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: increadible-egress-live
+spec:
+  endpointSelector:
+    matchLabels:
+      app: increadible
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: ANY
+          rules:
+            dns:
+              - matchPattern: "*"
+    - toFQDNs:
+        - matchName: api.coingecko.com
+        - matchName: hacker-news.firebaseio.com
+        - matchName: en.wikipedia.org
+        - matchName: www.wikidata.org
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
