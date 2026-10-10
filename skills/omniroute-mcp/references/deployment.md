@@ -167,7 +167,7 @@ live) and 3 (a client connected end to end) each need the owner's approval.
 | Setting | Value | Why |
 |---|---|---|
 | Project, service | `increadible-rehearsal`, service `increadible` (its own project, apart from the owner's others) | nothing else shares it |
-| Source | this repository, **pinned to commit `916206f`** (`v1.0.3`), built from the `Dockerfile` | a push to `main` does not redeploy it |
+| Source | this repository, set to commit `916206f` (`v1.0.3`), built from the `Dockerfile` | **the pin does not hold for every redeploy**: on 2026-10-10 a redeploy caused by changing variables built the head of `main` (`aa0d616`) although the service still showed the pin; its build inputs (`src`, `features/07-09/src`, `Dockerfile`, `package*.json`, `tsconfig*.json`, `scripts/clean.js`, `LICENSE`, `.dockerignore`) were identical to `916206f`'s, and the service was then redeployed from `916206f` explicitly. Check the commit of the running deployment after any change |
 | Replicas | 1 | the A/B data file has one writer |
 | Volume | `increadible-data` at `/data` | `RULES_FILE`, `EXPERIMENTS_FILE`, `AB_DATA_FILE` already point there (`Dockerfile`) |
 | Variables | `AUTH_TOKEN` (64 random hex characters, set on the service, never printed or committed), `PORT=3000`, `AB_FSYNC=1`, `RAILWAY_RUN_UID=0` | the server refuses to start on `0.0.0.0` without a token; durable writes as in the manifests |
