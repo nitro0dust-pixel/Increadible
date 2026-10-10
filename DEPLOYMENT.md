@@ -142,9 +142,21 @@ server, and the URL rule also against 60 000 random hostile endpoints):
 - what one caller can make the gateway hold or start is bounded: the result cache keeps at most 500 entries and about 16 MiB (the oldest go first; before this, every distinct call added an entry for good, and 2 000 calls with 200 KB of params held 385 MB of heap against the manifests' 256Mi limit), at most 10 live calls run at once and 100 more may wait (a call beyond that is refused with `the gateway is busy`), and one `aggregate_apis` request takes at most 100 calls and runs five of them at a time (it used to start every call it was given at once: 5 000 requested, 5 000 started together).
 
 **NOT VERIFIED:** any real provider (the authoring sandbox cannot reach them; the tests use a local server, and for the built-in registry a mocked `fetch`); each provider's
-terms of service and rate limits (a per-API limiter exists, `GATEWAY_RATE_LIMITS`, but no limit is set, because no provider's limit was read; `RATE_LIMIT_PER_MINUTE` is global and off); **egress**: no NetworkPolicy exists, so a pod can reach any host.
-Before enabling live calls in a cluster, add an egress policy that allows DNS and only the registered hosts: api.openweathermap.org, api.weatherapi.com, api.coingecko.com,
-finnhub.io, newsapi.org, hacker-news.firebaseio.com, en.wikipedia.org, www.wikidata.org, www.thesportsdb.com.
+terms of service and rate limits (a per-API limiter exists, `GATEWAY_RATE_LIMITS`, but no limit is set, because no provider's limit was read; `RATE_LIMIT_PER_MINUTE` is global and off).
+
+**Egress (outbound connections)**, in two layers; both are **NOT VERIFIED on a cluster** (none is available to this project), only checked by `tests/egress-policy.test.ts`:
+
+| Layer | File | What it allows | Where it works |
+|---|---|---|---|
+| Always | the NetworkPolicy `increadible-egress` in `k8s/staging-deployment.yaml` and `k8s/production-deployment.yaml` | DNS (port 53, UDP and TCP) and nothing else. Live calls are off in these manifests, so the server needs no outbound connection; one that is tried anyway is refused by the cluster. Ingress is not restricted by it | any network plugin that enforces NetworkPolicy (some, such as plain flannel, ignore it silently) |
+| With live calls | `k8s/egress-live-cilium.yaml`, a `CiliumNetworkPolicy` applied with `kubectl -n <namespace> apply -f`, together with setting `GATEWAY_LIVE_APIS` | HTTPS (443) to exactly the four keyless providers: api.coingecko.com, hacker-news.firebaseio.com, en.wikipedia.org, www.wikidata.org | **Cilium only.** Standard NetworkPolicy matches IP addresses, not host names, and these providers sit behind CDNs whose addresses change. On another plugin, use an egress proxy or that plugin's name-based policy |
+
+Without the second layer, the first one refuses every live call, so turning live calls on in a cluster is a deliberate two-part change. The DNS rule is open to any destination (not only the
+cluster's resolver) so that NodeLocal DNSCache and differently labelled resolvers keep working; DNS itself remains a channel a compromised process could misuse, which no policy here closes.
+Switching a key-based API to live needs its host added to the Cilium policy (a test holds the list to the catalog's keyless APIs, so that change is deliberate too). The other registered hosts
+are api.openweathermap.org, api.weatherapi.com, finnhub.io, newsapi.org and www.thesportsdb.com.
+Beyond the tests, both kinds were decoded once (2026-10-10, in a scratch Go program, not in CI) with the projects' own types, rejecting unknown fields: the NetworkPolicies with `k8s.io/api` v0.31.0 (`networking/v1`), the Cilium policy with `github.com/cilium/cilium` v1.16.5 (`cilium.io/v2`) and its rule parser; all passed, and a misspelt field and an invalid host name were each refused. That checks the shape, not a cluster's behaviour.
+**Railway** has no egress policy: there the evidence is its DNS log, which showed only the four keyless providers' hosts (section "Railway").
 
 ### Software bill of materials
 

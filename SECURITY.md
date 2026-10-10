@@ -34,7 +34,7 @@ title. Only the latest `main` is supported.
 | The secret scanner image is not pinned | recorded as D-5 in `AUDIT.md`; owner decision |
 | GitHub Actions are pinned by version tag, not by commit SHA | open decision |
 | Image signing; reading the SBOM attestation back | not done / `NOT VERIFIED` |
-| TLS, ingress and a NetworkPolicy | not built; the gateway has no egress policy |
+| TLS, ingress and a NetworkPolicy | TLS and ingress not built. Egress: the manifests allow DNS only, and `k8s/egress-live-cilium.yaml` allows HTTPS to the four keyless providers on a Cilium cluster (`DEPLOYMENT.md`); never applied to a cluster, so **NOT VERIFIED**. Railway has no egress policy |
 | A cluster deployment | never done; the production manifest and the monitoring have never been applied to anything |
 | Live provider calls | verified for the four keyless APIs only (coingecko, hackernews, wikipedia, wikidata: one real call each from Claude Desktop on the owner's Windows PC, 2026-10-10, package 1.0.3); the key-based APIs have never run live; provider terms and rate limits not reviewed |
 

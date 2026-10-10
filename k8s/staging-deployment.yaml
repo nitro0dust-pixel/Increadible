@@ -217,3 +217,27 @@ spec:
     - name: http
       port: 80
       targetPort: http
+---
+# Egress: DNS only. With live gateway calls off (as here: no GATEWAY_LIVE_APIS), the server needs no outbound connection at
+# all, so a call that tries one (a bug, or a later change) is refused by the cluster instead of reaching any host. DNS on
+# port 53 is allowed to any destination, not only to kube-dns pods, so that NodeLocal DNSCache and differently labelled
+# resolvers keep working. Ingress is not restricted here (policyTypes lists Egress only), so the Service, probes and a
+# metrics scraper are unaffected. Enforced only by a network plugin that implements NetworkPolicy; NOT VERIFIED on a cluster.
+# Live calls need more: standard NetworkPolicy cannot name hosts, see k8s/egress-live-cilium.yaml and DEPLOYMENT.md.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: increadible-egress
+  namespace: increadible-staging
+spec:
+  podSelector:
+    matchLabels:
+      app: increadible
+  policyTypes:
+    - Egress
+  egress:
+    - ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
