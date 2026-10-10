@@ -90,6 +90,18 @@ seed sources (offline) -> candidate store -> gate pipeline -> registry (gated on
      allows HTTPS to the four keyless providers by host name, on Cilium only, because standard NetworkPolicy cannot name hosts.
      A test holds the host list to the catalog's keyless APIs. Other network plugins need an egress proxy: not built.
 4. **Seed import** from the catalogues, as candidates only.
+   - **Done for public-apis (2026-10-10)**: `scripts/seed-candidates.js` turned the list's README (fetched from
+     `raw.githubusercontent.com`, SHA-256 `cf00cccb...`, MIT licence, its notice kept in the file) into
+     `features/09-api-gateway/data/candidates-public-apis.json`: 2,032 candidates in 51 categories, each with the listed auth
+     *as listed* (classifying it is gate 2), HTTPS and CORS flags and the documentation link; 5 malformed source rows are listed
+     with their line, not guessed at. The file is read by no server code, compiled into nothing and shipped in neither the image nor
+     the Claude Desktop package; `discover_apis` still lists the nine catalog APIs only (`tests/gateway-candidates.test.ts`).
+   - **APIs.guru: not imported.** Its API (`api.apis.guru`) is not reachable from the authoring sandbox, and its data last changed
+     on 2024-03-01 (section 2).
+   - The commit of the list is not recorded: the GitHub API refused the lookup from the sandbox, so the snapshot is identified by
+     its SHA-256 and the date fetched. A re-import is `node scripts/seed-candidates.js README.md LICENSE --fetched-on <date>
+     --source-url <url>`; one candidate per line keeps the diff readable.
+   - Which candidates to gate next is the owner's choice; a candidate reaches `catalog.ts` only by a person, through every gate.
 5. **Promote keyless APIs first** (coingecko, hackernews, wikipedia, wikidata), probed from a machine that can reach the providers, before any cluster.
 6. **A/B measurement** of cost (primary) and quality (guardrail) on a real workload. Blocked until a real workload exists.
 
