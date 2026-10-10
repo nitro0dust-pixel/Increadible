@@ -43,6 +43,7 @@ targets, not results).
 | `npm run loadtest`, `npm run capacity` | per-tool throughput and latency; A/B data size against restart, memory and query cost (not in CI: shared runners are too noisy; `smoke.sh` only checks they still run). Use an idle machine and read `PERFORMANCE.md` first |
 | `node scripts/record-contracts.js [--where M] [api ...]` | after `npm run build`, with `GATEWAY_USER_AGENT` set: sends each keyless API's health probe through the gateway and records the answer to `tests/fixtures/contracts/` for the contract tests (gated catalog, step 1b). Needs a machine that reaches the providers: **not the authoring sandbox** |
 | `node scripts/seed-candidates.js <README.md> <LICENSE> --fetched-on D --source-url U` | the gated catalog's seed import (step 4): a snapshot of the public-apis list into `features/09-api-gateway/data/candidates-public-apis.json`, candidates only, read by no server code. The input is fetched by hand (not in CI) |
+| `node scripts/candidate-report.js` | after `npm run build`: regenerates `docs/GATEWAY-CANDIDATES.md` from the candidate store and the catalog (a test fails while the document is stale) |
 | `node scripts/make-ab-data.js --file <f> --measurements <N>` | writes an A/B data file of N measurements (fast, no server); smoke and the image probe use it to start on a large file |
 | `PROMTOOL=<bin> bash scripts/check-prometheus.sh` | `promtool check rules` and `test rules` for `k8s/monitoring.yaml` (`scripts/install-promtool.sh <dir>` builds the pinned promtool) |
 
