@@ -88,7 +88,7 @@ describe("mcpb/manifest.json", () => {
     const text = read("mcpb/manifest.json");
     expect(text).not.toMatch(/GATEWAY_KEY_|AUTH_TOKEN|sk-[A-Za-z0-9]{10}|ghp_|AKIA|BEGIN [A-Z ]*PRIVATE KEY/);
     expect(manifest.description + manifest.long_description).toMatch(/mock/);
-    expect(manifest.long_description).toMatch(/never been run against a real provider/);
+    expect(manifest.long_description).toMatch(/run against the real providers only for the four APIs that need no key/); // says exactly what was verified live, no more
     expect(JSON.stringify(manifest)).not.toMatch(/production-ready|verified savings|certified|SOC ?2|GDPR/i);
   });
 

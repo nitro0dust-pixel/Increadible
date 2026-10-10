@@ -4,7 +4,7 @@ A small registry of public APIs with response caching. Implemented in `src/mcp-s
 (class `UniversalAPIGateway`), served by the root MCP server.
 
 > **Current limitation:** by default `call_api` returns generated **mock data** and makes no HTTP requests. Real calls are
-> **opt-in per API** (see "Live mode") and have been tested against a local server only, **not against the real providers**.
+> **opt-in per API** (see "Live mode") and have been tested against a local server, and against the real providers only for the four keyless APIs (one call each, 2026-10-10); the key-based APIs **never**.
 > The registry holds **9 APIs**, not thousands.
 
 ## Registry

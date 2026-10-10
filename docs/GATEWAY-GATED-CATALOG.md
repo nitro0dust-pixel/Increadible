@@ -13,7 +13,7 @@ document is built, installed or run.
 |---|---|
 | The gateway has four tools: `discover_apis`, `call_api`, `aggregate_apis`, `get_api_stats` | `features/09-api-gateway/src/mcp-server.ts`, `mcpb/manifest.json` |
 | Nine registered APIs: openweathermap, weatherapi, coingecko, finnhub, newsapi, hackernews, wikipedia, wikidata, thesportsdb. `call_api` answers sample data unless an API is switched to live | `mcp-server.ts`, [`USING-THE-GATEWAY.md`](USING-THE-GATEWAY.md) |
-| Live calls have never run against a real provider | `GATEWAY.md` (requirement 2), `mcpb/manifest.json` |
+| Live calls had never run against a real provider when this was written; on 2026-10-10 one call each to the four keyless APIs succeeded from Claude Desktop (the key-based APIs: never) | `GATEWAY.md` (requirement 2), `docs/INSTALL-CLAUDE-DESKTOP.md` section 5.4 |
 | The live layer refuses other hosts and paths, `..` and encoded dots or slashes, full URLs, redirects, non-JSON, oversize and slow responses; GET only; the gateway adds the credential from an environment variable and redacts it from errors and logs | `features/09-api-gateway/src/live.ts` |
 | **The registry is hard-coded**: `initializeAPIRegistry()`, called from the constructor, builds the nine `APIDefinition` entries (`id`, `name`, `category`, `endpoint`, `methods`, `auth`, `free`, `description`, `docs_url`); the `apis` option replaces them only in tests. Credential sources are in `DEFAULT_CREDENTIALS` | `mcp-server.ts` |
 | Bounds: cache 500 entries and 16 MiB, at most 100 calls per `aggregate_apis`, 10 live calls in flight, 100 waiting | `mcp-server.ts`, `MAX_CACHE_ENTRIES`, `MAX_CACHE_BYTES`, `MAX_AGGREGATE_CALLS`, `MAX_LIVE_IN_FLIGHT`, `MAX_LIVE_WAITING` |
