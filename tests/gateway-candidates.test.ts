@@ -11,6 +11,8 @@ import { UniversalAPIGateway } from "../features/09-api-gateway/src/mcp-server";
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const { parsePublicApis, counts } = require("../scripts/seed-candidates.js");
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const { report, matchCatalog, DOC } = require("../scripts/candidate-report.js");
 
 const root = path.join(__dirname, "..");
 const STORE = "features/09-api-gateway/data/candidates-public-apis.json";
@@ -116,5 +118,32 @@ describe(`the committed candidate store (${STORE})`, () => {
     expect(store.candidates.length).toBeGreaterThan(1000);
     const listed = new UniversalAPIGateway({}).discoverAPIs();
     expect(listed.map((a) => a.id)).toEqual(CATALOG.map((e) => e.definition.id));
+  });
+});
+
+describe("the candidate report (docs/GATEWAY-CANDIDATES.md, scripts/candidate-report.js)", () => {
+  it("is exactly what the generator writes from the committed store and catalog (regenerate it after either changes)", () => {
+    expect(fs.readFileSync(path.join(root, DOC), "utf8")).toBe(report(store, CATALOG));
+  });
+
+  it("finds each catalog API once in the list, by host before name (by name alone 'WeatherAPI' matches an unrelated project)", () => {
+    const found = CATALOG.map((e) => [e.definition.id, matchCatalog(e.definition, store.candidates).map((c: any) => c.source_id)]);
+    expect(Object.fromEntries(found)).toEqual({
+      openweathermap: ["weather/openweathermap"],
+      weatherapi: ["weather/weatherapi"],
+      coingecko: ["cryptocurrency/coingecko"],
+      finnhub: ["finance/finnhub"],
+      newsapi: ["news/news"],
+      hackernews: ["social/hackernews"],
+      wikipedia: ["open-data/wikipedia"],
+      wikidata: ["open-data/wikidata"],
+      thesportsdb: ["sports-fitness/thesportsdb"],
+    });
+    const byName = store.candidates.filter((c: any) => c.name.toLowerCase().replace(/[^a-z0-9]/g, "") === "weatherapi").map((c: any) => c.source_id);
+    expect(byName).toEqual(["weather/weather-api", "weather/weatherapi"]);
+  });
+
+  it("shows where the list disagrees with the catalog: wikidata is listed as OAuth, but its read API answered keyless on 2026-10-10", () => {
+    expect(fs.readFileSync(path.join(root, DOC), "utf8")).toContain("| wikidata | none | `open-data/wikidata` | `OAuth` | **no** |");
   });
 });

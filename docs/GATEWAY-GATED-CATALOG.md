@@ -102,6 +102,9 @@ seed sources (offline) -> candidate store -> gate pipeline -> registry (gated on
      its SHA-256 and the date fetched. A re-import is `node scripts/seed-candidates.js README.md LICENSE --fetched-on <date>
      --source-url <url>`; one candidate per line keeps the diff readable.
    - Which candidates to gate next is the owner's choice; a candidate reaches `catalog.ts` only by a person, through every gate.
+     [`GATEWAY-CANDIDATES.md`](GATEWAY-CANDIDATES.md) (generated) gives the material: candidates per category and listed auth
+     (909 keyless with HTTPS), and the nine catalog APIs as the list shows them; the list calls wikidata `OAuth`, which its read API
+     is not (it answered without a key on 2026-10-10), an example of why gate 2 is a person's check.
 5. **Promote keyless APIs first** (coingecko, hackernews, wikipedia, wikidata), probed from a machine that can reach the providers, before any cluster.
 6. **A/B measurement** of cost (primary) and quality (guardrail) on a real workload. Blocked until a real workload exists.
 

@@ -26,7 +26,8 @@ third-party projects (or are our integration guides for them) and are not listed
 | Third-party tools that run beside this server | [COMPANIONS.md](../COMPANIONS.md) |
 | Calling the API gateway from a Claude chat: prompts, answers, mock versus real, the statistics | [USING-THE-GATEWAY.md](USING-THE-GATEWAY.md) |
 | The universal API gateway decision (option A approved 2026-10-10, not built yet) | [GATEWAY.md](../GATEWAY.md) |
-| Option A of that decision as components and an order of work (approved 2026-10-10, not built yet) | [GATEWAY-GATED-CATALOG.md](GATEWAY-GATED-CATALOG.md) |
+| Option A of that decision as components and an order of work (approved 2026-10-10; being built step by step, its section 4 says what is done) | [GATEWAY-GATED-CATALOG.md](GATEWAY-GATED-CATALOG.md) |
+| What the seed list of candidate APIs holds, per category and listed auth, and how the catalog's own APIs appear in it (generated; material for choosing what to gate next) | [GATEWAY-CANDIDATES.md](GATEWAY-CANDIDATES.md) |
 | Working on the code | [CONTRIBUTING.md](../CONTRIBUTING.md) |
 | Context for Claude sessions (stable facts and working rules) | [CLAUDE.md](../CLAUDE.md) |
 | Security posture and reporting | [SECURITY.md](../SECURITY.md) |
