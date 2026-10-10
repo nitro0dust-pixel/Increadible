@@ -9,7 +9,8 @@ verification status, and the list of what is not verified is at the end.
 The owner asked (2026-10-07) for a **universal gateway**, "the best proven and recommended one", chosen by research first.
 The original plan (commit `67e7498`) asked for intelligent access to 1000+ public APIs, intent-based selection, multi-step
 workflows, caching, fallbacks and cost tracking. Today the registry has 9 APIs, `call_api` returns mock data unless an API is
-switched to live, and live calls have never run against a real provider.
+switched to live. Live calls were first made on 2026-10-10, one each to the four keyless APIs (coingecko, hackernews, wikipedia, wikidata)
+from Claude Desktop on the owner's Windows PC; the key-based APIs have never run live.
 
 ## How it was researched, and the limits
 
@@ -46,7 +47,7 @@ Facts that carry the decision:
 | # | Requirement | Evidence | Status today |
 |---|---|---|---|
 | 1 | 1000+ **usable** APIs, not 1000 listed | Both catalogs are seed material: one is frozen since 2024-03-01, the other is not machine-readable | 9 APIs |
-| 2 | Safe execution of untrusted model input | The live layer refuses other hosts and paths, redirects, non-JSON, oversize and slow responses; tested against a real local server and a 60 000-endpoint property test | Done, **never run against a real provider** |
+| 2 | Safe execution of untrusted model input | The live layer refuses other hosts and paths, redirects, non-JSON, oversize and slow responses; tested against a real local server and a 60 000-endpoint property test | Done; **run against the real providers for the four keyless APIs only** (one call each, 2026-10-10, from Claude Desktop); the key-based APIs never |
 | 3 | The catalog is untrusted input | Specs go stale or are edited by AI tools: pin each base URL when an API is registered and never take `servers` from a spec | Not built |
 | 4 | Authentication beyond API keys | OAuth2 and Bearer are common; hundreds of keys need a secret store, which is the owner's decision | API keys only |
 | 5 | Terms per API | For example, a free tier can be non-commercial only | Not built |

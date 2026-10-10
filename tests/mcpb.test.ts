@@ -44,6 +44,12 @@ describe("mcpb/manifest.json", () => {
     jest.restoreAllMocks();
   });
 
+  it("carries one version everywhere: package.json, the manifest, and the version the server reports (SERVER_INFO in src/server.ts, written by hand)", () => {
+    const pkg = JSON.parse(read("package.json"));
+    const reported = /SERVER_INFO = \{ name: "increadible", version: "([^"]+)" \}/.exec(read("src/server.ts"))?.[1];
+    expect([manifest.version, reported]).toEqual([pkg.version, pkg.version]);
+  });
+
   it("is consistent with package.json and lists exactly the tools the server lists, in order", () => {
     expect(tools).toHaveLength(13);
     expect(mcpb.problems(manifest, pkg, tools.map((t) => t.name))).toEqual([]);
@@ -65,6 +71,13 @@ describe("mcpb/manifest.json", () => {
     expect(fsyncFromEnv("false")).toBe(false);
   });
 
+  it("offers live gateway calls only as an opt-in: two optional text settings, empty by default, so that a fresh install answers sample data", () => {
+    for (const key of ["live_apis", "contact"]) expect(manifest.user_config[key]).toMatchObject({ type: "string", default: "", required: false });
+    expect(manifest.server.mcp_config.env.GATEWAY_LIVE_APIS).toBe("${user_config.live_apis}");
+    expect(manifest.server.mcp_config.env.GATEWAY_USER_AGENT).toBe("${user_config.contact}");
+    expect(manifest.user_config.live_apis.description).toMatch(/coingecko,hackernews,wikipedia,wikidata/);
+  });
+
   it("asks where the data lives instead of guessing: a required folder with no default, so data is never silently written (or lost) somewhere unplanned", () => {
     expect(manifest.user_config.data_directory).toMatchObject({ type: "directory", required: true });
     expect(manifest.user_config.data_directory.default).toBeUndefined();
@@ -75,7 +88,7 @@ describe("mcpb/manifest.json", () => {
     const text = read("mcpb/manifest.json");
     expect(text).not.toMatch(/GATEWAY_KEY_|AUTH_TOKEN|sk-[A-Za-z0-9]{10}|ghp_|AKIA|BEGIN [A-Z ]*PRIVATE KEY/);
     expect(manifest.description + manifest.long_description).toMatch(/mock/);
-    expect(manifest.long_description).toMatch(/never been run against a real provider/);
+    expect(manifest.long_description).toMatch(/run against the real providers only for the four APIs that need no key/); // says exactly what was verified live, no more
     expect(JSON.stringify(manifest)).not.toMatch(/production-ready|verified savings|certified|SOC ?2|GDPR/i);
   });
 
@@ -99,6 +112,7 @@ describe("mcpb/manifest.json", () => {
       ["a setting of an unknown type", (m) => (m.user_config.data_directory.type = "folder"), /known type/],
       ["a required setting that also has a default", (m) => (m.user_config.data_directory.default = "/tmp"), /required and has a default/],
       ["a setting without a description", (m) => delete m.user_config.durable_writes.description, /title and a description/],
+      ["an optional setting used with no default (the runtime would pass the literal ${user_config.live_apis})", (m) => delete m.user_config.live_apis.default, /live_apis is optional and used in mcp_config, so it needs a default/],
       ["a non-string environment value", (m) => (m.server.mcp_config.env.AB_FSYNC = true), /must be a string/],
       ["a runtime that is not the package's", (m) => (m.compatibility.runtimes.node = ">=18.0.0"), /engines/],
       ["no runtime at all", (m) => delete m.compatibility.runtimes, /engines/],
@@ -298,10 +312,16 @@ describe("the bundle (node scripts/mcpb.js build)", () => {
       fs.mkdirSync(data, { recursive: true });
     });
 
-    const session = (calls: Array<[string, Record<string, unknown>]>, userConfig = { data_directory: data, durable_writes: true }) =>
+    /** As the runtime does (@anthropic-ai/mcpb 2.1.2, getMcpConfigForManifest): the manifest's defaults first, then what the user set. */
+    const withDefaults = (unpacked: any, settings: Record<string, string | boolean>) => ({
+      ...Object.fromEntries(Object.entries(unpacked.user_config as Record<string, { default?: string | boolean }>).filter(([, e]) => e.default !== undefined).map(([k, e]) => [k, e.default as string | boolean])),
+      ...settings,
+    });
+    const session = (calls: Array<[string, Record<string, unknown>]>, settings: Record<string, string | boolean> = { data_directory: data, durable_writes: true }) =>
       new Promise<{ code: number | null; replies: any[]; stderr: string }>((resolve, reject) => {
         const unpacked = JSON.parse(fs.readFileSync(path.join(home, "manifest.json"), "utf8"));
         const config = unpacked.server.mcp_config;
+        const userConfig = withDefaults(unpacked, settings);
         const env: Record<string, string> = { ...(process.env as Record<string, string>) };
         for (const name of ["NODE_PATH", "RULES_FILE", "EXPERIMENTS_FILE", "AB_DATA_FILE", "AB_FSYNC"]) delete env[name];
         for (const [key, value] of Object.entries(config.env as Record<string, string>)) env[key] = substitute(value, userConfig);
@@ -331,8 +351,9 @@ describe("the bundle (node scripts/mcpb.js build)", () => {
     afterEach(() => {
       for (const child of open.splice(0)) child.kill("SIGKILL");
     });
-    function openSession(userConfig: Record<string, string | boolean>) {
+    function openSession(settings: Record<string, string | boolean>) {
       const unpacked = JSON.parse(fs.readFileSync(path.join(home, "manifest.json"), "utf8"));
+      const userConfig = withDefaults(unpacked, settings);
       const config = unpacked.server.mcp_config;
       const env: Record<string, string> = { ...(process.env as Record<string, string>) };
       for (const name of ["NODE_PATH", "RULES_FILE", "EXPERIMENTS_FILE", "AB_DATA_FILE", "AB_FSYNC", "AB_LAZY_OPEN"]) delete env[name];
@@ -402,6 +423,20 @@ describe("the bundle (node scripts/mcpb.js build)", () => {
       expect(second.code).toBe(0);
       expect(body(second.replies[2]).statistical_analysis.current_samples).toBe(20);
       expect(fs.readFileSync(path.join(data, "rules.yaml"), "utf8")).toMatch(/id: x/);
+    });
+
+    it("answers sample data when Live APIs is left empty (a fresh install), and switches exactly the listed APIs to live when it is set", async () => {
+      const fresh = openSession({ data_directory: folder("live-off"), durable_writes: true });
+      expect(await fresh.call("get_api_stats", {})).toMatchObject({ live_apis: [] });
+      expect(await fresh.call("call_api", { api_id: "hackernews", endpoint: "topstories.json" })).toMatchObject({ source: "mock" });
+      expect(fresh.stderr()).not.toMatch(/GATEWAY_LIVE_APIS names an unknown API/); // an empty setting is not read as an API id
+      fresh.end();
+      expect(await fresh.exited).toBe(0);
+      // Only the switch is checked here: the authoring sandbox cannot reach the providers, so no real call is made.
+      const live = openSession({ data_directory: folder("live-on"), durable_writes: true, live_apis: "hackernews, wikipedia", contact: "increadible-test (test@example.com)" });
+      expect(await live.call("get_api_stats", {})).toMatchObject({ live_apis: ["hackernews", "wikipedia"] });
+      live.end();
+      expect(await live.exited).toBe(0);
     });
 
     it("answers the handshake and every tool but the A/B data ones in a second copy started while the first is running (Claude Desktop starts several), and the second copy takes over when the first ends", async () => {

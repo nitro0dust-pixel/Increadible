@@ -75,5 +75,5 @@ One Node.js process, one MCP server, three components we wrote. This page is the
 - **One replica.** The A/B data file has a single writer, so Kubernetes runs one pod with a `Recreate` strategy; scaling out needs a different storage design.
 - **The data file is never compacted.** Memory is flat, but the file grows (a 1 GiB volume holds about 8.9 million measurements); rollup or rotation is a backlog item.
 - **No savings have been measured.** The old percentages were targets (`ROADMAP.md`).
-- **Live gateway calls have never run against a real provider.**
+- **Live gateway calls have run against the real providers only for the four keyless APIs** (one call each, 2026-10-10, from Claude Desktop); the key-based APIs never.
 - **Statistics are a fixed-sample snapshot.** Asking repeatedly while data arrives and acting on the first significant answer inflates false positives; there is no sequential testing.

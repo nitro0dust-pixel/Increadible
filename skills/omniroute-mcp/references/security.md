@@ -38,7 +38,7 @@ title. Only the latest `main` is supported.
 | Image signing; reading the SBOM attestation back | not done / `NOT VERIFIED` |
 | TLS, ingress and a NetworkPolicy | not built; the gateway has no egress policy |
 | A cluster deployment | never done; the production manifest and the monitoring have never been applied to anything |
-| Live provider calls | never run against a real provider |
+| Live provider calls | verified for the four keyless APIs only (coingecko, hackernews, wikipedia, wikidata: one real call each from Claude Desktop on the owner's Windows PC, 2026-10-10, package 1.0.3); the key-based APIs have never run live; provider terms and rate limits not reviewed |
 
 ## Handling secrets in this project
 

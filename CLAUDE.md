@@ -7,7 +7,7 @@ counts, no commit hashes and no status, because those go stale with every PR.
 ## What this is
 
 One MCP server (stdio and HTTP) serving three components we wrote: Routing Plugins (#7), A/B Testing (#8) and API
-Gateway (#9, **mock data by default**, with opt-in live calls that have never run against a real provider). `features/01-06` are vendored third-party submodules that are **not integrated or
+Gateway (#9, **mock data by default**, with opt-in live calls: verified for the four keyless APIs only (coingecko, hackernews, wikipedia, wikidata: one real call each from Claude Desktop on the owner's Windows PC, 2026-10-10, package 1.0.3); the key-based APIs have never run live). `features/01-06` are vendored third-party submodules that are **not integrated or
 tested here**. Nothing is deployed beyond a local rehearsal; no cost saving has been measured (the old percentages were
 targets, not results).
 
@@ -15,6 +15,9 @@ targets, not results).
 
 - Repo `nitro0dust-pixel/Increadible` (private). **The default branch is `main`** (owner switched it on 2026-10-09); PRs
   target `main`, and Dependabot reads its configuration from it.
+- **One Claude session works on the project at a time, and it keeps the records** (owner, 2026-10-09: a second session ran in parallel
+  for PRs #43 and #45, both sessions edited the same status lines, and its record PR #45 was closed as superseded by #46; that session is
+  ended). A session that finds another one active asks the owner before touching ROADMAP, BUILD-HISTORY, CHANGELOG or the skill's status.
 - Work happens on `claude/nice-keller-aoooos`, one PR at a time, squash-merged into `main`. After a squash merge the
   branch and `main` have identical content but different commits: bring `main` in with `git fetch origin main && git merge
   origin/main` and push as a fast-forward. **Never force-push or rewrite history**.
