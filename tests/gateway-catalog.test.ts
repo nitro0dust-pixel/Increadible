@@ -5,7 +5,7 @@
 import { describe, it, expect, beforeAll, afterAll, jest } from "@jest/globals";
 import * as fs from "fs";
 import * as path from "path";
-import { CATALOG, CatalogEntry, catalogCredentials, catalogDefinitions } from "../features/09-api-gateway/src/catalog";
+import { CATALOG, CatalogEntry, catalogCredentials, catalogDefinitions, gateSummaries } from "../features/09-api-gateway/src/catalog";
 import { UniversalAPIGateway } from "../features/09-api-gateway/src/mcp-server";
 
 const golden = JSON.parse(fs.readFileSync(path.join(__dirname, "fixtures", "gateway-registry-golden.json"), "utf8"));
@@ -126,3 +126,48 @@ describe("the gated catalog, step 1a: the registry as data", () => {
     });
   });
 });
+
+describe("the gate records in get_api_stats (owner decision, 2026-10-10: read-only, through get_api_stats)", () => {
+  beforeAll(() => {
+    jest.spyOn(console, "error").mockImplementation(() => undefined);
+  });
+  afterAll(() => {
+    jest.restoreAllMocks();
+  });
+
+  it("shows every registered API's gate record, all candidate today, with nothing signed off yet", () => {
+    const gates = new UniversalAPIGateway({}).getStats().gates;
+    expect(Object.keys(gates)).toEqual(CATALOG.map((e) => e.definition.id));
+    expect(gates.coingecko).toEqual({
+      status: "candidate",
+      auth: "none",
+      base_url_pinned_on: null,
+      auth_confirmed_on: null,
+      terms: null,
+      probe: "/ping",
+      contract_test: null,
+      live_evidence: { calls: 2, last_on: "2026-10-10" },
+    });
+    expect(gates.finnhub).toMatchObject({ status: "candidate", auth: "api_key", probe: null, live_evidence: { calls: 0, last_on: null } });
+  });
+
+  it("shows sign-off dates and the terms' address once recorded, and never the terms' text", () => {
+    const signed: CatalogEntry[] = JSON.parse(JSON.stringify(CATALOG));
+    Object.assign(signed[2].gate, {
+      status: "gated",
+      base_url_pinned: { by: "owner", on: "2026-10-11" },
+      auth_confirmed: { by: "owner", on: "2026-10-12" },
+      terms: { by: "owner", on: "2026-10-13", url: "https://example.org/terms", summary: "SECRET-LOOKING TEXT" },
+      contract_test: "tests/gateway-contracts.test.ts",
+    });
+    const g = gateSummaries(["coingecko"], signed).coingecko;
+    expect(g).toMatchObject({ status: "gated", base_url_pinned_on: "2026-10-11", auth_confirmed_on: "2026-10-12", terms: { url: "https://example.org/terms", on: "2026-10-13" } });
+    expect(JSON.stringify(g)).not.toMatch(/SECRET-LOOKING|owner/);
+  });
+
+  it("lists only the APIs the gateway serves: a registry replaced in code has no gate records", () => {
+    const custom = new UniversalAPIGateway({ apis: [{ id: "local", name: "Local", category: "test", endpoint: "https://127.0.0.1/x", methods: ["GET"], auth: "none", free: true, description: "t" }] });
+    expect(custom.getStats().gates).toEqual({});
+  });
+});
+

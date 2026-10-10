@@ -1,6 +1,6 @@
 import * as crypto from "crypto";
 import { Credential, LiveCallError, LiveOptions, buildRequestUrl, liveGet, redact } from "./live";
-import { APIDefinition, catalogCredentials, catalogDefinitions } from "./catalog";
+import { APIDefinition, catalogCredentials, catalogDefinitions, gateSummaries } from "./catalog";
 
 interface CacheEntry {
   data: any;
@@ -441,6 +441,7 @@ class UniversalAPIGateway {
       live_apis: this.liveApis === "*" ? "*" : [...this.liveApis].filter((id) => this.apis.has(id)),
       rate_limits: Object.fromEntries(this.rateLimits),
       rate_limited: this.stats.rate_limited,
+      gates: gateSummaries(this.apis.keys()),
     };
   }
 
@@ -580,7 +581,10 @@ export const getStatsTool = {
     "reset when it restarts. total_calls includes cache hits and unknown ids (invalid arguments are not " +
     "counted); cache_hit_rate is a string, not a number; live_apis is [] while every answer is sample data, " +
     "otherwise the ids of the APIs switched to live calls, or the single value \"*\" when all are. rate_limits maps " +
-    "an API id to its limit of live calls per minute ({} when none is set) and rate_limited counts the live calls refused by it.",
+    "an API id to its limit of live calls per minute ({} when none is set) and rate_limited counts the live calls refused by it. " +
+    "gates is each registered API's gate record in the gated catalog: status (candidate, gated or degraded; only gated APIs have " +
+    "passed every check), auth class, the dates the base URL and auth were signed off and the terms recorded (null until then), " +
+    "the health probe's path and contract test, and how many real calls were recorded as evidence.",
   inputSchema: {
     type: "object" as const,
     properties: {},

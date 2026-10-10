@@ -47,7 +47,7 @@ seed sources (offline) -> candidate store -> gate pipeline -> registry (gated on
 3. **Registry.** Gated APIs only. The advertised count is the number of gated APIs, never the number of candidates (`GATEWAY.md`, recommendation 3).
 4. **Live switch.** Unchanged: `GATEWAY_LIVE_APIS` opts an API in; a gated API answers sample data until then.
 5. **Call layer.** Unchanged. The host allowlist becomes each API's pinned base URL.
-6. **Evidence record.** Per API: gate status, auth class, terms, probe history (latency, error rate), date of last change. Read-only, through `get_api_stats` or a new read-only tool (an owner decision).
+6. **Evidence record.** Per API: gate status, auth class, terms, probe history (latency, error rate), date of last change. Read-only, through `get_api_stats` (owner decision, 2026-10-10; the `gates` field, without probe history until a scheduled probe exists).
 7. **Retirement.** A probe that keeps failing moves the API to `degraded`: hidden from `discover_apis`, kept in the store. The number of failures is a design choice, not a measured value.
 
 ## 4. Order of work
@@ -83,8 +83,9 @@ seed sources (offline) -> candidate store -> gate pipeline -> registry (gated on
    - **Rate limit: the mechanism is built** (`GATEWAY_RATE_LIMITS`, e.g. `coingecko=30`: live calls per API in any rolling minute;
      a call over it is refused before it reaches the provider and counted as `rate_limited` in `get_api_stats`). **No limit is
      set**: the values depend on each provider's terms, which are not read yet (step 1b), so they are the owner's decision.
-   - **Retry policy: not built.** A retry sends a second request to a provider on the operator's behalf; whether to retry, on
-     which errors, and how often, needs a proposal and the owner's decision.
+   - **Retry policy: no retries for now (owner decision, 2026-10-10).** A live call that fails is reported, not repeated; to be
+     revisited when real traffic exists. It was the owner's call because a retry sends another request to a provider on the
+     operator's behalf.
 3. **Egress allowlist at deploy time**: a NetworkPolicy limited to the pinned hosts; a prerequisite for live mode in a cluster.
    - **Written, NOT VERIFIED on a cluster** (`DEPLOYMENT.md`, "Egress"): the deployment manifests allow DNS only; `k8s/egress-live-cilium.yaml`
      allows HTTPS to the four keyless providers by host name, on Cilium only, because standard NetworkPolicy cannot name hosts.
@@ -121,6 +122,11 @@ seed sources (offline) -> candidate store -> gate pipeline -> registry (gated on
 - [ ] Option D: wanted or not (`GATEWAY.md`, third box).
 - [ ] Where API keys live once more than the keyless APIs are switched on (`GATEWAY.md`, fourth box).
 - [ ] Probe retirement threshold: needs a proposal, then a decision.
+- [x] Where gate status is shown (section 3, item 6): **read-only in `get_api_stats`, decided by the owner on 2026-10-10**; built as the
+  `gates` field (status, auth class, sign-off dates, terms address, probe path, contract test, live evidence; no probe history yet).
+- [x] Retries for live calls: **none for now, decided by the owner on 2026-10-10** (step 2).
+- [x] The first new APIs to gate: **one category's keyless HTTPS candidates, decided by the owner on 2026-10-10**
+  ([`GATEWAY-CANDIDATES.md`](GATEWAY-CANDIDATES.md), section 3). Which category: not chosen yet.
 
 ## 7. Not verified
 

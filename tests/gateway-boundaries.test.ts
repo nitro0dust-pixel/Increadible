@@ -576,7 +576,7 @@ describe("the tools around the gateway", () => {
   it("reports its statistics through get_api_stats", async () => {
     const stats = await call("get_api_stats");
     expect(Object.keys(stats).sort()).toEqual([
-      "api_distribution", "cache_evictions", "cache_hit_rate", "cached_items", "failed", "live_apis", "live_calls", "rate_limited", "rate_limits", "successful", "total_calls",
+      "api_distribution", "cache_evictions", "cache_hit_rate", "cached_items", "failed", "gates", "live_apis", "live_calls", "rate_limited", "rate_limits", "successful", "total_calls",
     ]);
   });
 });
