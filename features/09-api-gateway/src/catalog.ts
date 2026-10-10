@@ -4,6 +4,8 @@
  * Step 1a (this file) only moves the built-in registry out of the code and gives each API a gate record; what the gateway answers
  * is unchanged (`tests/gateway-catalog.test.ts` holds it to the answers of the earlier hard-coded registry). No API is `gated` yet:
  * an API is promoted only when every gate below holds evidence, and a test refuses a `gated` entry with a gate left empty.
+ * Step 1b adds the health probes of the keyless APIs (their checks are in `probes.ts`); a probe written here is proposed, not signed
+ * off, and its recorded answer (`scripts/record-contracts.js`) is what the contract test replays.
  */
 import type { Credential } from "./live";
 
@@ -41,7 +43,7 @@ export interface GateRecord {
   terms: (SignOff & { url: string; summary: string }) | null;
   /** Gate 4: one fixed, keyless health request and what counts as success. */
   probe: { endpoint: string; params: Record<string, string>; success: string } | null;
-  /** Gate 6: the test file with this API's recorded-response contract test, run in CI. */
+  /** Gate 6: the test file with this API's recorded-response contract test, run in CI; the recording is tests/fixtures/contracts/<id>.json. */
   contract_test: string | null;
   /** Real calls that were seen to work. Evidence for the gates above; not a gate by itself. */
   live_evidence: Array<{ on: string; where: string; endpoint: string; result: string }>;
@@ -111,7 +113,11 @@ export const CATALOG: CatalogEntry[] = [
       description: "Cryptocurrency data and prices",
       docs_url: "https://www.coingecko.com/en/api",
     },
-    gate: { ...NO_GATES, live_evidence: seen("/simple/price", "bitcoin and ethereum prices in USD and INR", LIVE_OK) },
+    gate: {
+      ...NO_GATES,
+      probe: { endpoint: "/ping", params: {}, success: "HTTP 200, JSON, a non-empty string gecko_says" },
+      live_evidence: seen("/simple/price", "bitcoin and ethereum prices in USD and INR", LIVE_OK),
+    },
   },
   {
     definition: {
@@ -155,7 +161,11 @@ export const CATALOG: CatalogEntry[] = [
       free: true,
       description: "Technology and startup news",
     },
-    gate: { ...NO_GATES, live_evidence: seen("/maxitem.json", "item id 50028141", LIVE_OK) },
+    gate: {
+      ...NO_GATES,
+      probe: { endpoint: "/maxitem.json", params: {}, success: "HTTP 200, JSON, a positive integer (the newest item id)" },
+      live_evidence: seen("/maxitem.json", "item id 50028141", LIVE_OK),
+    },
   },
 
   // Reference
@@ -170,7 +180,15 @@ export const CATALOG: CatalogEntry[] = [
       free: true,
       description: "Encyclopedia content via API",
     },
-    gate: { ...NO_GATES, live_evidence: seen("(api.php) action=query list=search srsearch=Earth", "234 239 hits, top three listed", LIVE_OK) },
+    gate: {
+      ...NO_GATES,
+      probe: {
+        endpoint: "/",
+        params: { action: "query", meta: "siteinfo", siprop: "general", format: "json" },
+        success: "HTTP 200, JSON, no error object, query.general.sitename is Wikipedia and query.general.base is on https://en.wikipedia.org/",
+      },
+      live_evidence: seen("(api.php) action=query list=search srsearch=Earth", "234 239 hits, top three listed", LIVE_OK),
+    },
   },
   {
     definition: {
@@ -183,7 +201,15 @@ export const CATALOG: CatalogEntry[] = [
       free: true,
       description: "Structured data knowledge base",
     },
-    gate: { ...NO_GATES, live_evidence: seen("(api.php) action=wbsearchentities search=Earth", "7 entities, Q2 first", LIVE_OK) },
+    gate: {
+      ...NO_GATES,
+      probe: {
+        endpoint: "/",
+        params: { action: "wbgetentities", ids: "Q2", props: "labels", languages: "en", format: "json" },
+        success: "HTTP 200, JSON, no error object, entities.Q2.labels.en.value is Earth",
+      },
+      live_evidence: seen("(api.php) action=wbsearchentities search=Earth", "7 entities, Q2 first", LIVE_OK),
+    },
   },
 
   // Sports

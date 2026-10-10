@@ -41,6 +41,7 @@ targets, not results).
 | `bash scripts/cleanroom.sh [commit]` | `verify` on a `git archive` of `HEAD` (or the commit given) after `npm ci`: only what is committed, nothing from the working copy. Use it for any claim of the form "it passes on commit X" |
 | `bash scripts/probe-image.sh <image>` | the image the way a deployment runs it: needs Docker, curl, jq. **Only CI has a Docker daemon**; locally it can be tried against a stubbed `docker`, which proves the script's logic but not the image |
 | `npm run loadtest`, `npm run capacity` | per-tool throughput and latency; A/B data size against restart, memory and query cost (not in CI: shared runners are too noisy; `smoke.sh` only checks they still run). Use an idle machine and read `PERFORMANCE.md` first |
+| `node scripts/record-contracts.js [--where M] [api ...]` | after `npm run build`, with `GATEWAY_USER_AGENT` set: sends each keyless API's health probe through the gateway and records the answer to `tests/fixtures/contracts/` for the contract tests (gated catalog, step 1b). Needs a machine that reaches the providers: **not the authoring sandbox** |
 | `node scripts/make-ab-data.js --file <f> --measurements <N>` | writes an A/B data file of N measurements (fast, no server); smoke and the image probe use it to start on a large file |
 | `PROMTOOL=<bin> bash scripts/check-prometheus.sh` | `promtool check rules` and `test rules` for `k8s/monitoring.yaml` (`scripts/install-promtool.sh <dir>` builds the pinned promtool) |
 

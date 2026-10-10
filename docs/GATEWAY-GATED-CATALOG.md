@@ -59,10 +59,25 @@ seed sources (offline) -> candidate store -> gate pipeline -> registry (gated on
      gate has a person's sign-off yet; the four keyless APIs carry their live calls of 2026-10-10 as evidence. What the gateway
      answers did not change: `tests/gateway-catalog.test.ts` holds it to a golden file recorded from the hard-coded registry
      (`tests/fixtures/gateway-registry-golden.json`), and refuses a `gated` or `degraded` API with any gate left empty.
-   - **1b, next:** for each API, the owner signs off its pinned URL and auth class, its terms are read and recorded (URL, summary,
+   - **1a merged** as PR #50 (2026-10-10).
+   - **1b, in progress:** for each API, the owner signs off its pinned URL and auth class, its terms are read and recorded (URL, summary,
      date), a health probe with success criteria and a recorded-response contract test are written; the four keyless APIs first.
      Only then does an API become `gated`, and only after that does `discover_apis` list gated APIs only (a behaviour change, in its
      own pull request).
+     - **Done (no sign-off needed):** a probe for each keyless API in its gate record (one fixed request, success criteria in words);
+       the same criteria as code in `features/09-api-gateway/src/probes.ts`; `scripts/record-contracts.js`, which sends each probe
+       through the gateway's own live path and writes the provider's answer to `tests/fixtures/contracts/<api>.json` only when it
+       passes (keyless APIs only, so no credential can reach a file; the User-Agent is not written); and
+       `tests/gateway-contracts.test.ts`, which checks every recording against the catalog's current probe and URL and replays it
+       through the gateway in CI. A `gated` or `degraded` API now also needs its recording.
+     - **Not done: no recording exists.** The authoring sandbox cannot reach the four providers (`network error (ENOTFOUND)`) or read
+       their terms pages, so the recorder runs on the owner's PC:
+       `npm ci && npm run build`, then `GATEWAY_USER_AGENT="increadible (<contact>)" node scripts/record-contracts.js --where "<machine>"`
+       (PowerShell: set `$env:GATEWAY_USER_AGENT` first), and the four files under `tests/fixtures/contracts/` go into a pull request.
+       The chain (record, then replay) was run once here with a stubbed `fetch`: four files written, four replays passed; those files were
+       synthetic and deleted.
+     - **Waiting on the owner:** the sign-offs on each pinned URL and auth class, and the terms (read on a machine that reaches the
+       providers, summarised, signed off).
    Output of step 1: nine gated records, each with a pinned URL, an auth class, terms and a probe history.
 2. **Per-API rate limit and a retry policy** (both open in `ROADMAP.md`), before more APIs are switched to live.
 3. **Egress allowlist at deploy time**: a NetworkPolicy limited to the pinned hosts. None exists today (`DEPLOYMENT.md`); it is a prerequisite for live mode in a cluster.
@@ -87,7 +102,7 @@ seed sources (offline) -> candidate store -> gate pipeline -> registry (gated on
 ## 7. Not verified
 
 - Catalogue sizes, the no-auth share, the broken-API estimate, and the ContextForge and Docker advisory details (`GATEWAY.md`, "Not verified").
-- Probe success criteria and retirement thresholds: design choices, not measured.
+- Probe success criteria and retirement thresholds: design choices, not measured. The four probes have never been sent to the real providers (only replayed against a stubbed `fetch`).
 - The effort of step 1: not estimated.
 
 ## 8. Corrections to the first draft
