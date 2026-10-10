@@ -168,7 +168,7 @@ Beyond the tests, both kinds were decoded once (2026-10-10, in a scratch Go prog
   `docker buildx imagetools inspect ghcr.io/nitro0dust-pixel/increadible:latest --format '{{ json .SBOM }}'`
   (command from Docker's attestation documentation) and check that it lists packages.
 - Dependabot (`.github/dependabot.yml`) proposes npm, GitHub Actions and Docker updates weekly, never npm or Node
-  major bumps. It reads that file from the repository's default branch, so it does nothing until the default branch is `main`.
+  major bumps. It reads that file from the repository's default branch, which is `main` since 2026-10-09, so it is active.
 
 ## Railway (stages 1 and 2: private rehearsal, then live data; both verified 2026-10-10)
 

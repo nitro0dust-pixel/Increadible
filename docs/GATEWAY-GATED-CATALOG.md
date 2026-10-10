@@ -1,6 +1,6 @@
 # API gateway: gated catalog architecture (proposal, option A)
 
-**Status: APPROVED by the owner on 2026-10-10 (option A). Not built yet; step 1 is next.**
+**Status: APPROVED by the owner on 2026-10-10 (option A). Being built: steps 1a, 2, 3 and 4 done; step 1b in progress (probes, recordings and contract tests done for the keyless four; sign-offs and terms wait on the owner). Section 4 has the detail.**
 
 This expands recommendation "A, with a gated catalog" in [`GATEWAY.md`](../GATEWAY.md) into components and an order of work.
 It was drafted in a separate Claude session on 2026-10-10 from the owner's local copy, then checked line by line against
