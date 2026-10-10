@@ -177,6 +177,16 @@ describe("gate proposals for the first batch (features/09-api-gateway/data/gate-
     expect(file.note).toMatch(/UNVERIFIED/);
   });
 
+  it("says where each finding came from and how far to trust it (search summaries, 2026-10-10: not verification)", () => {
+    for (const p of file.proposals) {
+      const f = p.found_2026_10_10;
+      expect({ id: p.id, summary: f?.summary?.trim().length > 0, reliability: f?.reliability?.trim().length > 0 }).toEqual({ id: p.id, summary: true, reliability: true });
+      expect(f.sources.length).toBeGreaterThan(0);
+      for (const u of f.sources) expect(new URL(u).protocol).toBe("https:");
+    }
+    expect(file.note).toMatch(/not verification/);
+  });
+
   it("is read by no server code (proposals are never callable)", () => {
     const sources = ["src", "features/09-api-gateway/src"].flatMap((d) => fs.readdirSync(path.join(root, d)).map((f) => fs.readFileSync(path.join(root, d, f), "utf8")));
     for (const text of sources) expect(text).not.toMatch(/gate-proposals/);

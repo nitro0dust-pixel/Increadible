@@ -1,5 +1,5 @@
 {
-  "note": "Gate proposals for the first Cryptocurrency batch (owner's choice, 2026-10-10). Proposals only: read by no server code, not in catalog.ts, not listed by discover_apis, not callable. Every value below was written from the authoring session's memory, because the sandbox cannot reach the providers or their documentation: each is UNVERIFIED until a person checks it against the official documentation and signs it off (gates 1 and 2), the terms are read (gate 3), and a recorded answer passes the probe (gates 4 and 6).",
+  "note": "Gate proposals for the first Cryptocurrency batch (owner's choice, 2026-10-10). Proposals only: read by no server code, not in catalog.ts, not listed by discover_apis, not callable. Every value below was written from the authoring session's memory, because the sandbox cannot reach the providers or their documentation: each is UNVERIFIED until a person checks it against the official documentation and signs it off (gates 1 and 2), the terms are read (gate 3), and a recorded answer passes the probe (gates 4 and 6). The found_2026_10_10 entries come from web-search summaries on 2026-10-10 (the providers' sites do not resolve from the sandbox); they say where to look, they are not verification.",
   "proposed_on": "2026-10-10",
   "proposals": [
     {
@@ -10,6 +10,7 @@
       "docs_url": "https://docs.coincap.io/",
       "probe": { "endpoint": "/assets/bitcoin", "params": {}, "success": "HTTP 200, JSON, data.id is bitcoin" },
       "check_first": "The keyless v2 API may have been retired in favour of a keyed v3 (rest.coincap.io); if so, this API fails the keyless criterion of the batch and should be dropped or re-classified as api_key.",
+      "found_2026_10_10": {"summary": "The keyless v2 API appears to be gone: a migration guide says api.coincap.io no longer resolves (NXDOMAIN), and that v3 (rest.coincap.io/v3) answers 401 without a key, with paid credits since 2025. If confirmed, CoinCap fails the keyless criterion of this batch: drop it, or reclassify it as api_key outside this batch.", "reliability": "second-hand (a competitor's guide and third-party READMEs); no CoinCap announcement found", "sources": ["https://coinpaprika.com/education/migrating-from-coincap-api-to-coinpaprika/", "https://glama.ai/mcp/servers/@wazzan/mcp-coincap-jj/blob/main/api-migration-plan.md"]},
       "status": "proposed"
     },
     {
@@ -20,6 +21,7 @@
       "docs_url": "https://api.coinpaprika.com/",
       "probe": { "endpoint": "/global", "params": {}, "success": "HTTP 200, JSON, a number market_cap_usd" },
       "check_first": "The free tier's request limit and whether attribution is required.",
+      "found_2026_10_10": {"summary": "The free tier at api.coinpaprika.com/v1 works without a key for most endpoints. Its limit is stated two ways in its own docs (20,000 requests a month; 1,000 a day without a key). One third party says a public or commercial instance needs an enterprise agreement; no official attribution rule found.", "reliability": "search summary of CoinPaprika's docs; the commercial-use line is second-hand", "sources": ["https://docs.coinpaprika.com/api-reference/rest-api/introduction", "https://currencyinfo.docs.adamant.im/reference/sources/coinpaprika"]},
       "status": "proposed"
     },
     {
@@ -30,6 +32,7 @@
       "docs_url": "https://www.coinlore.com/cryptocurrency-data-api",
       "probe": { "endpoint": "/global/", "params": {}, "success": "HTTP 200, JSON, an array whose first item has coins_count" },
       "check_first": "The trailing slash in its paths, and the stated request limit.",
+      "found_2026_10_10": {"summary": "No key needed. No official terms page or published rate limit found; third parties suggest about one request per second and caching. Endpoint paths differ between sources (/api/tickers/ and /api/ticker/), so the probe path must be checked live.", "reliability": "third-party only", "sources": ["https://jentic.com/apis/coinlore", "https://currencyinfo.docs.adamant.im/reference/sources/coinlore"]},
       "status": "proposed"
     },
     {
@@ -40,6 +43,7 @@
       "docs_url": "https://defillama.com/docs/api",
       "probe": { "endpoint": "/v2/chains", "params": {}, "success": "HTTP 200, JSON, an array of objects with name and tvl" },
       "check_first": "Response sizes: some endpoints (for example /protocols) may exceed the gateway's 1 MiB default; the probe uses a small one. Also the split between the free and the paid (pro) API.",
+      "found_2026_10_10": {"summary": "The free API at api.llama.fi needs no key. DefiLlama's own Pro page gives the open tier 10 to 200 requests a minute (Pro: 1,000 a minute, paid). The /v2/chains path was not confirmed by any result.", "reliability": "rate limit from DefiLlama's own page (search summary); the rest second-hand", "sources": ["https://docs.llama.fi/pro-api"]},
       "status": "proposed"
     },
     {
@@ -50,6 +54,7 @@
       "docs_url": "https://mempool.space/docs/api/rest",
       "probe": { "endpoint": "/v1/fees/recommended", "params": {}, "success": "HTTP 200, JSON, a number fastestFee" },
       "check_first": "Several endpoints answer plain text (for example the tip height), which the gateway refuses (JSON only); the probe uses a JSON one. Also the public instance's rate limit.",
+      "found_2026_10_10": {"summary": "Public endpoints need no key; the docs say rate limiting applies and point to a rate-limits page that was not found. One comparison site says about 10 requests a second. No terms of service found. /api/v1/fees/recommended is the mainnet path.", "reliability": "third-party only", "sources": ["https://www.mintlify.com/mempool/mempool/api/introduction", "https://www.spark.money/tools/bitcoin-fee-api-provider-comparison"]},
       "status": "proposed"
     }
   ]

@@ -170,6 +170,17 @@ listed or callable (`tests/gateway-candidates.test.ts`). An API moves into `cata
 
 Only then is the entry added to `catalog.ts`, as `gated`. Until that change, nothing about these five is visible to a client.
 
+**What a search found on 2026-10-10** (each proposal's `found_2026_10_10` in the file holds the summary, sources and how reliable
+they are; the providers' sites do not resolve from the sandbox, so none of it was read on the provider's own page):
+
+| API | Finding | Consequence |
+|---|---|---|
+| CoinCap | `api.coincap.io` reportedly no longer resolves; v3 (`rest.coincap.io/v3`) answers 401 without a key | **Likely out of this batch** (keyless only). Owner: confirm on CoinCap's own docs, then drop it or pick a replacement from the Cryptocurrency candidates |
+| CoinPaprika | Keyless free tier; its own docs state the limit two ways (20,000 a month; 1,000 a day without a key); a third party says a public or commercial instance needs an enterprise agreement | Commercial use is the clause to read |
+| CoinLore | Keyless; no official terms or limit found (third parties: about one request a second); endpoint paths differ between sources | The probe path `/global/` must be checked live |
+| DefiLlama | Keyless; its own Pro page gives the open tier 10 to 200 requests a minute | `/v2/chains` was not confirmed by any result |
+| Mempool | Keyless; rate limited (one third party: about 10 a second); no terms of service found | The limit and terms are on mempool.space's docs |
+
 
 ## 10. Terms of the keyless four: what was found, and what the owner confirms (gate 3)
 
