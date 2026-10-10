@@ -237,3 +237,39 @@ export function catalogDefinitions(catalog: CatalogEntry[] = CATALOG): APIDefini
 export function catalogCredentials(catalog: CatalogEntry[] = CATALOG): Record<string, Credential> {
   return Object.fromEntries(catalog.filter((e) => e.credential).map((e) => [e.definition.id, e.credential as Credential]));
 }
+
+/** One API's gate record as `get_api_stats` shows it: what was signed off and when, never the terms' text or any credential. */
+export interface GateSummary {
+  status: GateStatus;
+  auth: APIDefinition["auth"];
+  base_url_pinned_on: string | null;
+  auth_confirmed_on: string | null;
+  terms: { url: string; on: string } | null;
+  probe: string | null;
+  contract_test: string | null;
+  live_evidence: { calls: number; last_on: string | null };
+}
+
+/**
+ * The gate record of every catalog API among `ids` (the APIs the gateway serves), read-only (owner decision, 2026-10-10: shown
+ * through `get_api_stats`). Probe history is not part of it: no scheduled probe exists yet.
+ */
+export function gateSummaries(ids: Iterable<string>, catalog: CatalogEntry[] = CATALOG): Record<string, GateSummary> {
+  const wanted = new Set(ids);
+  const out: Record<string, GateSummary> = {};
+  for (const { definition: d, gate: g } of catalog) {
+    if (!wanted.has(d.id)) continue;
+    const dates = g.live_evidence.map((e) => e.on).sort();
+    out[d.id] = {
+      status: g.status,
+      auth: d.auth,
+      base_url_pinned_on: g.base_url_pinned?.on ?? null,
+      auth_confirmed_on: g.auth_confirmed?.on ?? null,
+      terms: g.terms ? { url: g.terms.url, on: g.terms.on } : null,
+      probe: g.probe ? g.probe.endpoint : null,
+      contract_test: g.contract_test,
+      live_evidence: { calls: g.live_evidence.length, last_on: dates.length > 0 ? dates[dates.length - 1] : null },
+    };
+  }
+  return out;
+}
