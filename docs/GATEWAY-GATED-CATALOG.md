@@ -70,12 +70,15 @@ seed sources (offline) -> candidate store -> gate pipeline -> registry (gated on
        passes (keyless APIs only, so no credential can reach a file; the User-Agent is not written); and
        `tests/gateway-contracts.test.ts`, which checks every recording against the catalog's current probe and URL and replays it
        through the gateway in CI. A `gated` or `degraded` API now also needs its recording.
-     - **Not done: no recording exists.** The authoring sandbox cannot reach the four providers (`network error (ENOTFOUND)`) or read
-       their terms pages, so the recorder runs on the owner's PC:
-       `npm ci && npm run build`, then `GATEWAY_USER_AGENT="increadible (<contact>)" node scripts/record-contracts.js --where "<machine>"`
-       (PowerShell: set `$env:GATEWAY_USER_AGENT` first), and the four files under `tests/fixtures/contracts/` go into a pull request.
-       The chain (record, then replay) was run once here with a stubbed `fetch`: four files written, four replays passed; those files were
-       synthetic and deleted.
+     - **Done: the four recordings exist (2026-10-10).** The authoring sandbox cannot reach the providers (`network error (ENOTFOUND)`),
+       so the owner ran the recorder on their Windows PC at `main` = `bed1008` (`npm ci && npm run build`, then
+       `GATEWAY_USER_AGENT="increadible (<contact>)" node scripts/record-contracts.js --where "owner's Windows PC"`): "4 of 4 recorded".
+       The files came in on the owner's branch `contracts-2026-10-10` (commit `02f16ac`) and were taken into the pull request byte for
+       byte; their SHA-256 values match the recorder's output (coingecko `5332cc63...`, hackernews `0a0458c3...`, wikipedia
+       `670a9195...`, wikidata `cf5df2f5...`); no User-Agent or contact is in them. All four replay through the gateway in CI. Each
+       was broken on purpose and the replay failed: wikidata's label `Earth` changed, coingecko's URL changed, hackernews' status 500,
+       hackernews' body a string, wikipedia's `sitename` changed; an extra recording for an unknown API also failed. A recording proves
+       one answer on one day, nothing about uptime; re-record when a probe changes (the test refuses a recording made for another probe).
      - **Waiting on the owner:** the sign-offs on each pinned URL and auth class, and the terms (read on a machine that reaches the
        providers, summarised, signed off).
    Output of step 1: nine gated records, each with a pinned URL, an auth class, terms and a probe history.

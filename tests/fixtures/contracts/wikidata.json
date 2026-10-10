@@ -1,0 +1,35 @@
+{
+  "api": "wikidata",
+  "recorded_on": "2026-10-10T12:58:52.546Z",
+  "recorded_where": "owner's Windows PC",
+  "request": {
+    "endpoint": "/",
+    "params": {
+      "action": "wbgetentities",
+      "ids": "Q2",
+      "props": "labels",
+      "languages": "en",
+      "format": "json"
+    },
+    "url": "https://www.wikidata.org/w/api.php?action=wbgetentities&ids=Q2&props=labels&languages=en&format=json"
+  },
+  "response": {
+    "status": 200,
+    "content_type": "application/json; charset=utf-8",
+    "body": {
+      "entities": {
+        "Q2": {
+          "type": "item",
+          "id": "Q2",
+          "labels": {
+            "en": {
+              "language": "en",
+              "value": "Earth"
+            }
+          }
+        }
+      },
+      "success": 1
+    }
+  }
+}

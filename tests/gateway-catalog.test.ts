@@ -101,15 +101,17 @@ describe("the gated catalog, step 1a: the registry as data", () => {
           contract_test: "tests/no-such-file.test.ts",
         });
       }, /coingecko: gated without an existing contract test file/],
+      // thesportsdb, not coingecko: coingecko has had a recording since 2026-10-10, so it can no longer stand for "no recording"
       ["an API marked gated with every gate filled but no recorded answer", (c) => {
-        Object.assign(c[2].gate, {
+        Object.assign(c[8].gate, {
           status: "gated",
           base_url_pinned: { by: "owner", on: "2026-10-10" },
           auth_confirmed: { by: "owner", on: "2026-10-10" },
           terms: { by: "owner", on: "2026-10-10", url: "https://example.org/terms", summary: "s" },
+          probe: { endpoint: "/all_leagues.php", params: {}, success: "200 with leagues" },
           contract_test: "tests/gateway-contracts.test.ts",
         });
-      }, /coingecko: gated without a recorded contract \(tests\/fixtures\/contracts\/coingecko\.json\)/],
+      }, /^thesportsdb: gated without a recorded contract \(tests\/fixtures\/contracts\/thesportsdb\.json\)$/],
       ["a degraded API with its terms removed", (c) => (c[2].gate.status = "degraded"), /coingecko: degraded without recorded terms/],
       ["a duplicate id", (c) => (c[1].definition.id = c[0].definition.id), /openweathermap: duplicate id/],
       ["an http endpoint", (c) => (c[0].definition.endpoint = "http://api.openweathermap.org/data/2.5"), /openweathermap: endpoint must be plain https/],

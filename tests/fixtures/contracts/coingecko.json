@@ -1,0 +1,17 @@
+{
+  "api": "coingecko",
+  "recorded_on": "2026-10-10T12:58:50.673Z",
+  "recorded_where": "owner's Windows PC",
+  "request": {
+    "endpoint": "/ping",
+    "params": {},
+    "url": "https://api.coingecko.com/api/v3/ping"
+  },
+  "response": {
+    "status": 200,
+    "content_type": "application/json; charset=utf-8",
+    "body": {
+      "gecko_says": "(V3) To the Moon!"
+    }
+  }
+}
