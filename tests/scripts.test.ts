@@ -238,3 +238,21 @@ describe("scripts/cleanroom.sh", () => {
     expect(out).not.toContain("stub verify");
   });
 });
+
+describe("scripts/record-contracts.js", () => {
+  // The recording itself needs the providers, which CI cannot be relied on to reach; its chain (record, then replay in
+  // tests/gateway-contracts.test.ts) was run once with a stubbed fetch. Here: what it refuses before any request is made.
+  const run = (args: string[], env: Record<string, string | undefined>) =>
+    spawnSync("node", ["scripts/record-contracts.js", ...args], { encoding: "utf8", timeout: 30000, env: { ...process.env, ...env } });
+
+  it("refuses to run without a User-Agent with contact details (Wikimedia asks for one)", () => {
+    const r = run([], { GATEWAY_USER_AGENT: "" });
+    expect(r.status).toBe(2);
+    expect(r.stderr).toContain("set GATEWAY_USER_AGENT");
+  });
+
+  it("refuses an unknown option and a --where without a value", () => {
+    expect(run(["--force"], { GATEWAY_USER_AGENT: "t (t@example.org)" }).stderr).toContain("unknown option --force");
+    expect(run(["--where"], { GATEWAY_USER_AGENT: "t (t@example.org)" }).status).toBe(2);
+  });
+});

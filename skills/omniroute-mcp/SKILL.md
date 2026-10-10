@@ -19,10 +19,10 @@ Features #1 to #6 (`features/01` to `06`) are third-party submodules. They run b
 
 | Item | State |
 |---|---|
-| Last recorded: 2026-10-10 | `main` includes PR #47 (1.0.3: live gateway settings in the package); releases **`v1.0.3`** (tag on `916206f`, 2026-10-10) and `v1.0.2`. **First live calls to real providers** (coingecko, hackernews, wikipedia, wikidata, one each, from the owner's Claude Desktop). **Option A approved** (2026-10-10). One working session; it keeps the records |
-| Last merged PR | #47 |
-| Open PR / handover | the gated catalog, step 1a: the registry as data (`features/09-api-gateway/src/catalog.ts`), a gate record per API, all nine `candidate`, answers held to a golden file. Next: step 1b (owner sign-offs, terms, probes, contract tests). Railway stages 1 and 2 done (PR #49). Handover from `hsharma.gxi@gmail.com` (weekly limit reached on 2026-10-09) to `ashiurvi786@gmail.com`: **complete** |
-| Tests | `main` at PR #47: 24 suites, 875 passed, 6 todo; CI green, `main` run 38008855855 (pull-by-digest probe read) |
+| Last recorded: 2026-10-10 | `main` includes PR #50 (gated catalog step 1a: the registry as data, all nine APIs `candidate`); releases **`v1.0.3`** (tag on `916206f`, 2026-10-10) and `v1.0.2`. **First live calls to real providers** (coingecko, hackernews, wikipedia, wikidata, one each, from the owner's Claude Desktop and from Railway). **Option A approved** (2026-10-10). One working session; it keeps the records |
+| Last merged PR | #50 |
+| Open PR / handover | records #50 and starts the gated catalog's step 1b: health probes for the four keyless APIs (`catalog.ts`, checks in `probes.ts`), `scripts/record-contracts.js` (run on the owner's PC: the sandbox cannot reach the providers) and `tests/gateway-contracts.test.ts` (replays recordings; **none recorded yet**). Waiting on the owner: sign-offs on URLs and auth classes, terms. Railway stages 1 and 2 done (PR #49); Railway still runs `916206f` (merges do not deploy). Handover from `hsharma.gxi@gmail.com` (weekly limit reached on 2026-10-09) to `ashiurvi786@gmail.com`: **complete** |
+| Tests | `main` at PR #50: 25 suites, 890 passed, 6 todo; CI green, `main` run 38013095315 (pull-by-digest probe read) |
 | Audit | done: `references/audit.md` (7 parts; mutation testing 78.7% to 90.0%, every remaining mutant read) |
 | Container image | built, probed, pushed to GHCR (private), pulled back by digest and probed again, in CI |
 | Production / cluster | **Railway private rehearsal: stages 1 and 2 done 2026-10-10** (`references/deployment.md`, "Railway"): health, 401 without the token, 13 tools, A/B data survives a restart and a redeploy, the four keyless APIs live from Railway (DNS log: only their hosts); runs as root there; the commit pin did not hold for a variable-triggered redeploy. Stage 3 (a client end to end) needs the owner's approval. No production |

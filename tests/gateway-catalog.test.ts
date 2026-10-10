@@ -39,6 +39,7 @@ function catalogProblems(catalog: CatalogEntry[]): string[] {
         found.push(`${d.id}: ${gate.status} without recorded terms (url, summary, dated sign-off)`);
       if (!gate.probe || gate.probe.success.trim() === "") found.push(`${d.id}: ${gate.status} without a health probe and its success criteria`);
       if (!gate.contract_test || !fs.existsSync(path.join(root, gate.contract_test))) found.push(`${d.id}: ${gate.status} without an existing contract test file`);
+      if (!fs.existsSync(path.join(root, "tests", "fixtures", "contracts", `${d.id}.json`))) found.push(`${d.id}: ${gate.status} without a recorded contract (tests/fixtures/contracts/${d.id}.json)`);
     }
     for (const e of gate.live_evidence) if (!/^\d{4}-\d{2}-\d{2}$/.test(e.on) || !e.where || !e.result) found.push(`${d.id}: live evidence without date, place or result`);
   }
@@ -100,6 +101,15 @@ describe("the gated catalog, step 1a: the registry as data", () => {
           contract_test: "tests/no-such-file.test.ts",
         });
       }, /coingecko: gated without an existing contract test file/],
+      ["an API marked gated with every gate filled but no recorded answer", (c) => {
+        Object.assign(c[2].gate, {
+          status: "gated",
+          base_url_pinned: { by: "owner", on: "2026-10-10" },
+          auth_confirmed: { by: "owner", on: "2026-10-10" },
+          terms: { by: "owner", on: "2026-10-10", url: "https://example.org/terms", summary: "s" },
+          contract_test: "tests/gateway-contracts.test.ts",
+        });
+      }, /coingecko: gated without a recorded contract \(tests\/fixtures\/contracts\/coingecko\.json\)/],
       ["a degraded API with its terms removed", (c) => (c[2].gate.status = "degraded"), /coingecko: degraded without recorded terms/],
       ["a duplicate id", (c) => (c[1].definition.id = c[0].definition.id), /openweathermap: duplicate id/],
       ["an http endpoint", (c) => (c[0].definition.endpoint = "http://api.openweathermap.org/data/2.5"), /openweathermap: endpoint must be plain https/],
