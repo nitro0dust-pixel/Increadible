@@ -13,7 +13,7 @@ Open a new chat and type:
 
 `Use the increadible tool get_api_stats.`
 
-A fresh server answers JSON that starts `{"total_calls":0,` and, up to version 1.0.3, ends `"live_apis":[]}`; from the next version it ends `"rate_limits":{},"rate_limited":0}`. If Claude says it has no such tool, see `docs/TROUBLESHOOTING.md`.
+A fresh server answers JSON that starts `{"total_calls":0,` and, up to version 1.0.3, ends `"live_apis":[]}`; from the next version it ends with a `"gates":{...}` object holding one gate record per API. If Claude says it has no such tool, see `docs/TROUBLESHOOTING.md`.
 
 ## Step 1: find the API id (tool `discover_apis`)
 
@@ -63,6 +63,7 @@ Real example (version 1.0.3, before the two rate-limit fields) after two identic
 | `api_distribution` | Fresh successes per API |
 | `cached_items`, `cache_evictions` | Entries held now (may include expired ones), and entries pushed out because the cache was full |
 | `rate_limits`, `rate_limited` | (after 1.0.3) The per-API limits of live calls per minute set by the operator (`GATEWAY_RATE_LIMITS`; `{}` when none, which is the default and the extension's), and the live calls refused by them before reaching the provider |
+| `gates` | (after 1.0.3) Each API's record in the gated catalog: `status` (`candidate` until every check has passed, then `gated`; all nine are `candidate` today), the auth class, the dates the base URL and auth were signed off and the terms recorded (`null` until then), the health probe's path, the contract test, and how many real calls were recorded as evidence (`live_evidence`). A `candidate` API still answers; the status says how far it has been checked, not whether it works |
 | `live_calls`, `live_apis` | Real network calls made, and the APIs switched to live: `[]` in the extension as installed (Live APIs empty); with live calls on, the ids, or the single value `"*"` when everything is live |
 
 The counters live in the memory of one server process and start at 0 after every restart. Claude Desktop starts several copies and stops them at will (`docs/INSTALL-CLAUDE-DESKTOP.md`, section 5.3), so ask for the statistics in the same chat, soon after your calls. A zero after calls means the server process was restarted, or you are talking to another copy. That a chat's calls and its statistics can reach different copies was **not observed in Claude Desktop (NOT VERIFIED)**; it is an inference.
