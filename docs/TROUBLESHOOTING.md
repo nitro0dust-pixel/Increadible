@@ -61,6 +61,8 @@ You should see one JSON line listing 13 tools. Logs appear on stderr. Press Ctrl
 | `A/B data file lock was lost to another process: refusing to write` | the lock was taken over (this process stalled for over 15 s, or the lock file was removed) | restart the server |
 | `GATEWAY_LIVE_APIS names an unknown API: <id>` | a typo in the list | use ids from `discover_apis` |
 | `GATEWAY_TIMEOUT_MS must be an integer from 100 to 120000; using 10000` (and the other bounds) | a setting out of range | correct it |
+| `GATEWAY_RATE_LIMITS: ignored "..." ...; that API has no limit`, or `GATEWAY_RATE_LIMITS names an unknown API: ...` | an entry that is not `<api>=<1 to 100000>`, or an id not in the catalog | correct it; until then that API is not limited |
+| `<api>: rate limit reached: at most N live calls per minute to this API (GATEWAY_RATE_LIMITS); try again in S s` | the operator's per-API limit is used up; nothing was sent to the provider | wait S seconds, or raise the limit |
 
 ## 4. Tool errors (inside a chat)
 

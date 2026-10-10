@@ -249,13 +249,13 @@ describe("liveGet: how a failed fetch is reported (the real fetch is replaced)",
 });
 
 describe("the options read from the environment", () => {
-  const NAMES = ["GATEWAY_LIVE_APIS", "GATEWAY_TIMEOUT_MS", "GATEWAY_MAX_RESPONSE_BYTES", "GATEWAY_USER_AGENT"] as const;
+  const NAMES = ["GATEWAY_LIVE_APIS", "GATEWAY_TIMEOUT_MS", "GATEWAY_MAX_RESPONSE_BYTES", "GATEWAY_USER_AGENT", "GATEWAY_RATE_LIMITS"] as const;
   const saved: Record<string, string | undefined> = {};
   beforeEach(() => NAMES.forEach((n) => ((saved[n] = process.env[n]), delete process.env[n])));
   afterEach(() => NAMES.forEach((n) => (saved[n] === undefined ? delete process.env[n] : (process.env[n] = saved[n]))));
 
-  it("defaults to no live API, 10 s, 1 MiB and a named user agent", () => {
-    expect(gatewayOptionsFromEnv()).toEqual({ liveApis: [], timeoutMs: 10_000, maxResponseBytes: 1_048_576, userAgent: "increadible-gateway" });
+  it("defaults to no live API, 10 s, 1 MiB, a named user agent and no rate limit", () => {
+    expect(gatewayOptionsFromEnv()).toEqual({ liveApis: [], timeoutMs: 10_000, maxResponseBytes: 1_048_576, userAgent: "increadible-gateway", rateLimits: {} });
     expect(errors).not.toHaveBeenCalled();
   });
 
@@ -576,7 +576,7 @@ describe("the tools around the gateway", () => {
   it("reports its statistics through get_api_stats", async () => {
     const stats = await call("get_api_stats");
     expect(Object.keys(stats).sort()).toEqual([
-      "api_distribution", "cache_evictions", "cache_hit_rate", "cached_items", "failed", "live_apis", "live_calls", "successful", "total_calls",
+      "api_distribution", "cache_evictions", "cache_hit_rate", "cached_items", "failed", "live_apis", "live_calls", "rate_limited", "rate_limits", "successful", "total_calls",
     ]);
   });
 });

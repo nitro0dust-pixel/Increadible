@@ -161,10 +161,10 @@ describe("which APIs are live", () => {
   it("reads its settings from the environment, and falls back (with a note) on a bad number", () => {
     const keep = { ...process.env };
     try {
-      for (const k of ["GATEWAY_LIVE_APIS", "GATEWAY_TIMEOUT_MS", "GATEWAY_MAX_RESPONSE_BYTES", "GATEWAY_USER_AGENT"]) delete process.env[k];
-      expect(gatewayOptionsFromEnv()).toEqual({ liveApis: [], timeoutMs: 10000, maxResponseBytes: 1048576, userAgent: "increadible-gateway" });
+      for (const k of ["GATEWAY_LIVE_APIS", "GATEWAY_TIMEOUT_MS", "GATEWAY_MAX_RESPONSE_BYTES", "GATEWAY_USER_AGENT", "GATEWAY_RATE_LIMITS"]) delete process.env[k];
+      expect(gatewayOptionsFromEnv()).toEqual({ liveApis: [], timeoutMs: 10000, maxResponseBytes: 1048576, userAgent: "increadible-gateway", rateLimits: {} });
       Object.assign(process.env, { GATEWAY_LIVE_APIS: " coingecko, wikipedia ,", GATEWAY_TIMEOUT_MS: "2500", GATEWAY_MAX_RESPONSE_BYTES: "4096", GATEWAY_USER_AGENT: "me (a@b.example)" });
-      expect(gatewayOptionsFromEnv()).toEqual({ liveApis: ["coingecko", "wikipedia"], timeoutMs: 2500, maxResponseBytes: 4096, userAgent: "me (a@b.example)" });
+      expect(gatewayOptionsFromEnv()).toEqual({ liveApis: ["coingecko", "wikipedia"], timeoutMs: 2500, maxResponseBytes: 4096, userAgent: "me (a@b.example)", rateLimits: {} });
       process.env.GATEWAY_LIVE_APIS = "*";
       expect(gatewayOptionsFromEnv().liveApis).toBe("*");
       Object.assign(process.env, { GATEWAY_TIMEOUT_MS: "soon", GATEWAY_MAX_RESPONSE_BYTES: "5" });
