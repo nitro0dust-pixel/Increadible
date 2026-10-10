@@ -61,6 +61,10 @@ function problems(manifest = readJson(manifestFile), pkg = readJson(path.join(ro
     need(entry.title && entry.description, `user_config.${key} needs a title and a description`);
     need(!(entry.required && entry.default !== undefined), `user_config.${key} is required and has a default; pick one`);
     need(!entry.sensitive || entry.type === "string", `user_config.${key} is sensitive and not a string`);
+    // The runtime substitutes only settings that have a value: an optional one left empty with no default stays as the literal
+    // text "${user_config.KEY}" (@anthropic-ai/mcpb 2.1.2, getMcpConfigForManifest), and the server would read that as a value.
+    const usedInConfig = variablesIn(config).includes(`user_config.${key}`);
+    need(entry.required || entry.default !== undefined || !usedInConfig, `user_config.${key} is optional and used in mcp_config, so it needs a default (an empty one is substituted as is)`);
   }
   for (const [key, value] of Object.entries(config.env || {})) need(typeof value === "string", `mcp_config.env.${key} must be a string`);
   const engines = (pkg.engines && pkg.engines.node) || "";

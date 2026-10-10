@@ -2,7 +2,7 @@
 
 # Roadmap and project status
 
-Last updated: 2026-10-09 23:15 UTC (10 Oct 2026, 04:45 IST), measured at `main` = `691d520` (PR #44 merged, after PR #43) and the first release `v1.0.2` (tag on `64cdefb`); open pull requests: the one that records them, and PR #45 (the other session's record of #43, superseded by it).
+Last updated: 2026-10-09 23:40 UTC (10 Oct 2026, 05:10 IST), measured at `main` = `7a982dd` (PR #46 merged; #45 closed as superseded) and the first release `v1.0.2` (tag on `64cdefb`); the open pull request is the 1.0.3 one (live gateway settings in the package).
 
 **Bottom line:** the in-repo code (Features #7-#9 and the server around them) is built, tested, containerised, and the
 image published to GHCR passes its probe. **Nothing is deployed anywhere beyond a local rehearsal**: the staging
@@ -117,6 +117,8 @@ Statuses: DONE, PARTIAL, NOT STARTED, BLOCKED, N/A. A DONE needs evidence (PR, c
 
 ## Session continuity (account handover)
 
+**One working session (owner, 2026-10-09).** After a second session ran in parallel (PRs #43 and #45, the same status lines edited twice, #45 closed as superseded by #46), the owner ended it: one session works on the project and keeps the records (`CLAUDE.md`, branch workflow).
+
 On 2026-10-09 the Claude Pro account `hsharma.gxi@gmail.com` reached its weekly usage limit and the project continued under `ashiurvi786@gmail.com`. The handover plan is **complete**: the unreviewed checkpoint was reviewed, corrected and merged as PR #36 (version 1.0.2), recorded by PR #37, followed by PRs #38 and #39, and version 1.0.2 was verified in Claude Desktop. The full account of the handover, step by step, is in `docs/BUILD-HISTORY.md`, section 4, "Session handover".
 
 ## Backlog (unscheduled)
@@ -126,7 +128,7 @@ On 2026-10-09 the Claude Pro account `hsharma.gxi@gmail.com` reached its weekly 
 - **A/B module:** memory and query cost no longer grow with the data (step 9, `PERFORMANCE.md`). What remains: the data file itself is never compacted (the 1Gi volume holds about 8.9 million measurements and startup replay takes about 9 s for 8 million before the port opens, so a rollup or rotation is for when the volume fills; the `startupProbe` that protects a long replay was added in step 10); the primary metric decides the winner and guardrails can withhold it (PR #19), with 2 to 10 variants (PR #20). Not built: non-inferiority margins for guardrails, and sequential testing (a result is a fixed-sample snapshot, so asking for it repeatedly while data arrives and acting on the first significant answer inflates false positives; decide the sample size first, or add a sequential method).
 - **Observability:** a tool-call latency histogram exists but there is no baseline, so the latency alert threshold is provisional; no cost metrics; no dashboard; the rules are unit-tested with promtool but never run against a live Prometheus; no HTTP-level (end-to-end) latency metric, no request log.
 - **HTTP:** no TLS, per-client rate limit or request logging; the rate limit is global and off by default; keep-alive timeout is Node's 5 s default, unchecked against a real load balancer's idle timeout.
-- **Gateway live mode:** unverified against the real providers; no per-API rate limiter (only the global, off-by-default `RATE_LIMIT_PER_MINUTE`); no egress policy (no NetworkPolicy exists); no retry or backoff; no response schema per provider (it forwards the provider's JSON as is); each provider's terms of service not reviewed.
+- **Gateway live mode:** switchable in the Claude Desktop package from 1.0.3 (settings Live APIs and Contact, empty by default; keyless APIs only, no key setting); **verified against the real providers for those four** (one call each from Claude Desktop, 2026-10-10: coingecko `/simple/price`, hackernews `/maxitem.json`, a wikipedia search, a wikidata `wbsearchentities`; `get_api_stats` 4 calls, 4 live, 0 failed); unverified for the key-based APIs and for anything beyond one call each; no per-API rate limiter (only the global, off-by-default `RATE_LIMIT_PER_MINUTE`); no egress policy (no NetworkPolicy exists); no retry or backoff; no response schema per provider (it forwards the provider's JSON as is); each provider's terms of service not reviewed.
 - **Container hardening:** the secret scanner is pinned by digest (D-5, PR #39); the `docker` job does not wait for the `prometheus` job (D-6, accepted: the image holds no alert rules); no image signing; the image SBOM attestation is unverified; no vulnerability scan; GitHub Actions are pinned by version tag, not by commit SHA.
 
 ## Open decisions (owner)

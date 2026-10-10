@@ -19,9 +19,9 @@ Features #1 to #6 (`features/01` to `06`) are third-party submodules. They run b
 
 | Item | State |
 |---|---|
-| Last recorded: 2026-10-09 | `main` includes PR #44 (the release procedure, `references/releasing.md`) after PR #43 (the unknown-variant error lists the variant ids); first release **`v1.0.2`** tagged on `64cdefb` |
+| Last recorded: 2026-10-09 | `main` includes PR #46 (records #43 and #44; supersedes #45); first release **`v1.0.2`** tagged on `64cdefb`. **One working session from now on** (owner, 2026-10-09): it keeps the records |
 | Last merged PR | #44 |
-| Open PR / handover | the record PR for #43 and #44. **Next release must be 1.0.3 or later**: `main` still says 1.0.2 but builds a different file (`e02337fb...` after #43) from the tagged `v1.0.2` (`3594d5fd...`). Handover from `hsharma.gxi@gmail.com` (weekly limit reached on 2026-10-09) to `ashiurvi786@gmail.com`: **complete** |
+| Open PR / handover | PR #47 (1.0.3: live gateway settings in the package). **First live calls to real providers, 2026-10-10**: the owner's Claude Desktop answered `source: "live"` for coingecko, hackernews, wikipedia and wikidata (one call each; key-based APIs never run live). Waits for merge, then the owner's tag `v1.0.3`. Handover from `hsharma.gxi@gmail.com` (weekly limit reached on 2026-10-09) to `ashiurvi786@gmail.com`: **complete** |
 | Tests | `main` at PR #44: 24 suites, 871 passed, 6 todo (local run of the merged tree); `main` run 38002470893 for #43 green, pull-by-digest probe read |
 | Audit | done: `references/audit.md` (7 parts; mutation testing 78.7% to 90.0%, every remaining mutant read) |
 | Container image | built, probed, pushed to GHCR (private), pulled back by digest and probed again, in CI |
@@ -76,7 +76,7 @@ Node 24 in the image and CI; `engines` is `>=22`. The authoring sandbox has no D
 3. Pick a data folder; **every path in the config must be absolute**.
 4. Settings, Developer, Edit Config: add `increadible` under `mcpServers` with `command` = full path of `node`, `args` = the absolute path of `dist/src/index.js`, and `env` with `RULES_FILE` and `AB_DATA_FILE` (and `AB_FSYNC=1` if wanted).
 5. Quit Claude Desktop completely, start it, check Settings, Developer shows it running, and that 13 tools are listed.
-6. Without `AB_DATA_FILE` all A/B data is lost at every restart. The gateway answers mock data unless `GATEWAY_LIVE_APIS` is set. The one-click route: `npm run mcpb` builds `dist/mcpb/increadible-<version>.mcpb`; double-click it (or drag it into Claude Desktop, or Settings, Extensions, Advanced settings, Install Extension), choose a **Data folder**, leave the durable-writes setting on. It needs no Node on the PATH to run. Details and what was verified: Path A in the install guide.
+6. Without `AB_DATA_FILE` all A/B data is lost at every restart. The gateway answers mock data unless `GATEWAY_LIVE_APIS` is set (in the package from 1.0.3: the setting Live APIs; the four keyless APIs answered live from Claude Desktop on 2026-10-10). The one-click route: `npm run mcpb` builds `dist/mcpb/increadible-<version>.mcpb`; double-click it (or drag it into Claude Desktop, or Settings, Extensions, Advanced settings, Install Extension), choose a **Data folder**, leave the durable-writes setting on. It needs no Node on the PATH to run. Details and what was verified: Path A in the install guide.
 
 These steps are Path B (the config file): verified only up to the handshake, **NOT VERIFIED** inside Claude Desktop. Path A (the `.mcpb` package) is verified in the app for version 1.0.2 (owner, Windows, 2026-10-09).
 

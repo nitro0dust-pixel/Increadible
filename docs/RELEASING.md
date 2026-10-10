@@ -28,10 +28,13 @@ chat). A green CI run is not enough: version 1.0.0 passed CI, installed, and nev
    ```sh
    npm version X.Y.Z --no-git-tag-version   # package.json and package-lock.json only
    ```
-   then set the same `"version"` in `mcpb/manifest.json` by hand, and run `node scripts/mcpb.js problems` (it must print
-   `mcpb: manifest is consistent with package.json`). Leaving the manifest behind is caught: `problems` exits 1 and the tests fail
-   (rehearsed on 2026-10-09 with 1.0.3 in a scratch copy: 14 tests failed until the manifest matched, then all passed).
-2. **CHANGELOG:** move the entries under `## [Unreleased]` to `## [X.Y.Z] - YYYY-MM-DD` and leave an empty *Unreleased* above it.
+   then set the same version by hand in two more places: `"version"` in `mcpb/manifest.json`, and `SERVER_INFO` in `src/server.ts`
+   (the version the server reports to Claude Desktop and in its `ready on stdio` line). Run `node scripts/mcpb.js problems` (it must
+   print `mcpb: manifest is consistent with package.json`) and the **whole** `npm test`. Leaving either place behind is caught: a manifest
+   left behind makes `problems` exit 1 and 14 tests fail; `SERVER_INFO` left behind fails a test in `tests/mcpb.test.ts` and, after a
+   build, the banner test in `tests/entry-point.test.ts`. (The first rehearsal, on 2026-10-09, ran only `tests/config.test.ts` and
+   `tests/mcpb.test.ts` and missed `SERVER_INFO`; it was found when 1.0.3 was made, and the direct test was added then.)
+2. **CHANGELOG:** say under `## [Unreleased]` that the version is X.Y.Z. The entries move to `## [X.Y.Z] - YYYY-MM-DD` (the tag's date) in the pull request that records the tag, so that no release date is written before the version answered in Claude Desktop (as for `v1.0.2`, whose section was written after its tag).
 3. **Merge** after CI is green on the exact head, logs read. Note the merge commit `C` on `main`.
 4. **Read the package's SHA-256 from two independent builds of `C`:**
    - CI: the `main` run for `C`, job *Type-check, lint, build, smoke*, step `npm run mcpb`, line `mcpb: N files, B bytes, sha256 H`
@@ -55,8 +58,9 @@ chat). A green CI run is not enough: version 1.0.0 passed CI, installed, and nev
 8. **Record it:** the CHANGELOG header, the release row in `ROADMAP.md` ("Open decisions"), a row in `docs/BUILD-HISTORY.md`, the
    skill's status table, then `node scripts/skill.js sync` and `npm test`.
 
-What `v1.0.2` went through: steps 1, 3, 4 (CI and local builds, same SHA-256 `3594d5fd...`), 5, 6, 7 and 8. Step 2 came after the
-tag (PR #41 split the CHANGELOG).
+What `v1.0.2` went through: steps 1, 3, 4 (CI and local builds, same SHA-256 `3594d5fd...`), 5, 6, 7 and 8. Its CHANGELOG section was
+written after the tag (PR #41), which is now step 2. Version 1.0.3 (live gateway settings in the package) has done step 1 and waits for
+steps 3 to 8.
 
 ## 4. A version number names one file only once it is released
 

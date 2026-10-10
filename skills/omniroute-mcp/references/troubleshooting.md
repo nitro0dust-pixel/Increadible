@@ -41,7 +41,11 @@ You should see one JSON line listing 13 tools. Logs appear on stderr. Press Ctrl
 | An A/B tool says "Cannot use A/B data file ... in use by pid ..." | another copy of the server (the app starts several) holds the data file | close the other session or wait: the tool tries again on its next call, and the data file is released when the other copy ends. Routing and gateway tools are not affected |
 | An A/B tool says its lock "could not be checked from here ... try again" | a copy that was killed left its lock, which expires 15 s after its last refresh | wait 15 s and call again (nothing needs deleting) |
 | The tools are missing, or Increadible shows an error, after installing a new version | the new tool list or the start-up (1.0.2 itself was verified in the app on 2026-10-09, so a failure on 1.0.2 points at the machine or the install rather than the version) | remove the extension, install it again, and send the log lines around `increadible <version>: ready on stdio` (`docs/INSTALL-CLAUDE-DESKTOP.md`, section 5.5) |
-| I want live API calls or API keys | the package does not offer those settings yet | use Path B (`GATEWAY_LIVE_APIS`, `GATEWAY_KEY_<API>`); live mode has never run against a real provider |
+| I want live API calls | version 1.0.3 and later: the setting **Live APIs (real calls)** (empty means sample data); 1.0.2 has no such setting | fill it with lower-case ids, for example `coingecko,hackernews,wikipedia,wikidata`, set **Contact for providers**, then quit and restart Claude Desktop; check `source: "live"` and `get_api_stats` → `live_apis`. The four keyless APIs answered live from Claude Desktop on 2026-10-10 (one call each) |
+| I want API keys (openweathermap, weatherapi, finnhub, newsapi) | the package asks for no key | use Path B (`GATEWAY_KEY_<API>`) |
+| Live APIs is set, but `get_api_stats` lists fewer ids than you typed | a character other than a comma, such as a trailing `;` (`wikidata;` is not an id), or capitals | ids are lower case and separated by commas only: `coingecko,hackernews,wikipedia,wikidata`; save, then quit and restart Claude Desktop |
+| The chat answers that there is no `get_api_stats` tool, and lists other connections instead | that chat does not have the extension (a Cowork or Code session loads its own set) | start a new normal chat and check that Increadible is on in its tools menu (seen on 2026-10-10; a new chat had the tools) |
+| Live APIs is set, but answers still say `source: "mock"` | the server was not restarted, or an id is misspelt (capitals are ignored: `CoinGecko` is not `coingecko`) | quit Claude Desktop completely and start it again; compare `get_api_stats` → `live_apis` with what you typed |
 
 ## 3. Start-up messages from the server
 
@@ -83,7 +87,7 @@ You should see one JSON line listing 13 tools. Logs appear on stderr. Press Ctrl
 | Everything is gone after I restart Claude Desktop | `AB_DATA_FILE` is not set in the config: A/B data lives in memory only |
 | `get_experiment_results` says it needs more samples | at least 100 measurements in total and 30 per variant before a result is given |
 | No winner although one variant looks better | a winner must be significantly better (p < 0.05, Holm-corrected) than every other variant, and no guardrail may be significantly worse or have no data |
-| Prices or weather look fake | the gateway answers **mock data** unless you set `GATEWAY_LIVE_APIS`; every `call_api` result, and every successful `aggregate_apis` item, has a `source` field (`mock` or `live`); `discover_apis` and `get_api_stats` answers have none (`docs/USING-THE-GATEWAY.md`) |
+| Prices or weather look fake | the gateway answers **mock data** unless you set **Live APIs** in the extension (1.0.3 and later) or `GATEWAY_LIVE_APIS`; every `call_api` result, and every successful `aggregate_apis` item, has a `source` field (`mock` or `live`); `discover_apis` and `get_api_stats` answers have none (`docs/USING-THE-GATEWAY.md`) |
 | Where is my rules file? | the path in `RULES_FILE`; if unset, built-in rules only |
 
 ## 6. Still stuck

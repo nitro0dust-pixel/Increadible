@@ -23,7 +23,7 @@ Tools that run *beside* this server (and why `agentacct` is not the savings inst
 | 6 | agentacct (cost tracking) | submodule `features/06-agentacct/agentacct` ([upstream](https://github.com/mikehasa/agentacct)) | no |
 | 7 | Routing Plugins | `features/07-routing-plugins/src/mcp-server.ts` | yes |
 | 8 | A/B Testing | `features/08-ab-testing/src/mcp-server.ts` | yes |
-| 9 | API Gateway | `features/09-api-gateway/src/mcp-server.ts` | yes (mock data by default; opt-in live calls, never tried against a real provider) |
+| 9 | API Gateway | `features/09-api-gateway/src/mcp-server.ts` | yes (mock data by default; opt-in live calls, verified for the four keyless APIs only (coingecko, hackernews, wikipedia, wikidata: one real call each from Claude Desktop on the owner's Windows PC, 2026-10-10, package 1.0.3); the key-based APIs have never run live) |
 
 Each feature has an `INTEGRATION_GUIDE.md` next to its code or submodule. Features #1-#6 are
 documented by their upstream READMEs; the guides here only describe how they fit together.
@@ -156,7 +156,8 @@ First enabled rule whose `match` fits wins; an empty `match` matches everything.
 returns **generated mock data** and makes no network calls (every `call_api` result and every successful `aggregate_apis` item says `"source": "mock"`). Real HTTP calls are **opt-in per
 API**: set `GATEWAY_LIVE_APIS` to a comma-separated list of API ids (or `*`); `GATEWAY_TIMEOUT_MS`, `GATEWAY_MAX_RESPONSE_BYTES` and
 `GATEWAY_USER_AGENT` tune them, and the four key-based APIs read their key from `GATEWAY_KEY_<API>` (names and the security rules in
-`DEPLOYMENT.md`). Live mode has been tested against a local HTTP server only, **not against the real providers**. Results are cached for 5 minutes, at most 500 results and about 16 MiB (the oldest go first). At most 10 live calls run at once across the gateway, up to 100 more wait for a slot and anything beyond that is refused at once; an `aggregate_apis` request takes up to 100 calls and a call that fails holds its own `{error}` in the result instead of failing the request.
+`DEPLOYMENT.md`). In the Claude Desktop package (1.0.3 and later) the same switch is the setting **Live APIs (real calls)**, empty by default
+(`docs/INSTALL-CLAUDE-DESKTOP.md`, section 5.3). Live mode was tested against a local HTTP server, and against the real providers only for the four keyless APIs (one call each from Claude Desktop, 2026-10-10); the key-based APIs have **never run live**. Results are cached for 5 minutes, at most 500 results and about 16 MiB (the oldest go first). At most 10 live calls run at once across the gateway, up to 100 more wait for a slot and anything beyond that is refused at once; an `aggregate_apis` request takes up to 100 calls and a call that fails holds its own `{error}` in the result instead of failing the request.
 
 ## Development
 
