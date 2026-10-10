@@ -1,7 +1,8 @@
 # Deployment
 
 > **Verification status:** the server is tested locally (`npm run verify`) and CI builds and probes the
-> Docker image. **Nothing has been deployed to a real environment.** `k8s/staging-deployment.yaml` has been applied once
+> Docker image. **One private rehearsal runs on Railway** (stage 1, 2026-10-10, section "Railway"); nothing else runs in a real
+> environment. `k8s/staging-deployment.yaml` has been applied once
 > to a local Docker Desktop cluster with a locally built image (rollout, auth, ConfigMap rules and A/B persistence across
 > `rollout restart` all checked). The production and monitoring manifests have only been parsed and checked for internal
 > consistency by `tests/config.test.ts`, and the GHCR pull path is untested. Treat them as a starting point.
@@ -155,6 +156,62 @@ finnhub.io, newsapi.org, hacker-news.firebaseio.com, en.wikipedia.org, www.wikid
   (command from Docker's attestation documentation) and check that it lists packages.
 - Dependabot (`.github/dependabot.yml`) proposes npm, GitHub Actions and Docker updates weekly, never npm or Node
   major bumps. It reads that file from the repository's default branch, so it does nothing until the default branch is `main`.
+
+## Railway (stages 1 and 2: private rehearsal, then live data; both verified 2026-10-10)
+
+The owner chose Railway for the first hosted run and approved it in stages. **Stages 1 (private rehearsal) and 2 (the four keyless
+APIs live) are done**; stage 3 (a client connected end to end) needs the owner's approval.
+
+| Setting | Value | Why |
+|---|---|---|
+| Project, service | `increadible-rehearsal`, service `increadible` (its own project, apart from the owner's others) | nothing else shares it |
+| Source | this repository, set to commit `916206f` (`v1.0.3`), built from the `Dockerfile` | **the pin does not hold for every redeploy**: on 2026-10-10 a redeploy caused by changing variables built the head of `main` (`aa0d616`) although the service still showed the pin; its build inputs (`src`, `features/07-09/src`, `Dockerfile`, `package*.json`, `tsconfig*.json`, `scripts/clean.js`, `LICENSE`, `.dockerignore`) were identical to `916206f`'s, and the service was then redeployed from `916206f` explicitly. Check the commit of the running deployment after any change |
+| Replicas | 1 | the A/B data file has one writer |
+| Volume | `increadible-data` at `/data` | `RULES_FILE`, `EXPERIMENTS_FILE`, `AB_DATA_FILE` already point there (`Dockerfile`) |
+| Variables | `AUTH_TOKEN` (64 random hex characters, set on the service, never printed or committed), `PORT=3000`, `AB_FSYNC=1`, `RAILWAY_RUN_UID=0` | the server refuses to start on `0.0.0.0` without a token; durable writes as in the manifests |
+| Live gateway | stage 1: off. Stage 2: `GATEWAY_LIVE_APIS=coingecko,hackernews,wikipedia,wikidata` and `GATEWAY_USER_AGENT` set to the owner's contact | the four keyless APIs only; no API key is stored on Railway |
+| Address | `https://increadible-production.up.railway.app` (Railway's domain, HTTPS) | `/health` and `/ready` are open; `/mcp` and `/metrics` need the token |
+
+**`RAILWAY_RUN_UID=0` runs the container as root.** Railway mounts volumes as root (its documentation, "Volumes", *Permissions*
+and *Caveats*), and the image runs as the non-root user `node`, which could not write `/data` otherwise. This undoes one hardening
+of the image on Railway only (`SECURITY.md`). Not tried: preparing the volume's ownership another way.
+
+**Checked on 2026-10-10** (from the owner's PC, because the authoring sandbox's network policy refuses the Railway domain; Railway's
+own build, deploy and request logs read from here):
+
+| Check | Result |
+|---|---|
+| Build | from `916206f` with the `Dockerfile`, image `sha256:36d22c5a...`; deployment `SUCCESS` |
+| `GET /health` | 200, `{"status":"ok"}` |
+| `POST /mcp` without the token | 401 |
+| `tools/list` with the token | 13 tools |
+| `create_experiment`, then `record_metric` (variant A, `score` 8) | `success`, `recorded` |
+| `get_api_stats` | `live_apis: []` (sample data only) |
+| Restart (`restart-service`), then `get_experiment_results` | the old process logged `SIGTERM`, the new one `Restored 1 experiments and 1 measurements from /data/ab-data.jsonl`, and the call answered `current_samples: 1`: **A/B data survives a restart on the Railway volume** |
+| Railway's request log | the six probe calls and the one after the restart, with the status codes above |
+
+**Stage 2, checked on 2026-10-10:** the variables above made Railway redeploy (and redeploy again from `916206f` explicitly, see
+*Source*); the new process logged `Live API calls enabled for: coingecko, hackernews, wikipedia, wikidata` and again restored the
+experiment and its measurement, so **the A/B data also survives a redeploy from a fresh build**. From the owner's PC, one `call_api` each
+answered `source: "live"` with no error: coingecko `/simple/price`, hackernews `/maxitem.json`, a wikipedia search, a wikidata
+`wbsearchentities`; `get_api_stats` then 4 calls, 4 successful, 4 live, 0 failed. Railway's DNS log shows that the container looked up
+exactly these four providers' hosts (`api.coingecko.com`, `hacker-news.firebaseio.com`, `en.wikipedia.org`, `www.wikidata.org`) and no
+other, so the calls left from Railway (region `sfo`) and only to the registered hosts.
+
+**Not checked:** the volume's backups, load, the price of the plan, and whether
+Claude Desktop or claude.ai can use this server remotely (it takes a static bearer token; claude.ai's remote connectors use OAuth).
+
+To repeat the probe, from PowerShell (the token is read from the Railway dashboard, service *Variables*, and never pasted into a
+chat or a file):
+
+```powershell
+$u = "https://increadible-production.up.railway.app"
+Invoke-RestMethod "$u/health"
+$s = Read-Host "AUTH_TOKEN" -AsSecureString
+$t = [Runtime.InteropServices.Marshal]::PtrToStringAuto([Runtime.InteropServices.Marshal]::SecureStringToBSTR($s))
+$h = @{ Authorization = "Bearer $t" }
+(Invoke-RestMethod -Method Post "$u/mcp" -Headers $h -ContentType application/json -Body '{"jsonrpc":"2.0","id":1,"method":"tools/list"}').result.tools.Count
+```
 
 ## Kubernetes (staging verified locally only)
 
