@@ -9,7 +9,7 @@ counts, no commit hashes and no status, because those go stale with every PR.
 ## What this is
 
 One MCP server (stdio and HTTP) serving three components we wrote: Routing Plugins (#7), A/B Testing (#8) and API
-Gateway (#9, **mock data by default**, with opt-in live calls: verified for the four keyless APIs only (coingecko, hackernews, wikipedia, wikidata: one real call each from Claude Desktop on the owner's Windows PC, 2026-10-10, package 1.0.3); the key-based APIs have never run live). `features/01-06` are vendored third-party submodules that are **not integrated or
+Gateway (#9, **mock data by default**, with opt-in live calls: verified for the four keyless APIs only (coingecko, hackernews, wikipedia, wikidata: one real call each from Claude Desktop on the owner's Windows PC and from the Railway rehearsal, 2026-10-10, version 1.0.3); the key-based APIs have never run live). `features/01-06` are vendored third-party submodules that are **not integrated or
 tested here**. Nothing is deployed beyond rehearsals (a local Kubernetes one, and a private one on Railway, `DEPLOYMENT.md`); no cost saving has been measured (the old percentages were
 targets, not results).
 

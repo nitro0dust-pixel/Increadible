@@ -12,6 +12,7 @@ Entries marked **behaviour change** can affect an existing deployment.
 
 ### Added
 - **A private rehearsal on Railway (hosting stage 1, approved by the owner on 2026-10-10)**: one service built from the `Dockerfile` at `v1.0.3`, one replica, a `/data` volume, `AUTH_TOKEN`, live calls off. Checked from the owner's PC: health, 401 without the token, 13 tools, and an A/B measurement that survived a restart (`DEPLOYMENT.md`, "Railway"). **Behaviour change on Railway only:** the container runs as root there (`RAILWAY_RUN_UID=0`).
+- **Hosting stage 2 on Railway (approved by the owner on 2026-10-10):** the four keyless APIs live there, with the owner's contact as the User-Agent; one call each answered `source: "live"` from Railway, whose DNS log shows only the four providers' hosts (`DEPLOYMENT.md`, "Railway").
 
 ## [1.0.3] - 2026-10-10
 

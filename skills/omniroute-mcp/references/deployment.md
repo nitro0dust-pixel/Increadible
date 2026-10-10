@@ -159,10 +159,10 @@ finnhub.io, newsapi.org, hacker-news.firebaseio.com, en.wikipedia.org, www.wikid
 - Dependabot (`.github/dependabot.yml`) proposes npm, GitHub Actions and Docker updates weekly, never npm or Node
   major bumps. It reads that file from the repository's default branch, so it does nothing until the default branch is `main`.
 
-## Railway (stage 1: private rehearsal, verified 2026-10-10)
+## Railway (stages 1 and 2: private rehearsal, then live data; both verified 2026-10-10)
 
-The owner chose Railway for the first hosted run and approved it in stages. **Stage 1 is done**; stages 2 (the four keyless APIs
-live) and 3 (a client connected end to end) each need the owner's approval.
+The owner chose Railway for the first hosted run and approved it in stages. **Stages 1 (private rehearsal) and 2 (the four keyless
+APIs live) are done**; stage 3 (a client connected end to end) needs the owner's approval.
 
 | Setting | Value | Why |
 |---|---|---|
@@ -171,7 +171,7 @@ live) and 3 (a client connected end to end) each need the owner's approval.
 | Replicas | 1 | the A/B data file has one writer |
 | Volume | `increadible-data` at `/data` | `RULES_FILE`, `EXPERIMENTS_FILE`, `AB_DATA_FILE` already point there (`Dockerfile`) |
 | Variables | `AUTH_TOKEN` (64 random hex characters, set on the service, never printed or committed), `PORT=3000`, `AB_FSYNC=1`, `RAILWAY_RUN_UID=0` | the server refuses to start on `0.0.0.0` without a token; durable writes as in the manifests |
-| Live gateway | off (`GATEWAY_LIVE_APIS` not set) | stage 2 |
+| Live gateway | stage 1: off. Stage 2: `GATEWAY_LIVE_APIS=coingecko,hackernews,wikipedia,wikidata` and `GATEWAY_USER_AGENT` set to the owner's contact | the four keyless APIs only; no API key is stored on Railway |
 | Address | `https://increadible-production.up.railway.app` (Railway's domain, HTTPS) | `/health` and `/ready` are open; `/mcp` and `/metrics` need the token |
 
 **`RAILWAY_RUN_UID=0` runs the container as root.** Railway mounts volumes as root (its documentation, "Volumes", *Permissions*
@@ -192,7 +192,15 @@ own build, deploy and request logs read from here):
 | Restart (`restart-service`), then `get_experiment_results` | the old process logged `SIGTERM`, the new one `Restored 1 experiments and 1 measurements from /data/ab-data.jsonl`, and the call answered `current_samples: 1`: **A/B data survives a restart on the Railway volume** |
 | Railway's request log | the six probe calls and the one after the restart, with the status codes above |
 
-**Not checked:** a redeploy from a new build (only a restart), the volume's backups, load, the price of the plan, and whether
+**Stage 2, checked on 2026-10-10:** the variables above made Railway redeploy (and redeploy again from `916206f` explicitly, see
+*Source*); the new process logged `Live API calls enabled for: coingecko, hackernews, wikipedia, wikidata` and again restored the
+experiment and its measurement, so **the A/B data also survives a redeploy from a fresh build**. From the owner's PC, one `call_api` each
+answered `source: "live"` with no error: coingecko `/simple/price`, hackernews `/maxitem.json`, a wikipedia search, a wikidata
+`wbsearchentities`; `get_api_stats` then 4 calls, 4 successful, 4 live, 0 failed. Railway's DNS log shows that the container looked up
+exactly these four providers' hosts (`api.coingecko.com`, `hacker-news.firebaseio.com`, `en.wikipedia.org`, `www.wikidata.org`) and no
+other, so the calls left from Railway (region `sfo`) and only to the registered hosts.
+
+**Not checked:** the volume's backups, load, the price of the plan, and whether
 Claude Desktop or claude.ai can use this server remotely (it takes a static bearer token; claude.ai's remote connectors use OAuth).
 
 To repeat the probe, from PowerShell (the token is read from the Railway dashboard, service *Variables*, and never pasted into a
