@@ -35,7 +35,7 @@ Facts that carry the decision:
 |---|---|
 | APIs.guru's data last changed on **2024-03-01**, although the repository states weekly updates | **Verified** (primary page) |
 | APIs.guru lists about 2,500 APIs | Third-party figure, **NOT VERIFIED** |
-| public-apis has about 1,980 entries, roughly half needing no auth, and is Markdown tables (not machine-readable) | Entry count and the no-auth share are a research agent's tally, **NOT VERIFIED** |
+| public-apis has about 1,980 entries, roughly half needing no auth, and is Markdown tables (not machine-readable) | The research agent's tally was NOT VERIFIED; **counted on 2026-10-10** (gated catalog, step 4) from the list's README (SHA-256 `cf00cccb...`): **2,032 entries** in 51 categories, **972 listed with no auth** (47.8%), 903 `apiKey`, 149 `OAuth`, 6 `X-Mashape-Key`, 2 `User-Agent`; 5 rows malformed in the source. The tables are regular enough to parse (`scripts/seed-candidates.js`); a listing says nothing about whether an API works |
 | agentgateway (Linux Foundation, Apache-2.0): 5 security advisories, 1 High, **two on MCP-to-OpenAPI parameter sanitization** (the latest 2 Oct 2026), the very path a converter-based design would rely on | **Verified** (GitHub advisories page) |
 | IBM ContextForge: 10+ advisories, 2 Critical on 25 Aug 2026 (SSRF in a bundled server; a default JWT secret in the Docker Compose file); its `SECURITY.md` says the admin UI and API "must be disabled in production" | Research agent's reading of the repository, 2026-10-07, not re-read by me |
 | Docker MCP Gateway: needs a Docker daemon (a Kubernetes pod has none); 8 advisories, 2 Critical on 9 Jul 2026; catalog "300+" servers, Beta | Same; the catalog figure is from a search summary, `docs.docker.com` was not fetchable |
