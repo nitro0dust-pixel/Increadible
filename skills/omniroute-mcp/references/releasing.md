@@ -65,7 +65,7 @@ written after the tag (PR #41), which is now step 2. `v1.0.3` went through all e
 and CHANGELOG note (PR #47), merge (`916206f`, its tree equal to the CI-verified head `af43e10`), the package SHA-256 from CI and from
 a local build (`1fd5ac75...`, equal), the owner's install and live calls in Claude Desktop, the owner's annotated tag (object
 `5dd6620d`, 2026-10-10 00:34 UTC, unsigned), its check through the GitHub API (it points at `916206f`), and the records (the PR that
-moved the CHANGELOG to `[1.0.3]`). Which of the two 1.0.3 files the owner installed last is in `ROADMAP.md` (release row).
+moved the CHANGELOG to `[1.0.3]`). The owner installed the final file (`1fd5ac75...`); the first test build (`c9eef367...`, same server code) was also downloaded, which is why the file name alone cannot tell them apart.
 
 ## 4. A version number names one file only once it is released
 
