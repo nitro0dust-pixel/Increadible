@@ -593,13 +593,15 @@ describe("GATEWAY.md", () => {
     for (const f of ["README.md", "CLAUDE.md", "ROADMAP.md"]) expect({ file: f, links: read(f).includes("GATEWAY.md") }).toEqual({ file: f, links: true });
   });
 
-  it("says it is a proposal waiting on the owner and that nothing was built, and keeps its NOT VERIFIED list", () => {
-    expect(doc).toContain("**Status: PROPOSED. Waiting for the owner's decision. Nothing has been built from it.**");
+  it("says which option the owner approved and when, that nothing is built yet, and keeps its NOT VERIFIED list", () => {
+    expect(doc).toContain("**Status: option A APPROVED by the owner on 2026-10-10. Nothing has been built from it yet;");
     expect(doc).toContain("NOT VERIFIED");
     expect(doc).toContain("## Not verified");
     expect(doc).toContain("## Decisions requested from the owner");
-    // the decisions stay unticked until the owner makes them
-    expect(doc.split("## Decisions requested from the owner")[1]).not.toMatch(/- \[x\]/i);
+    // a decision is ticked only with the owner's dated approval on the same line; the others stay open
+    const boxes = doc.split("## Decisions requested from the owner")[1].split("\n").filter((l) => /^- \[[ x]\]/.test(l));
+    for (const line of boxes.filter((l) => l.startsWith("- [x]"))) expect({ line, dated: /[Aa]pproved .*\d{4}-\d{2}-\d{2}/.test(line) }).toEqual({ line, dated: true });
+    expect(boxes.filter((l) => l.startsWith("- [ ]")).length).toBeGreaterThan(0); // option D and the place for API keys are still open
   });
 
   it("states the size of the registry it is a proposal to change", () => {

@@ -1,6 +1,6 @@
 # Universal API gateway: decision record
 
-**Status: PROPOSED. Waiting for the owner's decision. Nothing has been built from it.** The gateway in this repository (Feature #9)
+**Status: option A APPROVED by the owner on 2026-10-10. Nothing has been built from it yet; step 1 of the gated catalog is next.** The gateway in this repository (Feature #9)
 still has 9 registered APIs. Written 2026-10-08 from research done on 2026-10-07 and 2026-10-08; every claim carries its
 verification status, and the list of what is not verified is at the end.
 
@@ -90,10 +90,10 @@ candidate when run (none was installed or run).
 
 ## Decisions requested from the owner
 
-The gated catalog of option A, as components and an order of work: [`docs/GATEWAY-GATED-CATALOG.md`](docs/GATEWAY-GATED-CATALOG.md) (proposed, not built).
+The gated catalog of option A, as components and an order of work: [`docs/GATEWAY-GATED-CATALOG.md`](docs/GATEWAY-GATED-CATALOG.md) (approved 2026-10-10, not built yet).
 
 
-- [ ] Approve the direction: **build the core, no giant** (option A).
-- [ ] Approve starting the **gated catalog** (the seeding and gating pipeline) after the audit.
+- [x] Approve the direction: **build the core, no giant** (option A). **Approved by the owner on 2026-10-10.**
+- [x] Approve starting the **gated catalog** (the seeding and gating pipeline) after the audit. **Approved with option A on 2026-10-10**; step 1 (`docs/GATEWAY-GATED-CATALOG.md`, section 4) is next.
 - [ ] Say whether option D (a hosted platform beside the server for SaaS actions) is wanted.
 - [ ] Choose where API keys will live when live mode is used for more than the keyless APIs (a Secret in the cluster is the assumption in `DEPLOYMENT.md`).

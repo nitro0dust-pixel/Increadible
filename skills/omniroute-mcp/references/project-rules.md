@@ -3,7 +3,7 @@
 # Increadible: context for Claude sessions
 
 Read this first, then `ROADMAP.md` (status, plan, open decisions: the source of truth for *what is done*),
-`DEPLOYMENT.md` (how it runs), `PERFORMANCE.md` (what has been measured, and what the numbers do not say), `COMPANIONS.md` (third-party tools that run beside this server, never inside it) and `GATEWAY.md` (the decision record for a universal API gateway: researched, proposed, not built, waiting on the owner); `AUDIT.md` is the account of the code audit: what was found, fixed and left open). The index of every document is `docs/README.md`; `CONTRIBUTING.md` and `SECURITY.md` cover how to change the code and its security posture; the global skill `skills/omniroute-mcp/` carries all of it into any Claude session. This file holds the stable facts and the working rules; it deliberately holds no test
+`DEPLOYMENT.md` (how it runs), `PERFORMANCE.md` (what has been measured, and what the numbers do not say), `COMPANIONS.md` (third-party tools that run beside this server, never inside it) and `GATEWAY.md` (the decision record for a universal API gateway: researched; option A, the gated catalog, approved by the owner on 2026-10-10; not built yet); `AUDIT.md` is the account of the code audit: what was found, fixed and left open). The index of every document is `docs/README.md`; `CONTRIBUTING.md` and `SECURITY.md` cover how to change the code and its security posture; the global skill `skills/omniroute-mcp/` carries all of it into any Claude session. This file holds the stable facts and the working rules; it deliberately holds no test
 counts, no commit hashes and no status, because those go stale with every PR.
 
 ## What this is

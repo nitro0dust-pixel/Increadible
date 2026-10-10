@@ -19,16 +19,16 @@ Features #1 to #6 (`features/01` to `06`) are third-party submodules. They run b
 
 | Item | State |
 |---|---|
-| Last recorded: 2026-10-09 | `main` includes PR #46 (records #43 and #44; supersedes #45); first release **`v1.0.2`** tagged on `64cdefb`. **One working session from now on** (owner, 2026-10-09): it keeps the records |
-| Last merged PR | #44 |
-| Open PR / handover | PR #47 (1.0.3: live gateway settings in the package). **First live calls to real providers, 2026-10-10**: the owner's Claude Desktop answered `source: "live"` for coingecko, hackernews, wikipedia and wikidata (one call each; key-based APIs never run live). Waits for merge, then the owner's tag `v1.0.3`. Handover from `hsharma.gxi@gmail.com` (weekly limit reached on 2026-10-09) to `ashiurvi786@gmail.com`: **complete** |
-| Tests | `main` at PR #44: 24 suites, 871 passed, 6 todo (local run of the merged tree); `main` run 38002470893 for #43 green, pull-by-digest probe read |
+| Last recorded: 2026-10-10 | `main` includes PR #47 (1.0.3: live gateway settings in the package); releases **`v1.0.3`** (tag on `916206f`, 2026-10-10) and `v1.0.2`. **First live calls to real providers** (coingecko, hackernews, wikipedia, wikidata, one each, from the owner's Claude Desktop). **Option A approved** (2026-10-10). One working session; it keeps the records |
+| Last merged PR | #47 |
+| Open PR / handover | the record PR for `v1.0.3` and option A. Next: step 1 of the gated catalog (`references/gateway.md`); hosting recommended on Railway, waiting on the owner. Handover from `hsharma.gxi@gmail.com` (weekly limit reached on 2026-10-09) to `ashiurvi786@gmail.com`: **complete** |
+| Tests | `main` at PR #47: 24 suites, 875 passed, 6 todo; CI green, `main` run 38008855855 (pull-by-digest probe read) |
 | Audit | done: `references/audit.md` (7 parts; mutation testing 78.7% to 90.0%, every remaining mutant read) |
 | Container image | built, probed, pushed to GHCR (private), pulled back by digest and probed again, in CI |
 | Production / cluster | **NOT DONE**: needs the owner's explicit approval and a cluster target |
 | Installed in the owner's Claude Desktop | **YES, version 1.0.2 answers** (owner, Windows, 2026-10-09): built locally (SHA-256 `3594d5fd...`), installed, and `get_api_stats` answered in a chat; the app accepted the 1.0.2 tool list. 1.0.0 had installed but never answered. Also working in the app: `discover_apis`, `create_experiment` (duplicate refused), `assign_variant`, `get_experiment_results`, and `record_metric`'s errors; an experiment's definition survives a restart. Not yet verified: a recorded measurement surviving a restart; 7 tools not exercised in the app |
 | One-click `.mcpb` package | **merged** (PR #32, fixed by PR #34 as version 1.0.1, SHA-256 `bc24224c...`; schemas added by PR #36 as version 1.0.2, SHA-256 `3594d5fd...`): `npm run mcpb`, or the CI artifact `increadible-mcpb`; manifest accepted by the vendor's validator; started from the unpacked bundle in a test; CI-built bytes equal the sandbox build. **Claude Desktop installs and runs version 1.0.2: verified** by the owner on Windows, 2026-10-09 (`references/install-claude-desktop.md`, section 5.4) |
-| Owner decisions open | code signing; gateway direction (option A expanded in `docs/GATEWAY-GATED-CATALOG.md`); security contact; cluster target; image scanner; rate limit; latency alert threshold. **Decided 2026-10-09:** license proprietary (`UNLICENSED`, all rights reserved) and the secret scanner pinned by digest (PR #39); default branch `main` (switched by the owner, verified); release `v1.0.2` tagged on `64cdefb` (pushed by the owner, verified through the API) |
+| Owner decisions open | code signing; security contact; deployment target (Railway recommended 2026-10-10, three approved stages); option D and where API keys live (`GATEWAY.md`); image scanner; rate limit; latency alert threshold. **Decided 2026-10-10:** option A, the gated catalog (`docs/GATEWAY-GATED-CATALOG.md`). **Decided 2026-10-09:** license proprietary (`UNLICENSED`, all rights reserved) and the secret scanner pinned by digest (PR #39); default branch `main` (switched by the owner, verified); release `v1.0.2` tagged on `64cdefb` (pushed by the owner, verified through the API) |
 
 ## Operating rules (non-negotiable)
 
@@ -118,5 +118,5 @@ These steps are Path B (the config file): verified only up to the handshake, **N
 | `references/deployment.md` | the image, HTTP mode, Kubernetes, monitoring, secrets |
 | `references/audit.md` | what was found, fixed and left open; the mutation-testing method |
 | `references/security.md` | security posture, gaps, reporting |
-| `references/gateway.md` | the proposed universal-gateway decision (waiting on the owner) |
+| `references/gateway.md` | the universal-gateway decision (option A approved 2026-10-10; the gated catalog is being built) |
 | `references/releasing.md` | making a release: version bump, the package's SHA-256 from two builds, the owner's tag, the check |
