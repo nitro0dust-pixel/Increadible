@@ -1,6 +1,6 @@
 # API gateway: gated catalog architecture (proposal, option A)
 
-**Status: PROPOSED. Not built. Needs the owner's approval** (`GATEWAY.md`, "Decisions requested from the owner").
+**Status: APPROVED by the owner on 2026-10-10 (option A). Not built yet; step 1 is next.**
 
 This expands recommendation "A, with a gated catalog" in [`GATEWAY.md`](../GATEWAY.md) into components and an order of work.
 It was drafted in a separate Claude session on 2026-10-10 from the owner's local copy, then checked line by line against
@@ -69,8 +69,8 @@ seed sources (offline) -> candidate store -> gate pipeline -> registry (gated on
 
 ## 6. Decisions needed from the owner
 
-- [ ] Approve option A (`GATEWAY.md`, first box).
-- [ ] Approve starting step 1 above (`GATEWAY.md`, second box).
+- [x] Approve option A (`GATEWAY.md`, first box): **approved 2026-10-10**.
+- [x] Approve starting step 1 above (`GATEWAY.md`, second box): **approved 2026-10-10**.
 - [ ] Option D: wanted or not (`GATEWAY.md`, third box).
 - [ ] Where API keys live once more than the keyless APIs are switched on (`GATEWAY.md`, fourth box).
 - [ ] Probe retirement threshold: needs a proposal, then a decision.
