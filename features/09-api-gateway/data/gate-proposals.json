@@ -1,0 +1,56 @@
+{
+  "note": "Gate proposals for the first Cryptocurrency batch (owner's choice, 2026-10-10). Proposals only: read by no server code, not in catalog.ts, not listed by discover_apis, not callable. Every value below was written from the authoring session's memory, because the sandbox cannot reach the providers or their documentation: each is UNVERIFIED until a person checks it against the official documentation and signs it off (gates 1 and 2), the terms are read (gate 3), and a recorded answer passes the probe (gates 4 and 6).",
+  "proposed_on": "2026-10-10",
+  "proposals": [
+    {
+      "id": "coincap",
+      "candidate": "cryptocurrency/coincap",
+      "endpoint": "https://api.coincap.io/v2",
+      "auth": "none",
+      "docs_url": "https://docs.coincap.io/",
+      "probe": { "endpoint": "/assets/bitcoin", "params": {}, "success": "HTTP 200, JSON, data.id is bitcoin" },
+      "check_first": "The keyless v2 API may have been retired in favour of a keyed v3 (rest.coincap.io); if so, this API fails the keyless criterion of the batch and should be dropped or re-classified as api_key.",
+      "status": "proposed"
+    },
+    {
+      "id": "coinpaprika",
+      "candidate": "cryptocurrency/coinpaprika",
+      "endpoint": "https://api.coinpaprika.com/v1",
+      "auth": "none",
+      "docs_url": "https://api.coinpaprika.com/",
+      "probe": { "endpoint": "/global", "params": {}, "success": "HTTP 200, JSON, a number market_cap_usd" },
+      "check_first": "The free tier's request limit and whether attribution is required.",
+      "status": "proposed"
+    },
+    {
+      "id": "coinlore",
+      "candidate": "cryptocurrency/coinlore",
+      "endpoint": "https://api.coinlore.net/api",
+      "auth": "none",
+      "docs_url": "https://www.coinlore.com/cryptocurrency-data-api",
+      "probe": { "endpoint": "/global/", "params": {}, "success": "HTTP 200, JSON, an array whose first item has coins_count" },
+      "check_first": "The trailing slash in its paths, and the stated request limit.",
+      "status": "proposed"
+    },
+    {
+      "id": "defillama",
+      "candidate": "cryptocurrency/defillama",
+      "endpoint": "https://api.llama.fi",
+      "auth": "none",
+      "docs_url": "https://defillama.com/docs/api",
+      "probe": { "endpoint": "/v2/chains", "params": {}, "success": "HTTP 200, JSON, an array of objects with name and tvl" },
+      "check_first": "Response sizes: some endpoints (for example /protocols) may exceed the gateway's 1 MiB default; the probe uses a small one. Also the split between the free and the paid (pro) API.",
+      "status": "proposed"
+    },
+    {
+      "id": "mempool",
+      "candidate": "cryptocurrency/mempool",
+      "endpoint": "https://mempool.space/api",
+      "auth": "none",
+      "docs_url": "https://mempool.space/docs/api/rest",
+      "probe": { "endpoint": "/v1/fees/recommended", "params": {}, "success": "HTTP 200, JSON, a number fastestFee" },
+      "check_first": "Several endpoints answer plain text (for example the tip height), which the gateway refuses (JSON only); the probe uses a JSON one. Also the public instance's rate limit.",
+      "status": "proposed"
+    }
+  ]
+}
