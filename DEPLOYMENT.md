@@ -1,7 +1,8 @@
 # Deployment
 
 > **Verification status:** the server is tested locally (`npm run verify`) and CI builds and probes the
-> Docker image. **Nothing has been deployed to a real environment.** `k8s/staging-deployment.yaml` has been applied once
+> Docker image. **One private rehearsal runs on Railway** (stage 1, 2026-10-10, section "Railway"); nothing else runs in a real
+> environment. `k8s/staging-deployment.yaml` has been applied once
 > to a local Docker Desktop cluster with a locally built image (rollout, auth, ConfigMap rules and A/B persistence across
 > `rollout restart` all checked). The production and monitoring manifests have only been parsed and checked for internal
 > consistency by `tests/config.test.ts`, and the GHCR pull path is untested. Treat them as a starting point.
@@ -155,6 +156,54 @@ finnhub.io, newsapi.org, hacker-news.firebaseio.com, en.wikipedia.org, www.wikid
   (command from Docker's attestation documentation) and check that it lists packages.
 - Dependabot (`.github/dependabot.yml`) proposes npm, GitHub Actions and Docker updates weekly, never npm or Node
   major bumps. It reads that file from the repository's default branch, so it does nothing until the default branch is `main`.
+
+## Railway (stage 1: private rehearsal, verified 2026-10-10)
+
+The owner chose Railway for the first hosted run and approved it in stages. **Stage 1 is done**; stages 2 (the four keyless APIs
+live) and 3 (a client connected end to end) each need the owner's approval.
+
+| Setting | Value | Why |
+|---|---|---|
+| Project, service | `increadible-rehearsal`, service `increadible` (its own project, apart from the owner's others) | nothing else shares it |
+| Source | this repository, **pinned to commit `916206f`** (`v1.0.3`), built from the `Dockerfile` | a push to `main` does not redeploy it |
+| Replicas | 1 | the A/B data file has one writer |
+| Volume | `increadible-data` at `/data` | `RULES_FILE`, `EXPERIMENTS_FILE`, `AB_DATA_FILE` already point there (`Dockerfile`) |
+| Variables | `AUTH_TOKEN` (64 random hex characters, set on the service, never printed or committed), `PORT=3000`, `AB_FSYNC=1`, `RAILWAY_RUN_UID=0` | the server refuses to start on `0.0.0.0` without a token; durable writes as in the manifests |
+| Live gateway | off (`GATEWAY_LIVE_APIS` not set) | stage 2 |
+| Address | `https://increadible-production.up.railway.app` (Railway's domain, HTTPS) | `/health` and `/ready` are open; `/mcp` and `/metrics` need the token |
+
+**`RAILWAY_RUN_UID=0` runs the container as root.** Railway mounts volumes as root (its documentation, "Volumes", *Permissions*
+and *Caveats*), and the image runs as the non-root user `node`, which could not write `/data` otherwise. This undoes one hardening
+of the image on Railway only (`SECURITY.md`). Not tried: preparing the volume's ownership another way.
+
+**Checked on 2026-10-10** (from the owner's PC, because the authoring sandbox's network policy refuses the Railway domain; Railway's
+own build, deploy and request logs read from here):
+
+| Check | Result |
+|---|---|
+| Build | from `916206f` with the `Dockerfile`, image `sha256:36d22c5a...`; deployment `SUCCESS` |
+| `GET /health` | 200, `{"status":"ok"}` |
+| `POST /mcp` without the token | 401 |
+| `tools/list` with the token | 13 tools |
+| `create_experiment`, then `record_metric` (variant A, `score` 8) | `success`, `recorded` |
+| `get_api_stats` | `live_apis: []` (sample data only) |
+| Restart (`restart-service`), then `get_experiment_results` | the old process logged `SIGTERM`, the new one `Restored 1 experiments and 1 measurements from /data/ab-data.jsonl`, and the call answered `current_samples: 1`: **A/B data survives a restart on the Railway volume** |
+| Railway's request log | the six probe calls and the one after the restart, with the status codes above |
+
+**Not checked:** a redeploy from a new build (only a restart), the volume's backups, load, the price of the plan, and whether
+Claude Desktop or claude.ai can use this server remotely (it takes a static bearer token; claude.ai's remote connectors use OAuth).
+
+To repeat the probe, from PowerShell (the token is read from the Railway dashboard, service *Variables*, and never pasted into a
+chat or a file):
+
+```powershell
+$u = "https://increadible-production.up.railway.app"
+Invoke-RestMethod "$u/health"
+$s = Read-Host "AUTH_TOKEN" -AsSecureString
+$t = [Runtime.InteropServices.Marshal]::PtrToStringAuto([Runtime.InteropServices.Marshal]::SecureStringToBSTR($s))
+$h = @{ Authorization = "Bearer $t" }
+(Invoke-RestMethod -Method Post "$u/mcp" -Headers $h -ContentType application/json -Body '{"jsonrpc":"2.0","id":1,"method":"tools/list"}').result.tools.Count
+```
 
 ## Kubernetes (staging verified locally only)
 

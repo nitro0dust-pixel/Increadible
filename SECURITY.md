@@ -21,7 +21,7 @@ title. Only the latest `main` is supported.
 | stdio mode (Claude Desktop) | no network listener; the process is started by the client and sees only the files named in its environment | `tests/entry-point.test.ts` |
 | Data file | single writer (lock file); a lost lock makes writes fail closed; created with mode 0600 | `tests/e2e-integration.test.ts`, `tests/ab-boundaries.test.ts` |
 | Claude Desktop package | built here from the committed sources and the lockfile (no install scripts), holds no secret, no source and no development tool; checked by `inspect`. **Unsigned**; Claude Desktop installed and ran the unsigned file on Windows (version 1.0.2, 2026-10-09); whether it showed a warning about the missing signature was not recorded | `tests/mcpb.test.ts` |
-| Container | non-root user, read-only root filesystem in the manifests, healthcheck | `Dockerfile`, `k8s/`, image probe in CI |
+| Container | non-root user, read-only root filesystem in the manifests, healthcheck; **except on Railway**, where the rehearsal runs as root (`RAILWAY_RUN_UID=0`, because Railway mounts volumes as root) | `Dockerfile`, `k8s/`, image probe in CI, `DEPLOYMENT.md` ("Railway") |
 | Dependencies | production tree: 0 advisories (CI gates on `npm audit --omit=dev`); CycloneDX SBOM generated and validated in CI | CI `security` job |
 | Secrets in the repository | scanned in CI for **verified** secrets | CI `security` job |
 
