@@ -97,8 +97,9 @@ describe("health probes and contract tests (gated catalog, step 1b)", () => {
     }
   });
 
-  it("says honestly which APIs have a recorded contract (none until the recorder runs on a machine that reaches them)", () => {
-    expect(recorded.map((f) => f.api)).toEqual([]);
+  it("says honestly which APIs have a recorded contract (the keyless four, recorded on the owner's Windows PC on 2026-10-10)", () => {
+    expect(recorded.map((f) => f.api)).toEqual(["coingecko", "hackernews", "wikidata", "wikipedia"]);
+    for (const f of recorded) expect({ api: f.api, on: f.recorded_on.slice(0, 10), where: f.recorded_where }).toEqual({ api: f.api, on: "2026-10-10", where: "owner's Windows PC" });
   });
 
   for (const f of recorded) {
