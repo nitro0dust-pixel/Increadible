@@ -84,7 +84,7 @@ seed sources (offline) -> candidate store -> gate pipeline -> registry (gated on
        named without a recording fails, and so does a recording whose API names none). This is evidence, not a sign-off: the four
        stay `candidate`.
      - **Waiting on the owner:** the sign-offs on each pinned URL and auth class, and the terms (read on a machine that reaches the
-       providers, summarised, signed off).
+       providers, summarised, signed off). What was found so far, and what each page still has to confirm, is in section 10.
    Output of step 1: nine gated records, each with a pinned URL, an auth class, terms and a probe history.
 2. **Per-API rate limit and a retry policy** (both open in `ROADMAP.md`), before more APIs are switched to live.
    - **Rate limit: the mechanism is built** (`GATEWAY_RATE_LIMITS`, e.g. `coingecko=30`: live calls per API in any rolling minute;
@@ -170,3 +170,29 @@ listed or callable (`tests/gateway-candidates.test.ts`). An API moves into `cata
 
 Only then is the entry added to `catalog.ts`, as `gated`. Until that change, nothing about these five is visible to a client.
 
+
+## 10. Terms of the keyless four: what was found, and what the owner confirms (gate 3)
+
+Looked up on 2026-10-10 by the authoring session. **Nothing here is a sign-off, and only one line was read on the provider's own
+page.** The session's fetcher reached `github.com` but not `coingecko.com`, `docs.coingecko.com`, `foundation.wikimedia.org`,
+`www.mediawiki.org` or `meta.wikimedia.org` (`ENOTFOUND`); for those, the lines below come from a web search's summaries of the
+pages, some of them second-hand, and say so. Gate 3 needs a person to read each page, confirm or correct the line, and sign it off
+with the date; only then is `gate.terms` filled in `catalog.ts`.
+
+| API | Page to read | What was found | How reliable | Still unknown |
+|---|---|---|---|---|
+| hackernews | <https://github.com/HackerNews/API> (README) | "There is currently no rate limit." No terms of use, licence for the data or attribution are stated; the repository's MIT licence covers the repository, not the data. Bugs go to `api@ycombinator.com` | **Read on the page** by this session | Whether Y Combinator has terms elsewhere that cover the API; ask or accept the README as the terms |
+| coingecko | <https://www.coingecko.com/en/api_terms>, <https://docs.coingecko.com/docs/keyless-public-api>, <https://docs.coingecko.com/docs/errors-and-rate-limits> | CoinGecko's docs (search summary) say the keyless API is rate-limited per IP, shared with everyone on that IP, and **not meant for production, scheduled polling or high-frequency use**; no fixed keyless limit is published (the Demo plan, with a key, is 100 calls per minute). Attribution ("Data provided by CoinGecko" with a link) and **non-commercial use only** for the keyless and Demo tiers are claimed by third parties only | Search summary; attribution and commercial use **second-hand** | The attribution clause and the commercial-use clause in the terms themselves; whether the gateway's use counts as "production" |
+| wikipedia, wikidata | <https://foundation.wikimedia.org/wiki/Policy:API_usage_guidelines>, <https://www.mediawiki.org/wiki/Wikimedia_APIs/Access_policy>, <https://meta.wikimedia.org/wiki/API_Policy_Update_2024> | Every request needs a **User-Agent with contact information**; clients without one may be blocked without notice. Operators must obey instructions in a response to slow down or delay. Numerical limits may change; an older page (2019) gives 200 requests per second as a ceiling | Search summary of Wikimedia's own pages | The current numerical limits; whether the 2024 policy adds anything for keyless clients |
+| wikipedia (content) | <https://www.wikidata.org/wiki/Wikidata:Licensing>, Wikimedia Terms of Use | Text is CC BY-SA 4.0, so text passed on to users needs attribution and share-alike | Search summary of Wikidata's licensing page | How attribution should be shown when the gateway returns article text |
+| wikidata (content) | <https://www.wikidata.org/wiki/Wikidata:Licensing> | Structured data in the main, property and lexeme namespaces is CC0 (no attribution required) | Search summary of Wikidata's own page | Nothing for the probe's use (labels are main-namespace data) |
+
+**One finding for the code, not a terms question.** When `GATEWAY_USER_AGENT` is not set, the gateway sends the User-Agent
+`increadible-gateway` (`features/09-api-gateway/src/mcp-server.ts`), which carries no contact. That is against Wikimedia's policy
+above, so live calls to wikipedia or wikidata need `GATEWAY_USER_AGENT` set with a contact (Railway and the owner's Claude Desktop
+set it). Whether the gateway should refuse or warn about live Wikimedia calls without a contact is an owner decision (a behaviour
+change); nothing is changed here.
+
+**What the owner confirms, per API:** the page's URL and the date read; licence; attribution (wording, and whether the gateway must
+pass it on to its users); commercial use; the rate limit (which becomes the `GATEWAY_RATE_LIMITS` value); then a sign-off with name and
+date. For coingecko, also whether keyless use fits the gateway at all, given "not for production".
