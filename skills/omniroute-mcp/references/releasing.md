@@ -61,8 +61,11 @@ chat). A green CI run is not enough: version 1.0.0 passed CI, installed, and nev
    skill's status table, then `node scripts/skill.js sync` and `npm test`.
 
 What `v1.0.2` went through: steps 1, 3, 4 (CI and local builds, same SHA-256 `3594d5fd...`), 5, 6, 7 and 8. Its CHANGELOG section was
-written after the tag (PR #41), which is now step 2. Version 1.0.3 (live gateway settings in the package) has done step 1 and waits for
-steps 3 to 8.
+written after the tag (PR #41), which is now step 2. `v1.0.3` went through all eight steps, in order: version bump
+and CHANGELOG note (PR #47), merge (`916206f`, its tree equal to the CI-verified head `af43e10`), the package SHA-256 from CI and from
+a local build (`1fd5ac75...`, equal), the owner's install and live calls in Claude Desktop, the owner's annotated tag (object
+`5dd6620d`, 2026-10-10 00:34 UTC, unsigned), its check through the GitHub API (it points at `916206f`), and the records (the PR that
+moved the CHANGELOG to `[1.0.3]`). The owner installed the final file (`1fd5ac75...`); the first test build (`c9eef367...`, same server code) was also downloaded, which is why the file name alone cannot tell them apart.
 
 ## 4. A version number names one file only once it is released
 
