@@ -1,0 +1,15 @@
+{
+  "api": "hackernews",
+  "recorded_on": "2026-10-10T12:58:51.428Z",
+  "recorded_where": "owner's Windows PC",
+  "request": {
+    "endpoint": "/maxitem.json",
+    "params": {},
+    "url": "https://hacker-news.firebaseio.com/v0/maxitem.json"
+  },
+  "response": {
+    "status": 200,
+    "content_type": "application/json; charset=utf-8",
+    "body": 50032491
+  }
+}
