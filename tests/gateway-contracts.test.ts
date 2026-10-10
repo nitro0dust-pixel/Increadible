@@ -102,6 +102,12 @@ describe("health probes and contract tests (gated catalog, step 1b)", () => {
     for (const f of recorded) expect({ api: f.api, on: f.recorded_on.slice(0, 10), where: f.recorded_where }).toEqual({ api: f.api, on: "2026-10-10", where: "owner's Windows PC" });
   });
 
+  it("names this test as the contract test of exactly the APIs with a recording (gate 6 in catalog.ts matches the files)", () => {
+    const named = CATALOG.filter((e) => e.gate.contract_test !== null).map((e) => [e.definition.id, e.gate.contract_test]);
+    expect(Object.fromEntries(named)).toEqual(Object.fromEntries(recorded.map((f) => [f.api, "tests/gateway-contracts.test.ts"])));
+    expect(fs.existsSync(path.join(__dirname, "..", "tests", "gateway-contracts.test.ts"))).toBe(true);
+  });
+
   for (const f of recorded) {
     it(`${f.api}: the recorded answer is a valid contract and replays through the gateway unchanged`, async () => {
       expect(fixtureProblems(f)).toEqual([]);

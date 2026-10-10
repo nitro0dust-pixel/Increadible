@@ -79,6 +79,10 @@ seed sources (offline) -> candidate store -> gate pipeline -> registry (gated on
        was broken on purpose and the replay failed: wikidata's label `Earth` changed, coingecko's URL changed, hackernews' status 500,
        hackernews' body a string, wikipedia's `sitename` changed; an extra recording for an unknown API also failed. A recording proves
        one answer on one day, nothing about uptime; re-record when a probe changes (the test refuses a recording made for another probe).
+     - **Done: gate 6 recorded in `catalog.ts`.** The four gate records name `tests/gateway-contracts.test.ts` as their contract
+       test, and `get_api_stats` shows it; a test holds the catalog and the recordings to each other both ways (a contract test
+       named without a recording fails, and so does a recording whose API names none). This is evidence, not a sign-off: the four
+       stay `candidate`.
      - **Waiting on the owner:** the sign-offs on each pinned URL and auth class, and the terms (read on a machine that reaches the
        providers, summarised, signed off).
    Output of step 1: nine gated records, each with a pinned URL, an auth class, terms and a probe history.
