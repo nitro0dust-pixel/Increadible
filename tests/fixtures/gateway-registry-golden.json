@@ -1,0 +1,237 @@
+{
+  "note": "Recorded from the hard-coded registry before the catalog (main at 07cf13b, PR #49 merge): what the gateway answered then. tests/gateway-catalog.test.ts holds the catalog to it.",
+  "discover_all": [
+    {
+      "id": "openweathermap",
+      "name": "OpenWeatherMap",
+      "category": "weather",
+      "endpoint": "https://api.openweathermap.org/data/2.5",
+      "methods": [
+        "GET"
+      ],
+      "auth": "api_key",
+      "free": true,
+      "description": "Real-time weather data worldwide",
+      "docs_url": "https://openweathermap.org/api"
+    },
+    {
+      "id": "weatherapi",
+      "name": "WeatherAPI",
+      "category": "weather",
+      "endpoint": "https://api.weatherapi.com/v1",
+      "methods": [
+        "GET"
+      ],
+      "auth": "api_key",
+      "free": true,
+      "description": "Weather forecast and current conditions"
+    },
+    {
+      "id": "coingecko",
+      "name": "CoinGecko",
+      "category": "finance",
+      "endpoint": "https://api.coingecko.com/api/v3",
+      "methods": [
+        "GET"
+      ],
+      "auth": "none",
+      "free": true,
+      "description": "Cryptocurrency data and prices",
+      "docs_url": "https://www.coingecko.com/en/api"
+    },
+    {
+      "id": "finnhub",
+      "name": "Finnhub",
+      "category": "finance",
+      "endpoint": "https://finnhub.io/api/v1",
+      "methods": [
+        "GET"
+      ],
+      "auth": "api_key",
+      "free": true,
+      "description": "Stock market data and quotes"
+    },
+    {
+      "id": "newsapi",
+      "name": "NewsAPI",
+      "category": "news",
+      "endpoint": "https://newsapi.org/v2",
+      "methods": [
+        "GET"
+      ],
+      "auth": "api_key",
+      "free": true,
+      "description": "News aggregation and search",
+      "docs_url": "https://newsapi.org"
+    },
+    {
+      "id": "hackernews",
+      "name": "HackerNews",
+      "category": "news",
+      "endpoint": "https://hacker-news.firebaseio.com/v0",
+      "methods": [
+        "GET"
+      ],
+      "auth": "none",
+      "free": true,
+      "description": "Technology and startup news"
+    },
+    {
+      "id": "wikipedia",
+      "name": "Wikipedia",
+      "category": "reference",
+      "endpoint": "https://en.wikipedia.org/w/api.php",
+      "methods": [
+        "GET"
+      ],
+      "auth": "none",
+      "free": true,
+      "description": "Encyclopedia content via API"
+    },
+    {
+      "id": "wikidata",
+      "name": "Wikidata",
+      "category": "reference",
+      "endpoint": "https://www.wikidata.org/w/api.php",
+      "methods": [
+        "GET"
+      ],
+      "auth": "none",
+      "free": true,
+      "description": "Structured data knowledge base"
+    },
+    {
+      "id": "thesportsdb",
+      "name": "TheSportsDB",
+      "category": "sports",
+      "endpoint": "https://www.thesportsdb.com/api/v1/json/1",
+      "methods": [
+        "GET"
+      ],
+      "auth": "api_key",
+      "free": true,
+      "description": "Sports data and statistics"
+    }
+  ],
+  "queries": {
+    "weather": [
+      "openweathermap",
+      "weatherapi"
+    ],
+    "finance": [
+      "coingecko",
+      "finnhub"
+    ],
+    "news": [
+      "newsapi",
+      "hackernews"
+    ],
+    "reference": [
+      "wikipedia",
+      "wikidata"
+    ],
+    "sports": [
+      "thesportsdb"
+    ],
+    "hacker": [
+      "hackernews"
+    ],
+    "WIKI": [
+      "wikipedia",
+      "wikidata"
+    ],
+    "nothing-matches": []
+  },
+  "mock": {
+    "openweathermap": {
+      "source": "mock",
+      "dataKeys": [
+        "main",
+        "weather"
+      ]
+    },
+    "weatherapi": {
+      "source": "mock",
+      "dataKeys": [
+        "data",
+        "status",
+        "timestamp"
+      ]
+    },
+    "coingecko": {
+      "source": "mock",
+      "dataKeys": [
+        "bitcoin"
+      ]
+    },
+    "finnhub": {
+      "source": "mock",
+      "dataKeys": [
+        "data",
+        "status",
+        "timestamp"
+      ]
+    },
+    "newsapi": {
+      "source": "mock",
+      "dataKeys": [
+        "articles",
+        "totalResults"
+      ]
+    },
+    "hackernews": {
+      "source": "mock",
+      "dataKeys": [
+        "data",
+        "status",
+        "timestamp"
+      ]
+    },
+    "wikipedia": {
+      "source": "mock",
+      "dataKeys": [
+        "data",
+        "status",
+        "timestamp"
+      ]
+    },
+    "wikidata": {
+      "source": "mock",
+      "dataKeys": [
+        "data",
+        "status",
+        "timestamp"
+      ]
+    },
+    "thesportsdb": {
+      "source": "mock",
+      "dataKeys": [
+        "data",
+        "status",
+        "timestamp"
+      ]
+    }
+  },
+  "credentials": {
+    "openweathermap": {
+      "env": "GATEWAY_KEY_OPENWEATHERMAP",
+      "in": "query",
+      "name": "appid"
+    },
+    "weatherapi": {
+      "env": "GATEWAY_KEY_WEATHERAPI",
+      "in": "query",
+      "name": "key"
+    },
+    "finnhub": {
+      "env": "GATEWAY_KEY_FINNHUB",
+      "in": "header",
+      "name": "X-Finnhub-Token"
+    },
+    "newsapi": {
+      "env": "GATEWAY_KEY_NEWSAPI",
+      "in": "header",
+      "name": "X-Api-Key"
+    }
+  }
+}

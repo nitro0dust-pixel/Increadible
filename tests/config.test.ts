@@ -554,8 +554,9 @@ describe("API gateway live mode is documented", () => {
   });
 
   it("names every credential variable and every host the registry uses in DEPLOYMENT.md (the egress advice depends on the hosts)", () => {
-    const credentials = [...gateway.matchAll(/env: "(GATEWAY_KEY_[A-Z0-9_]+)"/g)].map((m) => m[1]);
-    const hosts = [...gateway.matchAll(/endpoint: "https:\/\/([^/"]+)/g)].map((m) => m[1]);
+    const catalog = read("features/09-api-gateway/src/catalog.ts"); // the registry and its credentials live there since the gated catalog's step 1a
+    const credentials = [...catalog.matchAll(/env: "(GATEWAY_KEY_[A-Z0-9_]+)"/g)].map((m) => m[1]);
+    const hosts = [...catalog.matchAll(/endpoint: "https:\/\/([^/"]+)/g)].map((m) => m[1]);
     expect(credentials).toHaveLength(4);
     expect(hosts).toHaveLength(9);
     for (const name of [...credentials, ...hosts]) expect({ name, documented: deployment.includes(name) }).toEqual({ name, documented: true });
@@ -605,7 +606,7 @@ describe("GATEWAY.md", () => {
   });
 
   it("states the size of the registry it is a proposal to change", () => {
-    const registered = (read("features/09-api-gateway/src/mcp-server.ts").match(/^\s*id: "[a-z]+",\s*\n\s*name:/gm) ?? []).length;
+    const registered = (read("features/09-api-gateway/src/catalog.ts").match(/^\s*id: "[a-z]+",\s*\n\s*name:/gm) ?? []).length;
     expect(registered).toBe(9);
     expect(doc).toContain(`${registered} registered APIs`);
   });
@@ -705,7 +706,7 @@ describe("the documentation set", () => {
 
   it("names only npm scripts, script files and settings that exist", () => {
     const own = ownDocuments().filter((f) => f.startsWith("docs/") || ["CONTRIBUTING.md", "SECURITY.md"].includes(f));
-    const sources = ["src/index.ts", "src/server.ts", "features/07-routing-plugins/src/mcp-server.ts", "features/08-ab-testing/src/mcp-server.ts", "features/09-api-gateway/src/mcp-server.ts"].map(read).join("\n");
+    const sources = ["src/index.ts", "src/server.ts", "features/07-routing-plugins/src/mcp-server.ts", "features/08-ab-testing/src/mcp-server.ts", "features/09-api-gateway/src/mcp-server.ts", "features/09-api-gateway/src/catalog.ts"].map(read).join("\n");
     for (const file of own) {
       const text = read(file);
       for (const [, script] of text.matchAll(/npm run ([a-z][a-z0-9:-]*)/g)) expect({ file, script, exists: script in pkg.scripts }).toEqual({ file, script, exists: true });

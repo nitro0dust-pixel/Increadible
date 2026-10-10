@@ -21,7 +21,7 @@ Features #1 to #6 (`features/01` to `06`) are third-party submodules. They run b
 |---|---|
 | Last recorded: 2026-10-10 | `main` includes PR #47 (1.0.3: live gateway settings in the package); releases **`v1.0.3`** (tag on `916206f`, 2026-10-10) and `v1.0.2`. **First live calls to real providers** (coingecko, hackernews, wikipedia, wikidata, one each, from the owner's Claude Desktop). **Option A approved** (2026-10-10). One working session; it keeps the records |
 | Last merged PR | #47 |
-| Open PR / handover | the record PR for Railway stages 1 and 2. Next: step 1 of the gated catalog (`references/gateway.md`). Handover from `hsharma.gxi@gmail.com` (weekly limit reached on 2026-10-09) to `ashiurvi786@gmail.com`: **complete** |
+| Open PR / handover | the gated catalog, step 1a: the registry as data (`features/09-api-gateway/src/catalog.ts`), a gate record per API, all nine `candidate`, answers held to a golden file. Next: step 1b (owner sign-offs, terms, probes, contract tests). Railway stages 1 and 2 done (PR #49). Handover from `hsharma.gxi@gmail.com` (weekly limit reached on 2026-10-09) to `ashiurvi786@gmail.com`: **complete** |
 | Tests | `main` at PR #47: 24 suites, 875 passed, 6 todo; CI green, `main` run 38008855855 (pull-by-digest probe read) |
 | Audit | done: `references/audit.md` (7 parts; mutation testing 78.7% to 90.0%, every remaining mutant read) |
 | Container image | built, probed, pushed to GHCR (private), pulled back by digest and probed again, in CI |

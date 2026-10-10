@@ -52,7 +52,8 @@ image by digest and probes it again. The package `ghcr.io/nitro0dust-pixel/incre
   timeouts, optional rate limit, drain and hard-deadline shutdown, refusal to start open beyond loopback.
 - `src/server.ts`: the JSON-RPC handler, tool dispatch, metrics (counters, tool-latency histogram). A throwing tool becomes a tool
   error; the handler never throws.
-- `features/07..09/src/mcp-server.ts`: the three modules. A/B data is an append-only JSON-lines file (`AB_DATA_FILE`) with a
+- `features/07..09/src/mcp-server.ts`: the three modules. The gateway's registry is data in `features/09-api-gateway/src/catalog.ts`, one
+  gate record per API (option A, `docs/GATEWAY-GATED-CATALOG.md`); no API is `gated` until every gate has a dated sign-off, which a test enforces. A/B data is an append-only JSON-lines file (`AB_DATA_FILE`) with a
   single-writer lock file, crash recovery, optional fsync and a growth warning; it is never compacted. In memory the A/B module keeps
   only counts and a running mean and variance per variant and metric (so memory and the cost of a results call do not grow with the
   data), and replays the file in chunks at startup. `tests/ab-golden.test.ts` holds it to the answers of the earlier array-based version.
