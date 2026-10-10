@@ -27,6 +27,9 @@ const AGGREGATE_CONCURRENCY = 5;
 /** Live (network) calls in flight across the whole gateway, and how many more may wait for a slot before new ones are refused. */
 export const MAX_LIVE_IN_FLIGHT = 10;
 export const MAX_LIVE_WAITING = 100;
+/** A per-API rate limit (GATEWAY_RATE_LIMITS) counts the live calls sent in this rolling window, and may be at most this many. */
+export const RATE_LIMIT_WINDOW_MS = 60_000;
+export const MAX_RATE_LIMIT = 100_000;
 
 /** Where each key-based API takes its credential: the catalog's `credential` fields (`catalog.ts`). */
 const DEFAULT_CREDENTIALS = catalogCredentials();
@@ -42,6 +45,13 @@ export interface GatewayOptions {
   /** Replaces the built-in registry (used by tests to point an API at a local server). */
   apis?: APIDefinition[];
   credentials?: Record<string, Credential>;
+  /**
+   * At most this many live calls per API in any rolling minute (GATEWAY_RATE_LIMITS). An API without an entry has no limit of its
+   * own: no default is set, because no provider's limit has been measured or read (an owner decision, `ROADMAP.md`).
+   */
+  rateLimits?: Record<string, number>;
+  /** The clock for the rate limit, in milliseconds (tests replace it). Default: performance.now (monotonic). */
+  now?: () => number;
 }
 
 const DEFAULT_TIMEOUT_MS = 10_000;
@@ -58,7 +68,25 @@ function boundedInt(raw: string | undefined, name: string, min: number, max: num
   return n;
 }
 
-/** The gateway's options from the environment: GATEWAY_LIVE_APIS, GATEWAY_TIMEOUT_MS, GATEWAY_MAX_RESPONSE_BYTES, GATEWAY_USER_AGENT. */
+/**
+ * `GATEWAY_RATE_LIMITS`, e.g. `coingecko=30, wikipedia=60`: live calls per rolling minute, per API. An entry that is not
+ * `<api>=<integer from 1 to MAX_RATE_LIMIT>` is reported on stderr and ignored (it limits nothing, so the message says so).
+ */
+export function parseRateLimits(raw: string | undefined): Record<string, number> {
+  const limits: Record<string, number> = {};
+  for (const entry of (raw ?? "").split(",").map((x) => x.trim()).filter((x) => x !== "")) {
+    const m = /^([a-z0-9]+)\s*=\s*(\d+)$/.exec(entry);
+    const n = m ? Number(m[2]) : NaN;
+    if (!m || !Number.isSafeInteger(n) || n < 1 || n > MAX_RATE_LIMIT) {
+      console.error(`GATEWAY_RATE_LIMITS: ignored "${entry.slice(0, 80)}" (expected <api>=<calls per minute>, 1 to ${MAX_RATE_LIMIT}); that API has no limit`);
+      continue;
+    }
+    limits[m[1]] = n;
+  }
+  return limits;
+}
+
+/** The gateway's options from the environment: GATEWAY_LIVE_APIS, GATEWAY_TIMEOUT_MS, GATEWAY_MAX_RESPONSE_BYTES, GATEWAY_USER_AGENT, GATEWAY_RATE_LIMITS. */
 export function gatewayOptionsFromEnv(): GatewayOptions {
   const live = (process.env.GATEWAY_LIVE_APIS ?? "").trim();
   return {
@@ -66,6 +94,7 @@ export function gatewayOptionsFromEnv(): GatewayOptions {
     timeoutMs: boundedInt(process.env.GATEWAY_TIMEOUT_MS, "GATEWAY_TIMEOUT_MS", 100, 120_000, DEFAULT_TIMEOUT_MS),
     maxResponseBytes: boundedInt(process.env.GATEWAY_MAX_RESPONSE_BYTES, "GATEWAY_MAX_RESPONSE_BYTES", 1024, 32 * 1024 * 1024, DEFAULT_MAX_RESPONSE_BYTES),
     userAgent: process.env.GATEWAY_USER_AGENT?.trim() || DEFAULT_USER_AGENT,
+    rateLimits: parseRateLimits(process.env.GATEWAY_RATE_LIMITS),
   };
 }
 
@@ -81,12 +110,17 @@ class UniversalAPIGateway {
   private liveApis: Set<string> | "*";
   private live: LiveOptions;
   private env: Record<string, string | undefined>;
+  private rateLimits: Map<string, number> = new Map();
+  /** Per rate-limited API, the send times (ms) of its live calls in the current window, oldest first: at most its limit. */
+  private sent: Map<string, number[]> = new Map();
+  private now: () => number;
   private stats = {
     total_calls: 0,
     successful: 0,
     failed: 0,
     cached_hits: 0,
     live_calls: 0,
+    rate_limited: 0,
     api_distribution: {} as Record<string, number>,
   };
 
@@ -104,6 +138,15 @@ class UniversalAPIGateway {
     }
     if (this.liveApis !== "*") {
       for (const id of this.liveApis) if (!this.apis.has(id)) console.error(`GATEWAY_LIVE_APIS names an unknown API: ${id}`);
+    }
+    this.now = options.now ?? (() => performance.now()); // monotonic: a wall-clock step back must not hold calls longer
+    for (const [id, limit] of Object.entries(options.rateLimits ?? {})) {
+      if (!this.apis.has(id)) console.error(`GATEWAY_RATE_LIMITS names an unknown API: ${id}`);
+      else if (!Number.isSafeInteger(limit) || limit < 1 || limit > MAX_RATE_LIMIT) console.error(`GATEWAY_RATE_LIMITS: ignored ${id}=${limit}; that API has no limit`);
+      else this.rateLimits.set(id, limit);
+    }
+    if (this.rateLimits.size > 0) {
+      console.error(`Rate limits (live calls per minute): ${[...this.rateLimits].map(([id, n]) => `${id}=${n}`).join(", ")}`);
     }
     const names = this.liveApis === "*" ? "all APIs" : [...this.liveApis].filter((id) => this.apis.has(id)).join(", ");
     if (names !== "") console.error(`Live API calls enabled for: ${names}`);
@@ -219,6 +262,7 @@ class UniversalAPIGateway {
         else headers[credential.name] = secret as string;
       }
       return await this.withLiveSlot(() => {
+        this.admit(api.id); // counted when it is sent, after any wait for a slot
         this.stats.live_calls++;
         return liveGet(url, headers, this.live, secrets);
       });
@@ -230,6 +274,25 @@ class UniversalAPIGateway {
       // eslint-disable-next-line preserve-caught-error
       throw new Error(`${api.id}: unexpected error`);
     }
+  }
+
+  /**
+   * Refuses a live call to `apiId` when its limit of calls in the last RATE_LIMIT_WINDOW_MS is used up; otherwise records it.
+   * A refused call reaches no provider and is not recorded. Cache hits never get here, so they do not count.
+   */
+  private admit(apiId: string): void {
+    const limit = this.rateLimits.get(apiId);
+    if (limit === undefined) return;
+    const now = this.now();
+    const times = this.sent.get(apiId) ?? [];
+    while (times.length > 0 && times[0] <= now - RATE_LIMIT_WINDOW_MS) times.shift();
+    if (times.length >= limit) {
+      this.stats.rate_limited++;
+      const wait = Math.max(1, Math.ceil((times[0] + RATE_LIMIT_WINDOW_MS - now) / 1000));
+      throw new LiveCallError(`rate limit reached: at most ${limit} live calls per minute to this API (GATEWAY_RATE_LIMITS); try again in ${wait} s`);
+    }
+    times.push(now);
+    this.sent.set(apiId, times);
   }
 
   /**
@@ -376,6 +439,8 @@ class UniversalAPIGateway {
       cache_evictions: this.cacheEvictions,
       live_calls: this.stats.live_calls,
       live_apis: this.liveApis === "*" ? "*" : [...this.liveApis].filter((id) => this.apis.has(id)),
+      rate_limits: Object.fromEntries(this.rateLimits),
+      rate_limited: this.stats.rate_limited,
     };
   }
 
@@ -514,7 +579,8 @@ export const getStatsTool = {
     "Get statistics on API gateway usage and caching. Counters are kept in the memory of this server process and " +
     "reset when it restarts. total_calls includes cache hits and unknown ids (invalid arguments are not " +
     "counted); cache_hit_rate is a string, not a number; live_apis is [] while every answer is sample data, " +
-    "otherwise the ids of the APIs switched to live calls, or the single value \"*\" when all are.",
+    "otherwise the ids of the APIs switched to live calls, or the single value \"*\" when all are. rate_limits maps " +
+    "an API id to its limit of live calls per minute ({} when none is set) and rate_limited counts the live calls refused by it.",
   inputSchema: {
     type: "object" as const,
     properties: {},

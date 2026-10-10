@@ -120,6 +120,7 @@ manifests do not (a config test keeps it that way until the owner decides).
 | `GATEWAY_TIMEOUT_MS` | 10000 | per call, 100 to 120000 |
 | `GATEWAY_MAX_RESPONSE_BYTES` | 1048576 | larger responses are refused; 1024 to 33554432 |
 | `GATEWAY_USER_AGENT` | `increadible-gateway` | sent to the provider; Wikimedia asks clients to identify themselves with contact details, so set one before enabling `wikipedia` or `wikidata` |
+| `GATEWAY_RATE_LIMITS` | empty: no API has a limit of its own | per-API limit of live calls in any rolling minute, e.g. `coingecko=30,wikipedia=60` (1 to 100000 each). A call over the limit is refused before it reaches the provider (`rate limit reached ... try again in N s`) and counted in `get_api_stats` as `rate_limited`; cache hits and sample answers do not count; a call the provider answered with an error does. One process, one count: replicas would each count their own (the manifests run one). An entry that cannot be read, or names an unknown API, is noted on stderr and limits nothing. **No value is set anywhere**: no provider's limit has been measured or read, so the numbers are the owner's decision |
 
 Credentials come from the environment at call time (names only here; the values are never logged, returned or cached). Provide them from a Secret (`secretKeyRef`), not a
 ConfigMap and not the image. An API that is live and whose key is missing fails with the variable's name.
@@ -143,7 +144,7 @@ server, and the URL rule also against 60 000 random hostile endpoints):
 - what one caller can make the gateway hold or start is bounded: the result cache keeps at most 500 entries and about 16 MiB (the oldest go first; before this, every distinct call added an entry for good, and 2 000 calls with 200 KB of params held 385 MB of heap against the manifests' 256Mi limit), at most 10 live calls run at once and 100 more may wait (a call beyond that is refused with `the gateway is busy`), and one `aggregate_apis` request takes at most 100 calls and runs five of them at a time (it used to start every call it was given at once: 5 000 requested, 5 000 started together).
 
 **NOT VERIFIED:** any real provider (the authoring sandbox cannot reach them; the tests use a local server, and for the built-in registry a mocked `fetch`); each provider's
-terms of service and rate limits (there is no per-API limiter; `RATE_LIMIT_PER_MINUTE` is global and off); **egress**: no NetworkPolicy exists, so a pod can reach any host.
+terms of service and rate limits (a per-API limiter exists, `GATEWAY_RATE_LIMITS`, but no limit is set, because no provider's limit was read; `RATE_LIMIT_PER_MINUTE` is global and off); **egress**: no NetworkPolicy exists, so a pod can reach any host.
 Before enabling live calls in a cluster, add an egress policy that allows DNS and only the registered hosts: api.openweathermap.org, api.weatherapi.com, api.coingecko.com,
 finnhub.io, newsapi.org, hacker-news.firebaseio.com, en.wikipedia.org, www.wikidata.org, www.thesportsdb.com.
 
