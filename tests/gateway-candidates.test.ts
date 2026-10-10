@@ -147,3 +147,38 @@ describe("the candidate report (docs/GATEWAY-CANDIDATES.md, scripts/candidate-re
     expect(fs.readFileSync(path.join(root, DOC), "utf8")).toContain("| wikidata | none | `open-data/wikidata` | `OAuth` | **no** |");
   });
 });
+
+describe("gate proposals for the first batch (features/09-api-gateway/data/gate-proposals.json)", () => {
+  const P = "features/09-api-gateway/data/gate-proposals.json";
+  const file = JSON.parse(fs.readFileSync(path.join(root, P), "utf8"));
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { buildRequestUrl } = require("../features/09-api-gateway/src/live");
+
+  it("proposes the five the owner chose, each from a keyless HTTPS Cryptocurrency candidate, none already in the catalog", () => {
+    expect(file.proposals.map((p: any) => p.id)).toEqual(["coincap", "coinpaprika", "coinlore", "defillama", "mempool"]);
+    const byId = new Map(store.candidates.map((c: any) => [c.source_id, c]));
+    const catalogIds = new Set(CATALOG.map((e) => e.definition.id));
+    for (const p of file.proposals) {
+      const c: any = byId.get(p.candidate);
+      expect({ id: p.id, category: c?.category, auth: c?.listed_auth, https: c?.https }).toEqual({ id: p.id, category: "Cryptocurrency", auth: "No", https: true });
+      expect(catalogIds.has(p.id)).toBe(false);
+    }
+  });
+
+  it("holds only proposals: plain https endpoints, a probe the gateway would accept, a thing to check first, status proposed", () => {
+    for (const p of file.proposals) {
+      const u = new URL(p.endpoint);
+      expect({ id: p.id, ok: u.protocol === "https:" && !u.search && !u.hash && !u.username }).toEqual({ id: p.id, ok: true });
+      expect(() => buildRequestUrl(p.endpoint, p.probe.endpoint, p.probe.params)).not.toThrow();
+      expect(p.probe.success.trim()).not.toBe("");
+      expect(p.check_first.trim()).not.toBe("");
+      expect(p.status).toBe("proposed");
+    }
+    expect(file.note).toMatch(/UNVERIFIED/);
+  });
+
+  it("is read by no server code (proposals are never callable)", () => {
+    const sources = ["src", "features/09-api-gateway/src"].flatMap((d) => fs.readdirSync(path.join(root, d)).map((f) => fs.readFileSync(path.join(root, d, f), "utf8")));
+    for (const text of sources) expect(text).not.toMatch(/gate-proposals/);
+  });
+});
