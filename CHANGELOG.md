@@ -11,6 +11,7 @@ Entries marked **behaviour change** can affect an existing deployment.
 ## [Unreleased]
 
 ### Added
+- **The gated catalog, step 1a (option A, approved 2026-10-10):** the gateway's nine APIs moved from code into data, `features/09-api-gateway/src/catalog.ts`, each with a gate record (status, pinned URL, auth class, terms, health probe, contract test, each with its sign-off) and the live calls seen to work. All nine are `candidate`. **No behaviour change:** `tests/gateway-catalog.test.ts` holds the answers to a golden file recorded from the old hard-coded registry, and refuses a `gated` API with an empty gate. The package's bytes change (a new file), so the next release needs a new version (`docs/RELEASING.md`, section 4).
 - **A private rehearsal on Railway (hosting stage 1, approved by the owner on 2026-10-10)**: one service built from the `Dockerfile` at `v1.0.3`, one replica, a `/data` volume, `AUTH_TOKEN`, live calls off. Checked from the owner's PC: health, 401 without the token, 13 tools, and an A/B measurement that survived a restart (`DEPLOYMENT.md`, "Railway"). **Behaviour change on Railway only:** the container runs as root there (`RAILWAY_RUN_UID=0`).
 - **Hosting stage 2 on Railway (approved by the owner on 2026-10-10):** the four keyless APIs live there, with the owner's contact as the User-Agent; one call each answered `source: "live"` from Railway, whose DNS log shows only the four providers' hosts (`DEPLOYMENT.md`, "Railway").
 

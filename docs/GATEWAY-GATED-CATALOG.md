@@ -15,7 +15,7 @@ document is built, installed or run.
 | Nine registered APIs: openweathermap, weatherapi, coingecko, finnhub, newsapi, hackernews, wikipedia, wikidata, thesportsdb. `call_api` answers sample data unless an API is switched to live | `mcp-server.ts`, [`USING-THE-GATEWAY.md`](USING-THE-GATEWAY.md) |
 | Live calls had never run against a real provider when this was written; on 2026-10-10 one call each to the four keyless APIs succeeded from Claude Desktop (the key-based APIs: never) | `GATEWAY.md` (requirement 2), `docs/INSTALL-CLAUDE-DESKTOP.md` section 5.4 |
 | The live layer refuses other hosts and paths, `..` and encoded dots or slashes, full URLs, redirects, non-JSON, oversize and slow responses; GET only; the gateway adds the credential from an environment variable and redacts it from errors and logs | `features/09-api-gateway/src/live.ts` |
-| **The registry is hard-coded**: `initializeAPIRegistry()`, called from the constructor, builds the nine `APIDefinition` entries (`id`, `name`, `category`, `endpoint`, `methods`, `auth`, `free`, `description`, `docs_url`); the `apis` option replaces them only in tests. Credential sources are in `DEFAULT_CREDENTIALS` | `mcp-server.ts` |
+| **The registry is data** (since step 1a, below): `features/09-api-gateway/src/catalog.ts` holds the nine APIs, each with its `APIDefinition` (`id`, `name`, `category`, `endpoint`, `methods`, `auth`, `free`, `description`, `docs_url`), its credential source if it takes a key, and a gate record; the gateway reads it at start-up, and the `apis` option replaces it only in tests. Before step 1a it was hard-coded in `initializeAPIRegistry()` and `DEFAULT_CREDENTIALS` | `catalog.ts`, `mcp-server.ts` |
 | Bounds: cache 500 entries and 16 MiB, at most 100 calls per `aggregate_apis`, 10 live calls in flight, 100 waiting | `mcp-server.ts`, `MAX_CACHE_ENTRIES`, `MAX_CACHE_BYTES`, `MAX_AGGREGATE_CALLS`, `MAX_LIVE_IN_FLIGHT`, `MAX_LIVE_WAITING` |
 | Known gaps: the rate limit is global and off by default; no per-API limiter; no retry or backoff; no egress policy (no NetworkPolicy exists, so a pod can reach any host) | `ROADMAP.md`, Backlog, "Gateway live mode"; `DEPLOYMENT.md`, live-mode section |
 
@@ -52,9 +52,18 @@ seed sources (offline) -> candidate store -> gate pipeline -> registry (gated on
 
 ## 4. Order of work
 
-1. **Gate the nine APIs already registered**, proving the pipeline without a new external source. Because the registry is code
-   today (section 1), this step first turns the built-in list into data that carries a gate status, with tests that the nine
-   answers do not change. Output: nine gated records, each with a pinned URL, an auth class, terms and a probe history.
+1. **Gate the nine APIs already registered**, proving the pipeline without a new external source. In two parts:
+   - **1a, done (2026-10-10):** the built-in registry became data, `features/09-api-gateway/src/catalog.ts`. Each API carries a gate
+     record: a status (`candidate`, `gated`, `degraded`) and one field per gate (pinned base URL, auth class, terms, health probe,
+     contract test, each with who signed it off and when), plus the live calls seen to work. **All nine are `candidate`**, because no
+     gate has a person's sign-off yet; the four keyless APIs carry their live calls of 2026-10-10 as evidence. What the gateway
+     answers did not change: `tests/gateway-catalog.test.ts` holds it to a golden file recorded from the hard-coded registry
+     (`tests/fixtures/gateway-registry-golden.json`), and refuses a `gated` or `degraded` API with any gate left empty.
+   - **1b, next:** for each API, the owner signs off its pinned URL and auth class, its terms are read and recorded (URL, summary,
+     date), a health probe with success criteria and a recorded-response contract test are written; the four keyless APIs first.
+     Only then does an API become `gated`, and only after that does `discover_apis` list gated APIs only (a behaviour change, in its
+     own pull request).
+   Output of step 1: nine gated records, each with a pinned URL, an auth class, terms and a probe history.
 2. **Per-API rate limit and a retry policy** (both open in `ROADMAP.md`), before more APIs are switched to live.
 3. **Egress allowlist at deploy time**: a NetworkPolicy limited to the pinned hosts. None exists today (`DEPLOYMENT.md`); it is a prerequisite for live mode in a cluster.
 4. **Seed import** from the catalogues, as candidates only.
@@ -88,4 +97,4 @@ seed sources (offline) -> candidate store -> gate pipeline -> registry (gated on
 | `mcp-server.ts` has 668 lines, `live.ts` 100, of which the first 50 and 60 were read | 718 and 160 lines. The registry question the draft left open is answered in section 1 |
 | The gaps are in a "Known limitations" section of `ROADMAP.md` | No such section; they are in `ROADMAP.md`, Backlog, "Gateway live mode", and in `DEPLOYMENT.md` |
 | `DEPLOYMENT.md` assumes an egress allowlist | `DEPLOYMENT.md` says no NetworkPolicy exists, so a pod can reach any host: a gap, not an assumption |
-| How the registry is loaded is unknown | It is hard-coded in `initializeAPIRegistry()`; step 1 therefore includes a code change, not only new records |
+| How the registry is loaded is unknown | It was hard-coded in `initializeAPIRegistry()`; step 1 therefore included a code change, not only new records (done in step 1a) |

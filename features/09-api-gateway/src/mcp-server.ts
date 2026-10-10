@@ -1,17 +1,6 @@
 import * as crypto from "crypto";
 import { Credential, LiveCallError, LiveOptions, buildRequestUrl, liveGet, redact } from "./live";
-
-interface APIDefinition {
-  id: string;
-  name: string;
-  category: string;
-  endpoint: string;
-  methods: string[];
-  auth: "none" | "api_key" | "oauth" | "basic";
-  free: boolean;
-  description: string;
-  docs_url?: string;
-}
+import { APIDefinition, catalogCredentials, catalogDefinitions } from "./catalog";
 
 interface CacheEntry {
   data: any;
@@ -39,13 +28,8 @@ const AGGREGATE_CONCURRENCY = 5;
 export const MAX_LIVE_IN_FLIGHT = 10;
 export const MAX_LIVE_WAITING = 100;
 
-/** Where each key-based API takes its credential. The environment variable is read at call time; its value is never logged or returned. */
-const DEFAULT_CREDENTIALS: Record<string, Credential> = {
-  openweathermap: { env: "GATEWAY_KEY_OPENWEATHERMAP", in: "query", name: "appid" },
-  weatherapi: { env: "GATEWAY_KEY_WEATHERAPI", in: "query", name: "key" },
-  finnhub: { env: "GATEWAY_KEY_FINNHUB", in: "header", name: "X-Finnhub-Token" },
-  newsapi: { env: "GATEWAY_KEY_NEWSAPI", in: "header", name: "X-Api-Key" },
-};
+/** Where each key-based API takes its credential: the catalog's `credential` fields (`catalog.ts`). */
+const DEFAULT_CREDENTIALS = catalogCredentials();
 
 export interface GatewayOptions {
   /** Ids of the APIs that make real HTTP calls, or "*" for all. Default: none, so every API answers with generated mock data. */
@@ -130,111 +114,8 @@ class UniversalAPIGateway {
   }
 
   private initializeAPIRegistry(replacement?: APIDefinition[]): void {
-    // Core public APIs - representative sample
-    const coreAPIs: APIDefinition[] = [
-      // Weather
-      {
-        id: "openweathermap",
-        name: "OpenWeatherMap",
-        category: "weather",
-        endpoint: "https://api.openweathermap.org/data/2.5",
-        methods: ["GET"],
-        auth: "api_key",
-        free: true,
-        description: "Real-time weather data worldwide",
-        docs_url: "https://openweathermap.org/api",
-      },
-      {
-        id: "weatherapi",
-        name: "WeatherAPI",
-        category: "weather",
-        endpoint: "https://api.weatherapi.com/v1",
-        methods: ["GET"],
-        auth: "api_key",
-        free: true,
-        description: "Weather forecast and current conditions",
-      },
-
-      // Finance
-      {
-        id: "coingecko",
-        name: "CoinGecko",
-        category: "finance",
-        endpoint: "https://api.coingecko.com/api/v3",
-        methods: ["GET"],
-        auth: "none",
-        free: true,
-        description: "Cryptocurrency data and prices",
-        docs_url: "https://www.coingecko.com/en/api",
-      },
-      {
-        id: "finnhub",
-        name: "Finnhub",
-        category: "finance",
-        endpoint: "https://finnhub.io/api/v1",
-        methods: ["GET"],
-        auth: "api_key",
-        free: true,
-        description: "Stock market data and quotes",
-      },
-
-      // News
-      {
-        id: "newsapi",
-        name: "NewsAPI",
-        category: "news",
-        endpoint: "https://newsapi.org/v2",
-        methods: ["GET"],
-        auth: "api_key",
-        free: true,
-        description: "News aggregation and search",
-        docs_url: "https://newsapi.org",
-      },
-      {
-        id: "hackernews",
-        name: "HackerNews",
-        category: "news",
-        endpoint: "https://hacker-news.firebaseio.com/v0",
-        methods: ["GET"],
-        auth: "none",
-        free: true,
-        description: "Technology and startup news",
-      },
-
-      // Reference
-      {
-        id: "wikipedia",
-        name: "Wikipedia",
-        category: "reference",
-        endpoint: "https://en.wikipedia.org/w/api.php",
-        methods: ["GET"],
-        auth: "none",
-        free: true,
-        description: "Encyclopedia content via API",
-      },
-      {
-        id: "wikidata",
-        name: "Wikidata",
-        category: "reference",
-        endpoint: "https://www.wikidata.org/w/api.php",
-        methods: ["GET"],
-        auth: "none",
-        free: true,
-        description: "Structured data knowledge base",
-      },
-
-      // Sports
-      {
-        id: "thesportsdb",
-        name: "TheSportsDB",
-        category: "sports",
-        endpoint: "https://www.thesportsdb.com/api/v1/json/1",
-        methods: ["GET"],
-        auth: "api_key",
-        free: true,
-        description: "Sports data and statistics",
-      },
-    ];
+    // The catalog's APIs (`catalog.ts`), in catalog order, or the registry the caller supplied.
+    const coreAPIs: APIDefinition[] = catalogDefinitions();
 
     // Add core APIs (or the registry the caller supplied)
     for (const api of replacement ?? coreAPIs) {
