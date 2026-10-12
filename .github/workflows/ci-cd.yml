@@ -84,7 +84,7 @@ jobs:
           path: sbom-npm.cdx.json
           if-no-files-found: error
       - name: Scan for verified secrets
-        uses: trufflesecurity/trufflehog@v3.99.0
+        uses: trufflesecurity/trufflehog@v3.99.2
         with:
           path: ./
           extra_args: --only-verified
