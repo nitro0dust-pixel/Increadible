@@ -1,7 +1,7 @@
 # Increadible: context for Claude sessions
 
 Read this first, then `ROADMAP.md` (status, plan, open decisions: the source of truth for *what is done*),
-`DEPLOYMENT.md` (how it runs), `PERFORMANCE.md` (what has been measured, and what the numbers do not say), `COMPANIONS.md` (third-party tools that run beside this server, never inside it) and `GATEWAY.md` (the decision record for a universal API gateway: researched; option A, the gated catalog, approved by the owner on 2026-10-10; not built yet); `AUDIT.md` is the account of the code audit: what was found, fixed and left open). The index of every document is `docs/README.md`; `CONTRIBUTING.md` and `SECURITY.md` cover how to change the code and its security posture; the global skill `skills/omniroute-mcp/` carries all of it into any Claude session. This file holds the stable facts and the working rules; it deliberately holds no test
+`DEPLOYMENT.md` (how it runs), `PERFORMANCE.md` (what has been measured, and what the numbers do not say), `COMPANIONS.md` (third-party tools that run beside this server, never inside it) and `GATEWAY.md` (the decision record for a universal API gateway: researched; option A, the gated catalog, approved by the owner on 2026-10-10; being built step by step, `docs/GATEWAY-GATED-CATALOG.md` says what is done); `AUDIT.md` is the account of the code audit: what was found, fixed and left open). The index of every document is `docs/README.md`; `CONTRIBUTING.md` and `SECURITY.md` cover how to change the code and its security posture; the global skill `skills/omniroute-mcp/` carries all of it into any Claude session. This file holds the stable facts and the working rules; it deliberately holds no test
 counts, no commit hashes and no status, because those go stale with every PR.
 
 ## What this is
@@ -18,7 +18,7 @@ targets, not results).
 - **One Claude session works on the project at a time, and it keeps the records** (owner, 2026-10-09: a second session ran in parallel
   for PRs #43 and #45, both sessions edited the same status lines, and its record PR #45 was closed as superseded by #46; that session is
   ended). A session that finds another one active asks the owner before touching ROADMAP, BUILD-HISTORY, CHANGELOG or the skill's status.
-- Work happens on `claude/nice-keller-aoooos`, one PR at a time, squash-merged into `main`. After a squash merge the
+- Work happens on one work branch at a time (historically `claude/nice-keller-aoooos`; a cloud session is given its own), one PR at a time, squash-merged into `main`. After a squash merge the
   branch and `main` have identical content but different commits: bring `main` in with `git fetch origin main && git merge
   origin/main` and push as a fast-forward. **Never force-push or rewrite history**.
 - Nothing is deployed to production without explicit owner approval. Pushing to the work branch and opening PRs is routine;
@@ -86,7 +86,7 @@ Details and defaults: `README.md` and `DEPLOYMENT.md`.
 
 ## Environment gotchas (authoring sandbox)
 
-- Reachable: npm, PyPI, the Go module proxy. **Not reachable:** GitHub release pages, Docker Hub's registry, other repositories. No Docker daemon,
+- Reachable: npm, PyPI, the Go module proxy. **Not reachable:** GitHub release pages, Docker Hub's registry, other repositories, and the gateway's providers (`ENOTFOUND`). The web fetcher reached `github.com` but not `coingecko.com` or Wikimedia's sites (2026-10-10); web search works, but its answers are summaries: terms found that way are leads for the owner, never a sign-off. No Docker daemon,
   no cluster. So scanners or images cannot be looked up and pinned from there: that needs the owner's approval to look them up.
 - `go install pkg@version` does not work for Prometheus (`replace` directives); `scripts/install-promtool.sh` documents the workaround.
 - GitHub-hosted runners were starved on 2026-10-05 (queued jobs cancelled after 15 minutes, no step run); retry once, do not change the workflow for it.

@@ -56,6 +56,9 @@ export interface CatalogEntry {
   gate: GateRecord;
 }
 
+/** Gate 6 for the keyless four: their recorded answers (tests/fixtures/contracts/, recorded 2026-10-10) are replayed by this test. */
+const CONTRACTS = "tests/gateway-contracts.test.ts";
+
 /** No gate passed: the state of every API registered before the gated catalog. */
 const NO_GATES = { status: "candidate", base_url_pinned: null, auth_confirmed: null, terms: null, probe: null, contract_test: null } as const;
 
@@ -115,6 +118,7 @@ export const CATALOG: CatalogEntry[] = [
     },
     gate: {
       ...NO_GATES,
+      contract_test: CONTRACTS,
       probe: { endpoint: "/ping", params: {}, success: "HTTP 200, JSON, a non-empty string gecko_says" },
       live_evidence: seen("/simple/price", "bitcoin and ethereum prices in USD and INR", LIVE_OK),
     },
@@ -163,6 +167,7 @@ export const CATALOG: CatalogEntry[] = [
     },
     gate: {
       ...NO_GATES,
+      contract_test: CONTRACTS,
       probe: { endpoint: "/maxitem.json", params: {}, success: "HTTP 200, JSON, a positive integer (the newest item id)" },
       live_evidence: seen("/maxitem.json", "item id 50028141", LIVE_OK),
     },
@@ -182,6 +187,7 @@ export const CATALOG: CatalogEntry[] = [
     },
     gate: {
       ...NO_GATES,
+      contract_test: CONTRACTS,
       probe: {
         endpoint: "/",
         params: { action: "query", meta: "siteinfo", siprop: "general", format: "json" },
@@ -203,6 +209,7 @@ export const CATALOG: CatalogEntry[] = [
     },
     gate: {
       ...NO_GATES,
+      contract_test: CONTRACTS,
       probe: {
         endpoint: "/",
         params: { action: "wbgetentities", ids: "Q2", props: "labels", languages: "en", format: "json" },

@@ -90,7 +90,7 @@ candidate when run (none was installed or run).
 
 ## Decisions requested from the owner
 
-The gated catalog of option A, as components and an order of work: [`docs/GATEWAY-GATED-CATALOG.md`](docs/GATEWAY-GATED-CATALOG.md) (approved 2026-10-10, not built yet).
+The gated catalog of option A, as components and an order of work: [`docs/GATEWAY-GATED-CATALOG.md`](docs/GATEWAY-GATED-CATALOG.md) (approved 2026-10-10; being built step by step: its section 4 says what is done).
 
 
 - [x] Approve the direction: **build the core, no giant** (option A). **Approved by the owner on 2026-10-10.**
