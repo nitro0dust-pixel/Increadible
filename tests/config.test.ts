@@ -547,7 +547,10 @@ describe("API gateway live mode is documented", () => {
   const deployment = read("DEPLOYMENT.md");
 
   it("names every gateway variable the code reads in README.md and DEPLOYMENT.md", () => {
-    for (const name of ["GATEWAY_LIVE_APIS", "GATEWAY_TIMEOUT_MS", "GATEWAY_MAX_RESPONSE_BYTES", "GATEWAY_USER_AGENT", "GATEWAY_RATE_LIMITS"]) {
+    for (const name of [
+      "GATEWAY_LIVE_APIS", "GATEWAY_TIMEOUT_MS", "GATEWAY_MAX_RESPONSE_BYTES", "GATEWAY_USER_AGENT", "GATEWAY_CONTACT", "GATEWAY_RATE_LIMITS",
+      "GATEWAY_DEFAULT_RATE_LIMIT", "GATEWAY_RETRIES", "GATEWAY_RETRY_MAX_WAIT_MS",
+    ]) {
       expect({ name, read: gateway.includes(`process.env.${name}`) }).toEqual({ name, read: true });
       expect({ name, deployment: deployment.includes(name), readme: read("README.md").includes(name) }).toEqual({ name, deployment: true, readme: true });
     }
