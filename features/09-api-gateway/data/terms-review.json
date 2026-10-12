@@ -1,0 +1,142 @@
+{
+  "note": "Terms review of the gateway's APIs (gate 3 groundwork). Not an approval: owner_signoff is null on every entry until the owner signs it off in writing; a test refuses anything else. method says how each finding was read: 'read on the page' (this session fetched the provider's page), 'search summary of the official page' (a web search summarised the provider's own page; the page itself did not resolve from the sandbox), or 'third party' (someone else's account). Read by no server code.",
+  "reviewed_on": "2026-10-12",
+  "reviewed_by": "authoring session (Claude), at the owner's request of 2026-10-12",
+  "sandbox_reach": "From the sandbox, github.com and raw.githubusercontent.com resolve; coingecko.com, docs.coingecko.com, meta.wikimedia.org, foundation.wikimedia.org and www.mediawiki.org do not (getaddrinfo ENOTFOUND, 2026-10-10 and 2026-10-12).",
+  "apis": [
+    {
+      "id": "coingecko",
+      "base_url": "https://api.coingecko.com/api/v3",
+      "auth": "none",
+      "account_tier_configured": "none: anonymous keyless access, no account and no key in any known deployment",
+      "official_pages": ["https://www.coingecko.com/en/api_terms", "https://docs.coingecko.com/docs/keyless-public-api", "https://docs.coingecko.com/docs/errors-and-rate-limits"],
+      "findings": [
+        { "claim": "The keyless API is rate-limited per IP address, the limit shared with everyone on that IP, and it is not meant for production, scheduled polling or high-frequency use; no fixed keyless limit is published (the Demo plan, with a key, is 100 calls a minute).", "source": "https://docs.coingecko.com/docs/errors-and-rate-limits", "method": "search summary of the official page" },
+        { "claim": "A product using CoinGecko data must show 'Data provided by CoinGecko' with a link to https://www.coingecko.com/en/api; reselling or redistributing the raw data is not allowed.", "source": "https://support.coingecko.com/hc/en-us/articles/16760512207257-What-Are-the-Differences-Between-Commercial-and-Custom-Licenses", "method": "search summary of the official page" },
+        { "claim": "The free tier comes with attribution rather than a commercial licence.", "source": "https://coinmarketcap.com/academy/article/best-free-crypto-api-in-2026-free-tier-comparison", "method": "third party" },
+        { "claim": "Keyless limit of 5 to 15 calls a minute.", "source": "https://apify.com/retrainmap/coingecko-markets", "method": "third party" }
+      ],
+      "rate_limit": { "published": null, "seen": "5 to 15 calls a minute (third party only)", "verified": false },
+      "usage_restrictions": "attribution required; not for production; no redistribution (search summaries; the terms page itself not read)",
+      "open_questions": ["Does the gateway's use count as production, and is keyless use acceptable at all?", "Exact attribution wording, and whether the gateway must pass it on to its users"],
+      "owner_signoff": null
+    },
+    {
+      "id": "hackernews",
+      "base_url": "https://hacker-news.firebaseio.com/v0",
+      "auth": "none",
+      "account_tier_configured": "none: anonymous keyless access",
+      "official_pages": ["https://github.com/HackerNews/API"],
+      "findings": [
+        { "claim": "\"There is currently no rate limit.\" Base URL prefix https://hacker-news.firebaseio.com/v0/. No terms of use, licence for the data or authentication are stated; bugs go to api@ycombinator.com.", "source": "https://raw.githubusercontent.com/HackerNews/API/master/README.md", "method": "read on the page" }
+      ],
+      "rate_limit": { "published": "none (\"There is currently no rate limit.\")", "seen": null, "verified": true },
+      "usage_restrictions": "none stated on the page",
+      "open_questions": ["Whether Y Combinator's site terms cover the API (none are linked from the README)"],
+      "owner_signoff": null
+    },
+    {
+      "id": "wikipedia",
+      "base_url": "https://en.wikipedia.org/w/api.php",
+      "auth": "none",
+      "account_tier_configured": "none: anonymous access (authenticated requests would get higher limits; none are made)",
+      "official_pages": ["https://foundation.wikimedia.org/wiki/Policy:Wikimedia_Foundation_User-Agent_Policy", "https://www.mediawiki.org/wiki/API:Etiquette", "https://meta.wikimedia.org/wiki/API_Policy_Update_2024", "https://foundation.wikimedia.org/wiki/Terms_of_Use"],
+      "findings": [
+        { "claim": "Every request needs a descriptive User-Agent: client name/version, contact in parentheses (an email address, a URL, or a wiki user name), then libraries; clients without one may be blocked without notice, and generic library defaults may be blocked or heavily rate-limited.", "source": "https://foundation.wikimedia.org/wiki/Policy:Wikimedia_Foundation_User-Agent_Policy", "method": "search summary of the official page" },
+        { "claim": "Operators must follow instructions in a response to delay or reduce requests; numerical limits may change; an older page (2019) gives 200 requests a second as a ceiling.", "source": "https://meta.wikimedia.org/wiki/API_Policy_Update_2024", "method": "search summary of the official page" },
+        { "claim": "Article text is CC BY-SA 4.0 (attribution and share-alike when passed on).", "source": "https://www.wikidata.org/wiki/Wikidata:Licensing", "method": "search summary of the official page" }
+      ],
+      "rate_limit": { "published": null, "seen": "200 requests a second (a 2019 page); limits may change", "verified": false },
+      "usage_restrictions": "User-Agent with contact required; obey slow-down responses; CC BY-SA 4.0 for text",
+      "open_questions": ["How attribution should appear when the gateway returns article text"],
+      "owner_signoff": null
+    },
+    {
+      "id": "wikidata",
+      "base_url": "https://www.wikidata.org/w/api.php",
+      "auth": "none",
+      "account_tier_configured": "none: anonymous access",
+      "official_pages": ["https://foundation.wikimedia.org/wiki/Policy:Wikimedia_Foundation_User-Agent_Policy", "https://www.wikidata.org/wiki/Wikidata:Licensing"],
+      "findings": [
+        { "claim": "The same Wikimedia User-Agent policy applies.", "source": "https://foundation.wikimedia.org/wiki/Policy:Wikimedia_Foundation_User-Agent_Policy", "method": "search summary of the official page" },
+        { "claim": "Structured data in the main, property and lexeme namespaces is CC0 (no attribution required).", "source": "https://www.wikidata.org/wiki/Wikidata:Licensing", "method": "search summary of the official page" }
+      ],
+      "rate_limit": { "published": null, "seen": null, "verified": false },
+      "usage_restrictions": "User-Agent with contact required",
+      "open_questions": [],
+      "owner_signoff": null
+    },
+    {
+      "id": "newsapi",
+      "base_url": "https://newsapi.org/v2",
+      "auth": "api_key",
+      "account_tier_configured": "none: no GATEWAY_KEY_NEWSAPI in any known deployment; never run live",
+      "official_pages": ["https://newsapi.org/pricing", "https://newsapi.org/terms"],
+      "findings": [
+        { "claim": "The free Developer plan may be used for development and testing only, not in staging or production (internal use included), and allows 100 requests a day.", "source": "https://newsapi.org/pricing", "method": "search summary of the official page" }
+      ],
+      "rate_limit": { "published": "100 requests a day on the Developer plan", "seen": null, "verified": false },
+      "usage_restrictions": "Developer plan: no staging or production use",
+      "open_questions": ["Keep newsapi in the catalog at all, given the Developer plan's ban on production use?", "A daily cap cannot be expressed in GATEWAY_RATE_LIMITS (per minute)"],
+      "owner_signoff": null
+    },
+    {
+      "id": "openweathermap",
+      "base_url": "https://api.openweathermap.org/data/2.5",
+      "auth": "api_key",
+      "account_tier_configured": "none: no GATEWAY_KEY_OPENWEATHERMAP in any known deployment; never run live",
+      "official_pages": ["https://openweathermap.org/full-price", "https://openweathermap.org/terms"],
+      "findings": [
+        { "claim": "The free tier allows 60 calls a minute and 1,000,000 a month (One Call: 1,000 a day free, then charged).", "source": "https://openweathermap.org/full-price", "method": "search summary of the official page" },
+        { "claim": "The 2.5 API was announced to close in June 2024; the catalog's base URL may be outdated.", "source": "https://forum.arduino.cc/t/openweathermap-api-2-5-to-be-closed-this-june-2024/1250604", "method": "third party" }
+      ],
+      "rate_limit": { "published": "60 calls a minute, 1,000,000 a month (free tier)", "seen": null, "verified": false },
+      "usage_restrictions": "not found (terms page not read)",
+      "open_questions": ["Is /data/2.5 still served for the free tier, or must the catalog move to 3.0?"],
+      "owner_signoff": null
+    },
+    {
+      "id": "weatherapi",
+      "base_url": "https://api.weatherapi.com/v1",
+      "auth": "api_key",
+      "account_tier_configured": "none: no GATEWAY_KEY_WEATHERAPI in any known deployment; never run live",
+      "official_pages": ["https://www.weatherapi.com/pricing.aspx", "https://www.weatherapi.com/terms.aspx"],
+      "findings": [
+        { "claim": "About 1,000,000 free calls a month; other sources say 1,000 a day; new sign-ups may start on a 14-day Pro Plus trial.", "source": "https://discourse.nodered.org/t/weatherapi-com-weather-service/64216", "method": "third party" }
+      ],
+      "rate_limit": { "published": null, "seen": "1,000,000 a month or 1,000 a day (third parties disagree)", "verified": false },
+      "usage_restrictions": "not found",
+      "open_questions": ["The free plan's real limit and any attribution rule"],
+      "owner_signoff": null
+    },
+    {
+      "id": "finnhub",
+      "base_url": "https://finnhub.io/api/v1",
+      "auth": "api_key",
+      "account_tier_configured": "none: no GATEWAY_KEY_FINNHUB in any known deployment; never run live",
+      "official_pages": ["https://finnhub.io/pricing", "https://finnhub.io/terms-of-service"],
+      "findings": [
+        { "claim": "The free tier allows 60 calls a minute.", "source": "https://metacpan.org/pod/Finance::Quote::Finnhub", "method": "third party" },
+        { "claim": "The free key is for personal, non-commercial use; a monetised or redistributing app needs a paid plan.", "source": "https://apicostcalc.com/finnhub.html", "method": "third party" }
+      ],
+      "rate_limit": { "published": null, "seen": "60 calls a minute (third parties)", "verified": false },
+      "usage_restrictions": "personal, non-commercial (third party only)",
+      "open_questions": ["Finnhub's own terms on commercial use"],
+      "owner_signoff": null
+    },
+    {
+      "id": "thesportsdb",
+      "base_url": "https://www.thesportsdb.com/api/v1/json/1",
+      "auth": "api_key",
+      "account_tier_configured": "none: no key configured; the catalog's base URL embeds the public test key path '1'; never run live",
+      "official_pages": ["https://www.thesportsdb.com/free_sports_api", "https://www.thesportsdb.com/docs_api"],
+      "findings": [
+        { "claim": "The free test key is '3' in current docs ('123' and others in older ones); free use about 30 requests a minute (one source says 100); free tier for personal, non-commercial use, a paid key for commercial use.", "source": "https://www.mintlify.com/Pharaoh-Labs/teamarr/reference/provider-tsdb", "method": "third party" }
+      ],
+      "rate_limit": { "published": null, "seen": "30 a minute (most third parties), 100 (one)", "verified": false },
+      "usage_restrictions": "personal, non-commercial on the free key (third party only)",
+      "open_questions": ["Is the catalog's test-key path '1' still accepted?"],
+      "owner_signoff": null
+    }
+  ]
+}

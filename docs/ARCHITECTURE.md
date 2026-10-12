@@ -30,7 +30,7 @@ One Node.js process, one MCP server, three components we wrote. This page is the
 | Handler | `src/server.ts` | JSON-RPC 2.0 validation, tool dispatch, Prometheus text | counters and histograms |
 | Routing Plugins (#7) | `features/07-routing-plugins/src/mcp-server.ts` | first matching enabled rule by priority; stats; `update_rules` validates, writes a temporary file, renames it, then switches | the rules (file) and per-rule counters (memory) |
 | A/B Testing (#8) | `features/08-ab-testing/src/mcp-server.ts` | experiments with 2 to 10 variants, sticky hash assignment, Welch t-test, Holm correction, guardrails | `AB_DATA_FILE` (append-only JSON lines) and, in memory, counts plus a running mean and variance per variant and metric |
-| API Gateway (#9) | `features/09-api-gateway/src/mcp-server.ts`, `live.ts` | discovery, cached `call_api`, bounded `aggregate_apis`; mock data unless an API is made live | a bounded result cache (500 entries, about 16 MiB) |
+| API Gateway (#9) | `features/09-api-gateway/src/mcp-server.ts`, `live.ts`, `catalog.ts`, `probes.ts` | discovery, cached `call_api`, bounded `aggregate_apis`; mock data unless an API is made live; for live calls a per-API rate limit (a default of 5 a minute), bounded retries after a transient failure, a cooldown after HTTP 429, and the Wikimedia User-Agent rule | a bounded result cache (500 entries, about 16 MiB); per API, send times in the current minute and a cooldown end |
 | Packaging (Claude Desktop) | `mcpb/manifest.json`, `scripts/mcpb.js`, `scripts/zip.js` | builds the one-click `.mcpb` bundle from the committed sources (compile into a clean stage, `npm ci --omit=dev --ignore-scripts` from the lockfile, sorted entries, fixed timestamps) and checks a bundle; `scripts/zip.js` is the zip writer it shares with `scripts/skill.js` | none |
 | Vendored third-party | `features/01` to `06` | OmniRoute, claude-mem, token-optimizer-mcp, gstack, agentacct | **not integrated or tested here**; they run beside this server, never inside it (`COMPANIONS.md`) |
 
@@ -66,7 +66,7 @@ One Node.js process, one MCP server, three components we wrote. This page is the
 | The A/B data file | written only by this server | replay skips torn or invalid lines and says how many |
 | Environment variables | operator-controlled | integers are bounds-checked; a bad value falls back with a message |
 | The `.mcpb` bundle | built here, not downloaded | compiled from the committed sources; dependencies installed from the lockfile with install scripts off; `.env` files, source maps and the lockfile left out; `inspect` refuses unsafe names and bad checksums. It is **unsigned** |
-| Provider responses (live gateway) | untrusted | JSON only, size and time capped, redirects refused, error bodies scrubbed of the credential |
+| Provider responses (live gateway) | untrusted | JSON only, size and time capped, redirects refused, error bodies scrubbed of the credential; a `Retry-After` is read as seconds or an HTTP date and capped at a day, so a provider cannot park the gateway's calls to it longer |
 
 ## Limits you should know
 
