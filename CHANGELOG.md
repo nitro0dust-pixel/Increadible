@@ -10,6 +10,8 @@ Entries marked **behaviour change** can affect an existing deployment.
 
 ## [Unreleased]
 
+**Version 1.0.4** (bumped in [#64](https://github.com/nitro0dust-pixel/Increadible/pull/64), not yet tagged): `package.json`, `package-lock.json`, `mcpb/manifest.json` and `src/version.ts`. The entries below move to `[1.0.4]` once the owner has installed the package in Claude Desktop, a tool has answered, and the tag is pushed (`docs/RELEASING.md`).
+
 ### Changed
 - **CI: the secret-scanner action `trufflesecurity/trufflehog` 3.99.0 to 3.99.2** (Dependabot). The scanner image stays pinned by digest (3.99.2, `sha256:47a84bc1...`). ([#62](https://github.com/nitro0dust-pixel/Increadible/pull/62))
 - **Live gateway calls: conservative limits, bounded retries, HTTP 429 and Retry-After** (owner's instruction of 2026-10-12). **Behaviour change** for a deployment with live APIs: every live API without its own `GATEWAY_RATE_LIMITS` entry is now limited to **5 calls a minute** (`GATEWAY_DEFAULT_RATE_LIMIT`; 0 turns it off; the project's own conservative choice, the lowest figure any source gave, not a provider's number); a call that gets an HTTP 429, 502, 503 or 504 or a dropped connection is **retried once** (`GATEWAY_RETRIES`, 0 to 3), never after a timeout, waiting the provider's `Retry-After` (seconds or a date) up to `GATEWAY_RETRY_MAX_WAIT_MS` (5 s), else 1 s doubling; a 429 (or a 503 with `Retry-After`) starts a **cooldown** during which calls to that API are refused before anything is sent (its `Retry-After`, or a minute). `get_api_stats` gains `default_rate_limit`, `retries`, `max_retries`, `throttled`, `cooldown_refused`, `cooldowns`, `user_agent_has_contact` and `contact_refused`. Replaces the "no retries for now" decision of 2026-10-10.

@@ -1,6 +1,6 @@
 {
   "name": "increadible",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "MCP server bundling routing rules, A/B testing and an API gateway, alongside vendored cost/context tooling for Claude Desktop",
   "main": "dist/src/index.js",
   "scripts": {
