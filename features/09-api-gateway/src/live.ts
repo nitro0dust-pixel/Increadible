@@ -23,8 +23,43 @@ export interface LiveOptions {
   userAgent: string;
 }
 
+/** What a failed call says about trying again; set by liveGet, read by the gateway's retry loop. */
+export interface RetryHint {
+  /** The HTTP status, when the API answered. */
+  status?: number;
+  /** The wait the API asked for (Retry-After), in milliseconds, when it gave a readable one. */
+  retryAfterMs?: number;
+  /** A transient failure worth one more try: HTTP 429, 502, 503, 504, or a dropped connection. Never a timeout. */
+  retryable?: boolean;
+}
+
 /** An error whose message is safe to show to the model and to log: it never contains a credential. */
-export class LiveCallError extends Error {}
+export class LiveCallError extends Error {
+  constructor(message: string, readonly hint: RetryHint = {}) {
+    super(message);
+  }
+}
+
+/** HTTP statuses that mean "not now" rather than "no": the request may succeed if sent again later. */
+export const RETRYABLE_STATUSES = new Set([429, 502, 503, 504]);
+/** Network error codes of a connection that dropped or a name that did not resolve for a moment. A refused connection is not here. */
+const RETRYABLE_NETWORK_CODES = new Set(["ECONNRESET", "EPIPE", "EAI_AGAIN", "UND_ERR_SOCKET"]);
+/** A Retry-After beyond this is treated as this (a day): a server cannot park the gateway's calls to it for longer. */
+export const MAX_RETRY_AFTER_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * The wait a Retry-After header asks for, in milliseconds: either delay-seconds or an HTTP date (RFC 9110, section 10.2.3).
+ * Undefined for a missing or unreadable value; a date in the past is 0; anything longer than MAX_RETRY_AFTER_MS is capped.
+ */
+export function parseRetryAfter(value: string | null | undefined, nowMs: number = Date.now()): number | undefined {
+  if (value === null || value === undefined) return undefined;
+  const v = value.trim();
+  if (/^\d{1,10}$/.test(v)) return Math.min(Number(v) * 1000, MAX_RETRY_AFTER_MS);
+  if (v.length > 64 || !/^[A-Za-z]{3}, \d{2} [A-Za-z]{3} \d{4} \d{2}:\d{2}:\d{2} GMT$/.test(v)) return undefined;
+  const at = Date.parse(v);
+  if (Number.isNaN(at)) return undefined;
+  return Math.min(Math.max(0, at - nowMs), MAX_RETRY_AFTER_MS);
+}
 
 const MAX_ENDPOINT_LENGTH = 512;
 const MAX_PARAMS = 30;
@@ -130,7 +165,7 @@ export async function liveGet(
     if (error?.name === "TimeoutError" || error?.name === "AbortError") throw new LiveCallError(`timed out after ${options.timeoutMs} ms`);
     // error.message of a failed fetch can contain the URL, and with it the credential: report only the error code.
     const code = typeof error?.cause?.code === "string" ? error.cause.code : "unknown";
-    throw new LiveCallError(`network error (${code})`);
+    throw new LiveCallError(`network error (${code})`, { retryable: RETRYABLE_NETWORK_CODES.has(code) });
   }
 
   if (response.status >= 300 && response.status < 400) {
@@ -144,7 +179,8 @@ export async function liveGet(
     const retryAfter = response.headers.get("retry-after");
     const body = redact(text, secrets).replace(/\s+/g, " ").trim().slice(0, MAX_ERROR_BODY_CHARS);
     throw new LiveCallError(
-      `HTTP ${response.status}${response.status === 429 && retryAfter ? ` (retry after ${retryAfter.slice(0, 40)})` : ""}${body ? `: ${body}` : ""}`
+      `HTTP ${response.status}${response.status === 429 && retryAfter ? ` (retry after ${retryAfter.slice(0, 40)})` : ""}${body ? `: ${body}` : ""}`,
+      { status: response.status, retryAfterMs: parseRetryAfter(retryAfter), retryable: RETRYABLE_STATUSES.has(response.status) }
     );
   }
 

@@ -11,7 +11,8 @@
       "probe": { "endpoint": "/assets/bitcoin", "params": {}, "success": "HTTP 200, JSON, data.id is bitcoin" },
       "check_first": "The keyless v2 API may have been retired in favour of a keyed v3 (rest.coincap.io); if so, this API fails the keyless criterion of the batch and should be dropped or re-classified as api_key.",
       "found_2026_10_10": {"summary": "The keyless v2 API appears to be gone: a migration guide says api.coincap.io no longer resolves (NXDOMAIN), and that v3 (rest.coincap.io/v3) answers 401 without a key, with paid credits since 2025. If confirmed, CoinCap fails the keyless criterion of this batch: drop it, or reclassify it as api_key outside this batch.", "reliability": "second-hand (a competitor's guide and third-party READMEs); no CoinCap announcement found", "sources": ["https://coinpaprika.com/education/migrating-from-coincap-api-to-coinpaprika/", "https://glama.ai/mcp/servers/@wazzan/mcp-coincap-jj/blob/main/api-migration-plan.md"]},
-      "status": "proposed"
+      "status": "deferred",
+      "deferred": { "by": "owner", "on": "2026-10-12", "reason": "Deferred for this release (owner, 2026-10-12): its keyless API is reportedly gone; the batch continues with the other four." }
     },
     {
       "id": "coinpaprika",

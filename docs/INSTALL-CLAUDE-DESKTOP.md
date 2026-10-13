@@ -136,7 +136,7 @@ finds (a damaged entry, an unsafe file name, a missing manifest or entry point) 
    | **Data folder** (required) | an existing folder that you back up, for example `D:\Increadible-data` (Windows) or `~/Documents/Increadible-data` (Mac). The server keeps `rules.yaml`, `experiments.yaml` (optional) and `ab-data.jsonl` there | none: you must choose |
    | **Flush every A/B measurement to disk** | leave on unless you have measured that you need the speed (about 0.2 ms per write on a local disk) | on |
 | **Live APIs (real calls)** (1.0.3 and later) | leave empty for sample data; or lower-case ids separated by commas, for example `coingecko,hackernews,wikipedia,wikidata` (the four that need no key; section 5.3) | empty |
-| **Contact for providers (User-Agent)** (1.0.3 and later) | used only with Live APIs: something like `increadible (you@example.com)`, so that a provider can reach you | empty (sends `increadible-gateway`) |
+| **Contact for providers** (1.0.3 and later) | used only with Live APIs: your email address or a web address, so that a provider can reach you. Wikipedia and Wikidata require it: without it the server warns, and refuses their calls in production. From the next version it is sent as `increadible-gateway/<version> (<contact>)`; a value written the old way (`increadible (you@example.com)`) still works | empty (no contact is sent) |
 
 3. Confirm, and make sure the extension is switched on. Then do section 6.
 

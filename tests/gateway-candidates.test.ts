@@ -172,7 +172,7 @@ describe("gate proposals for the first batch (features/09-api-gateway/data/gate-
       expect(() => buildRequestUrl(p.endpoint, p.probe.endpoint, p.probe.params)).not.toThrow();
       expect(p.probe.success.trim()).not.toBe("");
       expect(p.check_first.trim()).not.toBe("");
-      expect(p.status).toBe("proposed");
+      expect(["proposed", "deferred"]).toContain(p.status);
     }
     expect(file.note).toMatch(/UNVERIFIED/);
   });
@@ -185,6 +185,11 @@ describe("gate proposals for the first batch (features/09-api-gateway/data/gate-
       for (const u of f.sources) expect(new URL(u).protocol).toBe("https:");
     }
     expect(file.note).toMatch(/not verification/);
+  });
+
+  it("defers CoinCap for this release, by the owner's decision of 2026-10-12, and only CoinCap", () => {
+    const deferred = file.proposals.filter((p: any) => p.status === "deferred");
+    expect(deferred.map((p: any) => [p.id, p.deferred?.by, p.deferred?.on])).toEqual([["coincap", "owner", "2026-10-12"]]);
   });
 
   it("is read by no server code (proposals are never callable)", () => {

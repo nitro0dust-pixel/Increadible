@@ -44,10 +44,11 @@ describe("mcpb/manifest.json", () => {
     jest.restoreAllMocks();
   });
 
-  it("carries one version everywhere: package.json, the manifest, and the version the server reports (SERVER_INFO in src/server.ts, written by hand)", () => {
+  it("carries one version everywhere: package.json, the manifest, and the version the server reports and sends in its User-Agent (src/version.ts, written by hand)", () => {
     const pkg = JSON.parse(read("package.json"));
-    const reported = /SERVER_INFO = \{ name: "increadible", version: "([^"]+)" \}/.exec(read("src/server.ts"))?.[1];
+    const reported = /export const VERSION = "([^"]+)";/.exec(read("src/version.ts"))?.[1];
     expect([manifest.version, reported]).toEqual([pkg.version, pkg.version]);
+    expect(read("src/server.ts")).toContain('SERVER_INFO = { name: "increadible", version: VERSION }');
   });
 
   it("is consistent with package.json and lists exactly the tools the server lists, in order", () => {
@@ -74,7 +75,7 @@ describe("mcpb/manifest.json", () => {
   it("offers live gateway calls only as an opt-in: two optional text settings, empty by default, so that a fresh install answers sample data", () => {
     for (const key of ["live_apis", "contact"]) expect(manifest.user_config[key]).toMatchObject({ type: "string", default: "", required: false });
     expect(manifest.server.mcp_config.env.GATEWAY_LIVE_APIS).toBe("${user_config.live_apis}");
-    expect(manifest.server.mcp_config.env.GATEWAY_USER_AGENT).toBe("${user_config.contact}");
+    expect(manifest.server.mcp_config.env.GATEWAY_CONTACT).toBe("${user_config.contact}");
     expect(manifest.user_config.live_apis.description).toMatch(/coingecko,hackernews,wikipedia,wikidata/);
   });
 
@@ -434,7 +435,9 @@ describe("the bundle (node scripts/mcpb.js build)", () => {
       expect(await fresh.exited).toBe(0);
       // Only the switch is checked here: the authoring sandbox cannot reach the providers, so no real call is made.
       const live = openSession({ data_directory: folder("live-on"), durable_writes: true, live_apis: "hackernews, wikipedia", contact: "increadible-test (test@example.com)" });
-      expect(await live.call("get_api_stats", {})).toMatchObject({ live_apis: ["hackernews", "wikipedia"] });
+      // The setting written the old way (a whole User-Agent) still gives the gateway its contact, so Wikipedia gets no warning.
+      expect(await live.call("get_api_stats", {})).toMatchObject({ live_apis: ["hackernews", "wikipedia"], user_agent_has_contact: true });
+      expect(live.stderr()).not.toMatch(/without contact information/);
       live.end();
       expect(await live.exited).toBe(0);
     });
