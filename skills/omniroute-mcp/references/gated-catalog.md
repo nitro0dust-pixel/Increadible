@@ -2,7 +2,7 @@
 
 # API gateway: gated catalog architecture (proposal, option A)
 
-**Status: APPROVED by the owner on 2026-10-10 (option A). Being built: steps 1a, 2, 3 and 4 done; step 1b in progress (probes, recordings and contract tests done for the keyless four; sign-offs and terms wait on the owner). Section 4 has the detail.**
+**Status: APPROVED by the owner on 2026-10-10 (option A). Being built: steps 1a, 2, 3 and 4 done; step 1b in progress (probes, recordings, contract tests and a probe runner with a probe history done for the keyless four; sign-offs, terms and the retirement threshold wait on the owner). Section 4 has the detail.**
 
 This expands recommendation "A, with a gated catalog" in [`GATEWAY.md`](../GATEWAY.md) into components and an order of work.
 It was drafted in a separate Claude session on 2026-10-10 from the owner's local copy, then checked line by line against
@@ -49,7 +49,7 @@ seed sources (offline) -> candidate store -> gate pipeline -> registry (gated on
 3. **Registry.** Gated APIs only. The advertised count is the number of gated APIs, never the number of candidates (`GATEWAY.md`, recommendation 3).
 4. **Live switch.** Unchanged: `GATEWAY_LIVE_APIS` opts an API in; a gated API answers sample data until then.
 5. **Call layer.** Unchanged. The host allowlist becomes each API's pinned base URL.
-6. **Evidence record.** Per API: gate status, auth class, terms, probe history (latency, error rate), date of last change. Read-only, through `get_api_stats` (owner decision, 2026-10-10; the `gates` field, without probe history until a scheduled probe exists).
+6. **Evidence record.** Per API: gate status, auth class, terms, probe history (latency, error rate), date of last change. Read-only, through `get_api_stats` (owner decision, 2026-10-10; the `gates` field). Probe history: `scripts/run-probes.js` writes one, on the machine that runs it; the server does not read it, so `get_api_stats` shows none yet.
 7. **Retirement.** A probe that keeps failing moves the API to `degraded`: hidden from `discover_apis`, kept in the store. The number of failures is a design choice, not a measured value.
 
 ## 4. Order of work
@@ -85,6 +85,14 @@ seed sources (offline) -> candidate store -> gate pipeline -> registry (gated on
        test, and `get_api_stats` shows it; a test holds the catalog and the recordings to each other both ways (a contract test
        named without a recording fails, and so does a recording whose API names none). This is evidence, not a sign-off: the four
        stay `candidate`.
+     - **Done: a probe runner and a probe history (2026-10-14).** `scripts/run-probes.js` sends each keyless API's probe once
+       through the gateway's live path (no retry, which would hide the failure; the User-Agent with `GATEWAY_CONTACT`, refused
+       without one) and appends one JSON line per probe to a history file (default `probe-history.jsonl`, ignored by git): when,
+       where, the API, passed or not, the latency, the HTTP status and the problems found; never the body, the User-Agent or a
+       credential. `run-probes.js report` prints, per API, the runs, the failures, the failures in a row at the end and the median
+       latency of the passed probes. Scheduling it (cron, Task Scheduler) is the operator's: nothing in the server runs or reads it.
+       `tests/run-probes.test.ts` runs it against the recorded answers in place of the network. **Never run against the real
+       providers from here** (the sandbox cannot reach them); its first real history comes from the owner's machine.
      - **Waiting on the owner:** the sign-offs on each pinned URL and auth class, and the terms (read on a machine that reaches the
        providers, summarised, signed off). What was found so far, and what each page still has to confirm, is in section 10.
    Output of step 1: nine gated records, each with a pinned URL, an auth class, terms and a probe history.
@@ -138,7 +146,11 @@ seed sources (offline) -> candidate store -> gate pipeline -> registry (gated on
 - [x] Approve starting step 1 above (`GATEWAY.md`, second box): **approved 2026-10-10**.
 - [ ] Option D: wanted or not (`GATEWAY.md`, third box).
 - [ ] Where API keys live once more than the keyless APIs are switched on (`GATEWAY.md`, fourth box).
-- [ ] Probe retirement threshold: needs a proposal, then a decision.
+- [ ] Probe retirement threshold. **Proposal (2026-10-14), not decided:** an API becomes `degraded` after **3 failed probes in a
+  row**, the probes **at least 1 hour apart**, and goes back after **2 passed probes in a row**; one failure is never enough (a
+  provider's bad minute), and a run of failures within the same hour counts once. The numbers are design choices, not measured
+  values: no probe history exists yet to measure them against. `run-probes.js report` already prints the failures in a row; moving
+  an API to `degraded` stays a person's change to `catalog.ts` until the owner decides whether it should be automatic.
 - [x] Where gate status is shown (section 3, item 6): **read-only in `get_api_stats`, decided by the owner on 2026-10-10**; built as the
   `gates` field (status, auth class, sign-off dates, terms address, probe path, contract test, live evidence; no probe history yet).
 - [x] Retries for live calls: **none for now, decided by the owner on 2026-10-10**; **replaced on 2026-10-12** by the owner's
@@ -158,7 +170,7 @@ seed sources (offline) -> candidate store -> gate pipeline -> registry (gated on
 ## 7. Not verified
 
 - Catalogue sizes, the no-auth share, the broken-API estimate, and the ContextForge and Docker advisory details (`GATEWAY.md`, "Not verified").
-- Probe success criteria and retirement thresholds: design choices, not measured. The four probes have never been sent to the real providers (only replayed against a stubbed `fetch`).
+- Probe success criteria and retirement thresholds: design choices, not measured. The four probes were sent to the real providers once, by the recorder on the owner's PC on 2026-10-10 (each passed); everything since is a replay of those answers. `scripts/run-probes.js` has never run against the real providers.
 - The effort of step 1: not estimated.
 
 ## 8. Corrections to the first draft

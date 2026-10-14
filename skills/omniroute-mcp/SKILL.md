@@ -55,6 +55,7 @@ Features #1 to #6 (`features/01` to `06`) are third-party submodules. They run b
 | `node scripts/skill.js` with `sync`, `check`, `package` or `install` | keep this skill in step with the documents; zip it for upload; install it globally |
 | `npm run mcpb` (`node scripts/mcpb.js` with `build`, `inspect FILE` or `problems`) | build the one-click Claude Desktop package `dist/mcpb/increadible-<version>.mcpb` from the committed sources (needs `npm ci` first); check a bundle; check `mcpb/manifest.json` against `package.json` |
 | `node scripts/record-contracts.js [--where M] [api ...]` | after `npm run build`, with `GATEWAY_USER_AGENT` set: sends each keyless API's health probe through the gateway and writes the answer to `tests/fixtures/contracts/` (gate 6). Needs a machine that reaches the providers: the owner's PC, not the sandbox |
+| `node scripts/run-probes.js [--history F] [--where M] [api ...]`, `... report` | after `npm run build`, with `GATEWAY_CONTACT` set: one probe per keyless API through the gateway, the outcome appended to a probe history (`probe-history.jsonl`, never the body); `report` summarises it per API. Needs a machine that reaches the providers |
 | `node scripts/seed-candidates.js`, `node scripts/candidate-report.js` | the candidate store from the public-apis list (2,032 entries, read by no server code); the generated report `docs/GATEWAY-CANDIDATES.md` (a test fails while it is stale) |
 | `node scripts/make-ab-data.js --file F --measurements N` | a large A/B data file for smoke and capacity checks |
 

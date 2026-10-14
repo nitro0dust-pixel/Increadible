@@ -10,6 +10,9 @@ Entries marked **behaviour change** can affect an existing deployment.
 
 ## [Unreleased]
 
+### Added
+- **A probe runner and a probe history for the keyless APIs** (gated catalog, gate 4 and the evidence record): `scripts/run-probes.js` sends each keyless API's health probe once through the gateway's live path (no retry; refused without a contact in `GATEWAY_CONTACT`) and appends one JSON line per probe to a history file (default `probe-history.jsonl`, ignored by git): when, where, passed or not, latency, HTTP status, problems; never the body, the User-Agent or a credential. `run-probes.js report` prints runs, failures, failures in a row and median latency per API. For a scheduler on a machine that reaches the providers; nothing in the server runs or reads it, and it has **never run against the real providers** (the sandbox cannot reach them). A **proposal** for the retirement threshold (3 failures in a row, at least an hour apart; back after 2 passes) waits for the owner (`docs/GATEWAY-GATED-CATALOG.md`, section 6). No behaviour change. (PR_LINK)
+
 ### Changed
 - **Tests: three dead lint directives removed** from `tests/gateway-candidates.test.ts` (`eslint-disable-next-line @typescript-eslint/no-require-imports`; the rule is off for the whole project, so ESLint reported them as unused: 3 warnings and 0 errors, seen in the lint step of `main` run 38506367869 and locally at `26abe70`). No behaviour change. ([#65](https://github.com/nitro0dust-pixel/Increadible/pull/65))
 
