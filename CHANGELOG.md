@@ -11,7 +11,7 @@ Entries marked **behaviour change** can affect an existing deployment.
 ## [Unreleased]
 
 ### Changed
-- **Tests: three dead lint directives removed** from `tests/gateway-candidates.test.ts` (`eslint-disable-next-line @typescript-eslint/no-require-imports`; the rule is off for the whole project, so ESLint reported them as unused: 3 warnings and 0 errors, seen in the lint step of `main` run 38506367869 and locally at `26abe70`). No behaviour change. (PR_LINK)
+- **Tests: three dead lint directives removed** from `tests/gateway-candidates.test.ts` (`eslint-disable-next-line @typescript-eslint/no-require-imports`; the rule is off for the whole project, so ESLint reported them as unused: 3 warnings and 0 errors, seen in the lint step of `main` run 38506367869 and locally at `26abe70`). No behaviour change. ([#65](https://github.com/nitro0dust-pixel/Increadible/pull/65))
 
 ## [1.0.4] - 2026-10-14
 
