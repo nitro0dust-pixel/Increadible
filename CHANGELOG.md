@@ -3,14 +3,19 @@
 All notable changes to this repository, newest first. Format after [Keep a Changelog](https://keepachangelog.com/).
 Entries cite the pull request; evidence (CI runs, commands) is in each PR and in `ROADMAP.md`.
 
-**Releases:** `v1.0.3` (tag on commit `916206f`, pushed by the owner on 2026-10-10 after live calls were verified in Claude Desktop)
-and `v1.0.2` (tag on commit `64cdefb`, 2026-10-09); see `ROADMAP.md` and `docs/RELEASING.md`. The stale local `v1.0.0` tag was never
+**Releases:** `v1.0.4` (tag on commit `73c5f4d`, pushed by the owner on 2026-10-14 after the package answered in Claude Desktop),
+`v1.0.3` (tag on commit `916206f`, pushed by the owner on 2026-10-10 after live calls were verified in Claude Desktop) and `v1.0.2` (tag on commit `64cdefb`, 2026-10-09); see `ROADMAP.md` and `docs/RELEASING.md`. The stale local `v1.0.0` tag was never
 pushed and is not a release. Changes merged after the latest tag are under *Unreleased*.
 Entries marked **behaviour change** can affect an existing deployment.
 
 ## [Unreleased]
 
-**Version 1.0.4** (bumped in [#64](https://github.com/nitro0dust-pixel/Increadible/pull/64), not yet tagged): `package.json`, `package-lock.json`, `mcpb/manifest.json` and `src/version.ts`. The entries below move to `[1.0.4]` once the owner has installed the package in Claude Desktop, a tool has answered, and the tag is pushed (`docs/RELEASING.md`).
+### Changed
+- **Tests: three dead lint directives removed** from `tests/gateway-candidates.test.ts` (`eslint-disable-next-line @typescript-eslint/no-require-imports`; the rule is off for the whole project, so ESLint reported them as unused: 3 warnings and 0 errors, seen in the lint step of `main` run 38506367869 and locally at `26abe70`). No behaviour change. (PR_LINK)
+
+## [1.0.4] - 2026-10-14
+
+Version 1.0.4, bumped in [#64](https://github.com/nitro0dust-pixel/Increadible/pull/64) (`package.json`, `package-lock.json`, `mcpb/manifest.json`, `src/version.ts`); tag `v1.0.4` on the merge commit `73c5f4d`. The package `increadible-1.0.4.mcpb` (SHA-256 `24ee7a6f...`) was built identically by CI, in the authoring sandbox and on the owner's Windows PC; the owner installed it in Claude Desktop and `get_api_stats` answered (`docs/RELEASING.md`).
 
 ### Changed
 - **CI: the secret-scanner action `trufflesecurity/trufflehog` 3.99.0 to 3.99.2** (Dependabot). The scanner image stays pinned by digest (3.99.2, `sha256:47a84bc1...`). ([#62](https://github.com/nitro0dust-pixel/Increadible/pull/62))

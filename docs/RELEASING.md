@@ -64,8 +64,16 @@ written after the tag (PR #41), which is now step 2. `v1.0.3` went through all e
 and CHANGELOG note (PR #47), merge (`916206f`, its tree equal to the CI-verified head `af43e10`), the package SHA-256 from CI and from
 a local build (`1fd5ac75...`, equal), the owner's install and live calls in Claude Desktop, the owner's annotated tag (object
 `5dd6620d`, 2026-10-10 00:34 UTC, unsigned), its check through the GitHub API (it points at `916206f`), and the records (the PR that
-moved the CHANGELOG to `[1.0.3]`). `v1.0.4` is at step 1 (the version bump, with the gateway changes of PRs #50 to #63 in the
-package; 2026-10-13). The owner installed the final 1.0.3 file (`1fd5ac75...`); the first test build (`c9eef367...`, same server code) was also downloaded, which is why the file name alone cannot tell them apart.
+moved the CHANGELOG to `[1.0.3]`). `v1.0.4` went through all eight steps: version bump
+and CHANGELOG note (PR #64), merge (`73c5f4d`, 2026-10-14, its tree equal to the CI-verified head `e3a9bcb`), the package SHA-256
+`24ee7a6f...` from CI (`main` run 38506367869), from a local build in the authoring sandbox and from the owner's own build on Windows
+(all three equal; the owner built it because the file sent from the session was not found on their PC), the owner's install in
+Claude Desktop where `get_api_stats` answered with the fields that exist only from 1.0.4 (`default_rate_limit` 5, `retries`), the
+owner's annotated tag (object `aeba41b2`, 2026-10-14 03:56 UTC, unsigned), its check through the GitHub API (it points at
+`73c5f4d`), and the records. **Not verified before the tag:** the setting Contact for providers reaching the server. Both
+`get_api_stats` answers in Claude Desktop said `user_agent_has_contact: false`; the same built server, started the way the manifest
+starts it, says `true` with an email address in `GATEWAY_CONTACT` and `false` with a plain name, so the setting was either not saved
+or not an email address or URL. The owner tagged with that check open. The owner installed the final 1.0.3 file (`1fd5ac75...`); the first test build (`c9eef367...`, same server code) was also downloaded, which is why the file name alone cannot tell them apart.
 
 ## 4. A version number names one file only once it is released
 
