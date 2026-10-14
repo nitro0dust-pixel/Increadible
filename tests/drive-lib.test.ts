@@ -69,6 +69,8 @@ describe("matchValue, getPath and substitute", () => {
     expect(ok("C", { $matches: "^(A|B)$" })).toBe(false);
     expect(ok(undefined, { $exists: false })).toBe(true);
     expect(ok(0, { $exists: true })).toBe(true);
+    expect(ok(undefined, { $exists: true })).toBe(false); // a missing value does not satisfy $exists: true
+    expect(ok(0, { $exists: false })).toBe(false); // and a present falsy one does not satisfy $exists: false
     expect(ok(5, { $gte: 1, $lte: 3 })).toBe(false); // every matcher in the object must hold
   });
 
@@ -126,6 +128,12 @@ describe("runScenario", () => {
     expect((await run(client, [{ name: "s", method: "bad", expect: { rpc_error: -32602 } }])).steps[0].problems[0]).toMatch(/expected JSON-RPC error -32602, got -32601/);
     expect((await run(client, [{ name: "s", method: "bad" }])).steps[0].problems[0]).toMatch(/unexpected JSON-RPC error -32601/);
     expect((await run(client, [{ name: "s", method: "fine", expect: { rpc_error: -32601 } }])).steps[0].problems[0]).toMatch(/got a result/);
+  });
+
+  it("holds the raw result of a method step to its result expectations, by path", async () => {
+    const client = fake({ ping: { result: { a: { b: 2 } } } });
+    expect((await run(client, [{ name: "s", method: "ping", expect: { result: { "a.b": 2, a: { $type: "object" } } } }])).ok).toBe(true);
+    expect((await run(client, [{ name: "s", method: "ping", expect: { result: { "a.b": 3 } } }])).steps[0].problems).toEqual(["result.a.b: expected 3, got 2"]);
   });
 
   it("checks tools_include against tools/list", async () => {
@@ -386,6 +394,18 @@ describe("driveStdio against fake servers", () => {
     expect(silent.results[0].steps[0].problems[0]).toBe("no answer to initialize within 400 ms");
   });
 
+  it("fails the handshake for a server that does not call itself increadible", async () => {
+    const run = await drive(write("other.js", answerer.replace("VERSION", "1.2.3").replace('name: "increadible"', 'name: "other-server"') + 'process.stdin.on("end", () => process.exit(0));'));
+    expect(verdicts(run).handshake).toBe(false);
+    expect(run.results[0].steps[0].problems[0]).toBe('serverInfo.name should be "increadible", got "other-server"');
+  });
+
+  it("fails the shutdown check for a server that leaves only when it is sent SIGTERM, even with exit code 0", async () => {
+    const run = await drive(write("sigterm-only.js", answerer.replace("VERSION", "1.2.3") + 'setInterval(() => {}, 1000); process.stdin.on("end", () => {}); process.on("SIGTERM", () => process.exit(0));'), { graceMs: 150 });
+    expect(verdicts(run).shutdown).toBe(false);
+    expect(run.results[0].steps.find((s: any) => s.name === "shutdown").problems[0]).toBe("the server did not leave when stdin closed (it needed SIGTERM)");
+  });
+
   it("fails the stdout check for an answer nobody asked for (a well-formed message with an id no request used)", async () => {
     const run = await drive(write("unsolicited.js", answerer.replace("VERSION", "1.2.3") + 'process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: 999, result: {} }) + "\\n"); process.stdin.on("end", () => process.exit(0));'));
     expect(verdicts(run)).toEqual({ handshake: true, ping: true, shutdown: true, "stdout is protocol only": false });
@@ -405,6 +425,7 @@ describe("the HTTP client", () => {
   let base = "";
   const seen: Array<{ method: string; url: string; auth?: string; body: string }> = [];
   let ready = 200;
+  let unauthorized = false;
   beforeAll(async () => {
     server = http.createServer((req, res) => {
       let body = "";
@@ -416,6 +437,7 @@ describe("the HTTP client", () => {
         if (req.url === "/html") { res.end("<html>nope</html>"); return; }
         res.setHeader("Content-Type", "application/json");
         if (req.url !== "/mcp") { res.end("{}"); return; }
+        if (unauthorized) { res.statusCode = 401; res.end(JSON.stringify({ error: "Unauthorized" })); return; }
         res.end(JSON.stringify({ jsonrpc: "2.0", id: JSON.parse(body).id, result: { echoed: JSON.parse(body).method } }));
       });
     });
@@ -439,6 +461,16 @@ describe("the HTTP client", () => {
     const original = c.request.bind(c);
     c.request = (method: string, p: string, o: any) => original(method, p === "/mcp" ? "/html" : p, o);
     await expect(c.rpc("ping")).rejects.toThrow(/HTTP 200 without a JSON-RPC body/);
+  });
+
+  it("refuses a JSON answer that is not JSON-RPC either (the 401 body of the real server), naming the status", async () => {
+    const c = new lib.HttpClient({ baseUrl: base, token: "t" });
+    unauthorized = true;
+    try {
+      await expect(c.rpc("ping")).rejects.toThrow('HTTP 401 without a JSON-RPC body: {"error":"Unauthorized"}');
+    } finally {
+      unauthorized = false;
+    }
   });
 
   it("waits for /ready, and gives up with the last answer it saw", async () => {

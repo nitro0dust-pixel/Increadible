@@ -529,7 +529,7 @@ function handshakeStep(init, expectVersion, ms) {
  * Starts a server on stdio, performs the handshake, runs the scenario, ends the server the way a client does and checks how it ended.
  * One function for the stdio driver and the bundle driver, so both are held to the same checks.
  */
-async function driveStdio({ command, args, env, cwd, scenario, vars, skipWrites = false, secrets = [], requestTimeoutMs = 20000, expectVersion, protocolVersion, onStep }) {
+async function driveStdio({ command, args, env, cwd, scenario, vars, skipWrites = false, secrets = [], requestTimeoutMs = 20000, graceMs = 4000, expectVersion, protocolVersion, onStep }) {
   const client = new StdioClient({ command, args, env, cwd, requestTimeoutMs, secrets, protocolVersion });
   const steps = [];
   let serverInfo;
@@ -547,7 +547,7 @@ async function driveStdio({ command, args, env, cwd, scenario, vars, skipWrites 
     }
     if (handshakeOk) steps.push(...(await runScenario(client, scenario, { secrets, vars, skipWrites, onStep })).steps);
   } finally {
-    const ended = await client.stop(4000);
+    const ended = await client.stop(graceMs);
     const problems = [];
     if (ended.how !== "stdin closed") problems.push(`the server did not leave when stdin closed (it needed ${ended.how})`);
     else if (ended.code !== 0) problems.push(`the server left with code ${ended.code}, expected 0`);
