@@ -25,6 +25,7 @@ third-party projects (or are our integration guides for them) and are not listed
 | What was measured and what the numbers do not say | [PERFORMANCE.md](../PERFORMANCE.md) |
 | Third-party tools that run beside this server | [COMPANIONS.md](../COMPANIONS.md) |
 | Calling the API gateway from a Claude chat: prompts, answers, mock versus real, the statistics | [USING-THE-GATEWAY.md](USING-THE-GATEWAY.md) |
+| Driving the server with real requests from the command line (stdio, HTTP, protocol probe, the Desktop package): what each driver checks, how to run it, how to read the report | [DRIVERS.md](DRIVERS.md) |
 | The universal API gateway decision (option A approved 2026-10-10; being built, see the next row) | [GATEWAY.md](../GATEWAY.md) |
 | Option A of that decision as components and an order of work (approved 2026-10-10; being built step by step, its section 4 says what is done; section 9 holds the first batch and section 10 the terms found for the keyless four) | [GATEWAY-GATED-CATALOG.md](GATEWAY-GATED-CATALOG.md) |
 | What the seed list of candidate APIs holds, per category and listed auth, and how the catalog's own APIs appear in it (generated; material for choosing what to gate next) | [GATEWAY-CANDIDATES.md](GATEWAY-CANDIDATES.md) |

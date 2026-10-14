@@ -16,7 +16,11 @@
     "verify": "bash scripts/verify.sh",
     "smoke": "bash scripts/smoke.sh",
     "loadtest": "node scripts/loadtest.js",
-    "capacity": "node scripts/capacity.js"
+    "capacity": "node scripts/capacity.js",
+    "drive:stdio": "node scripts/drive-stdio.js",
+    "drive:http": "node scripts/drive-http.js",
+    "drive:probe": "node scripts/drive-probe.js",
+    "drive:bundle": "node scripts/drive-bundle.js"
   },
   "keywords": [
     "claude",

@@ -1,0 +1,464 @@
+import { describe, it, expect, beforeAll, afterAll, afterEach } from "@jest/globals";
+import * as fs from "fs";
+import * as http from "http";
+import * as os from "os";
+import * as path from "path";
+
+/**
+ * scripts/drive-lib.js, the shared part of the request drivers (docs/DRIVERS.md): scenario files, the matchers, the runner, the
+ * redaction of secrets, the stdio and HTTP clients and the way a server is ended. The clients are tried against small fake servers so
+ * that the failure paths (no answer, a crash, stray output, a server that ignores every polite goodbye) can be made to happen. The real
+ * server behind the drivers is in tests/drive.test.ts.
+ */
+const lib = require("../scripts/drive-lib.js");
+const root = path.join(__dirname, "..");
+const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value));
+
+describe("scenario files", () => {
+  const minimal = { name: "s", steps: [{ name: "a", method: "ping" }] };
+
+  it("every shipped scenario is valid, and its step names are unique", () => {
+    const names = lib.listScenarios();
+    expect(names).toContain("basic");
+    for (const name of names) expect(lib.loadScenario(name).steps.length).toBeGreaterThan(0);
+  });
+
+  it("refuses a scenario that would silently check nothing (each breakage is reported, with the step it is in)", () => {
+    const cases: Array<[string, (s: any) => void, RegExp]> = [
+      ["no name", (s) => delete s.name, /"name" is required/],
+      ["no steps", (s) => (s.steps = []), /non-empty array/],
+      ["a step without a name", (s) => delete s.steps[0].name, /step 1: "name" is required/],
+      ["a step name used twice", (s) => s.steps.push({ name: "a", method: "ping" }), /used twice/],
+      ["neither method nor tool", (s) => delete s.steps[0].method, /exactly one of "method" and "tool"/],
+      ["both method and tool", (s) => (s.steps[0].tool = "x"), /exactly one of "method" and "tool"/],
+      ["a misspelled step key", (s) => (s.steps[0].argumnets = {}), /unknown key "argumnets"/],
+      ["a misspelled expectation", (s) => (s.steps[0].expect = { tool_eror: true }), /unknown expectation "tool_eror"/],
+      ["writes that is not a boolean", (s) => (s.steps[0].writes = "yes"), /"writes" must be true or false/],
+      ["an unknown matcher", (s) => (s.steps[0].expect = { json: { a: { $gt: 1 } } }), /unknown matcher in json\.a/],
+    ];
+    for (const [what, mutate, message] of cases) {
+      const scenario = clone(minimal);
+      mutate(scenario);
+      expect({ what, error: (() => { try { lib.validateScenario(scenario, "t.json"); return ""; } catch (e) { return (e as Error).message; } })() }).toEqual({ what, error: expect.stringMatching(message) });
+    }
+    expect(() => lib.validateScenario(clone(minimal))).not.toThrow();
+  });
+
+  it("names the file when it is not found, and lists what exists", () => {
+    expect(() => lib.loadScenario("no-such-scenario")).toThrow(/no scenario "no-such-scenario"/);
+  });
+});
+
+describe("matchValue, getPath and substitute", () => {
+  it("compares a literal by value and applies each matcher", () => {
+    const ok = (actual: unknown, wanted: unknown) => lib.matchValue(actual, wanted) === null;
+    expect(ok({ a: [1, 2] }, { a: [1, 2] })).toBe(true);
+    expect(ok({ a: [1, 2] }, { a: [2, 1] })).toBe(false);
+    expect(ok("x", { $type: "string" })).toBe(true);
+    expect(ok([], { $type: "array" })).toBe(true);
+    expect(ok(null, { $type: "null" })).toBe(true);
+    expect(ok(3, { $type: "string" })).toBe(false);
+    expect(ok(5, { $gte: 5 })).toBe(true);
+    expect(ok(4, { $gte: 5 })).toBe(false);
+    expect(ok("4", { $gte: 3 })).toBe(false); // a string is not a number
+    expect(ok(5, { $lte: 5 })).toBe(true);
+    expect(ok(["a", "b"], { $includes: "b" })).toBe(true);
+    expect(ok("abc", { $includes: "bc" })).toBe(true);
+    expect(ok(["a"], { $includes: "z" })).toBe(false);
+    expect(ok("B", { $matches: "^(A|B)$" })).toBe(true);
+    expect(ok("C", { $matches: "^(A|B)$" })).toBe(false);
+    expect(ok(undefined, { $exists: false })).toBe(true);
+    expect(ok(0, { $exists: true })).toBe(true);
+    expect(ok(5, { $gte: 1, $lte: 3 })).toBe(false); // every matcher in the object must hold
+  });
+
+  it("says what it expected and what it got", () => {
+    expect(lib.matchValue(2, 3)).toBe("expected 3, got 2");
+    expect(lib.matchValue(2, { $gte: 3 })).toBe("expected $gte 3, got 2");
+  });
+
+  it("reads dotted paths through objects and arrays, and returns undefined for a path that is not there", () => {
+    const value = { a: { b: [{ c: 7 }] } };
+    expect(lib.getPath(value, "a.b.0.c")).toBe(7);
+    expect(lib.getPath(value, "a.x.0.c")).toBeUndefined();
+    expect(lib.getPath(null, "a")).toBeUndefined();
+    expect(lib.getPath([{ id: "h" }], "0.id")).toBe("h");
+  });
+
+  it("substitutes ${name} in strings at any depth; a whole-string variable keeps its type; an unknown variable is an error", () => {
+    const vars = { run: "r1", n: 5, list: [1] };
+    expect(lib.substitute({ id: "drive-${run}", n: "${n}", deep: [{ x: "${list}" }], text: "n=${n}" }, vars)).toEqual({ id: "drive-r1", n: 5, deep: [{ x: [1] }], text: "n=5" });
+    expect(() => lib.substitute("${missing}", vars)).toThrow(/unknown variable \$\{missing\}/);
+    expect(() => lib.substitute("a ${missing} b", vars)).toThrow(/unknown variable/);
+    expect(lib.substitute(7, vars)).toBe(7);
+  });
+});
+
+describe("runScenario", () => {
+  const text = (value: unknown, isError = false) => ({ result: { content: [{ type: "text", text: typeof value === "string" ? value : JSON.stringify(value) }], isError } });
+  /** A client that answers from a table: "tools/call:NAME" or the method. Records the calls it got. */
+  const fake = (answers: Record<string, unknown>) => {
+    const calls: Array<{ method: string; params: any }> = [];
+    return { calls, rpc: async (method: string, params: any) => { calls.push({ method, params }); const key = method === "tools/call" ? `tools/call:${params.name}` : method; if (!(key in answers)) throw new Error(`no answer scripted for ${key}`); return answers[key]; } };
+  };
+  const run = (client: any, steps: any[], options: any = {}) => lib.runScenario(client, lib.validateScenario({ name: "t", steps }), options);
+
+  it("passes a tool answer that matches, and reports each mismatch with its path", async () => {
+    const client = fake({ "tools/call:t": text({ a: 1, b: "x" }) });
+    const good = await run(client, [{ name: "s", tool: "t", expect: { json: { a: 1, b: { $type: "string" } } } }]);
+    expect(good.ok).toBe(true);
+    const bad = await run(client, [{ name: "s", tool: "t", expect: { json: { a: 2, b: { $type: "number" } } } }]);
+    expect(bad.ok).toBe(false);
+    expect(bad.steps[0].problems).toEqual(["json.a: expected 2, got 1", 'json.b: expected $type "number", got "x"']);
+  });
+
+  it("holds a tool error to the expectation both ways: an unexpected error fails, an expected one that does not come fails", async () => {
+    const client = fake({ "tools/call:fails": text({ error: "boom" }, true), "tools/call:works": text({}) });
+    expect((await run(client, [{ name: "s", tool: "fails" }])).steps[0].problems[0]).toMatch(/unexpected tool error: .*boom/);
+    expect((await run(client, [{ name: "s", tool: "works", expect: { tool_error: true } }])).steps[0].problems[0]).toMatch(/expected a tool error/);
+    expect((await run(client, [{ name: "s", tool: "fails", expect: { tool_error: true, contains: "boom" } }])).ok).toBe(true);
+    expect((await run(client, [{ name: "s", tool: "fails", expect: { tool_error: true, contains: "other" } }])).steps[0].problems[0]).toMatch(/does not contain "other"/);
+  });
+
+  it("holds a JSON-RPC error to its code, and a result where an error was expected fails", async () => {
+    const client = fake({ bad: { error: { code: -32601, message: "Method not found: bad" } }, fine: { result: {} } });
+    expect((await run(client, [{ name: "s", method: "bad", expect: { rpc_error: -32601, message_contains: "not found" } }])).ok).toBe(true);
+    expect((await run(client, [{ name: "s", method: "bad", expect: { rpc_error: -32602 } }])).steps[0].problems[0]).toMatch(/expected JSON-RPC error -32602, got -32601/);
+    expect((await run(client, [{ name: "s", method: "bad" }])).steps[0].problems[0]).toMatch(/unexpected JSON-RPC error -32601/);
+    expect((await run(client, [{ name: "s", method: "fine", expect: { rpc_error: -32601 } }])).steps[0].problems[0]).toMatch(/got a result/);
+  });
+
+  it("checks tools_include against tools/list", async () => {
+    const client = fake({ "tools/list": { result: { tools: [{ name: "a" }, { name: "b" }] } } });
+    expect((await run(client, [{ name: "s", method: "tools/list", expect: { tools_include: ["a", "b"] } }])).ok).toBe(true);
+    expect((await run(client, [{ name: "s", method: "tools/list", expect: { tools_include: ["a", "c"] } }])).steps[0].problems).toEqual(["tools/list lacks: c"]);
+  });
+
+  it("carries a saved value into later steps, in arguments and in expectations; a step that needs a value nobody saved fails", async () => {
+    const client = fake({ "tools/call:first": text({ id: "V" }), "tools/call:second": text({ got: "V" }) });
+    const result = await run(client, [
+      { name: "one", tool: "first", save: { v: "id" } },
+      { name: "two", tool: "second", arguments: { variant: "${v}", run: "${run_id}" }, expect: { json: { got: "${v}" } } },
+    ], { vars: { run_id: "R9" } });
+    expect(result.ok).toBe(true);
+    expect(client.calls[1].params.arguments).toEqual({ variant: "V", run: "R9" });
+    const orphan = await run(client, [{ name: "two", tool: "second", arguments: { variant: "${v}" } }]);
+    expect(orphan.steps[0].problems[0]).toMatch(/unknown variable \$\{v\}/);
+    const nothing = await run(client, [{ name: "one", tool: "first", save: { v: "no.such.path" } }]);
+    expect(nothing.steps[0].problems[0]).toMatch(/save v: nothing at no\.such\.path/);
+  });
+
+  it("skips the steps that write when asked to, without calling the server for them", async () => {
+    const client = fake({ "tools/call:read": text({}), "tools/call:write": text({}) });
+    const result = await run(client, [{ name: "r", tool: "read" }, { name: "w", tool: "write", writes: true }], { skipWrites: true });
+    expect(result.steps.map((s: any) => [s.name, s.ok, !!s.skipped])).toEqual([["r", true, false], ["w", true, true]]);
+    expect(client.calls.map((c) => c.params.name)).toEqual(["read"]);
+  });
+
+  it("turns an exception of the client into a failed step instead of stopping the run, and hides secrets in it", async () => {
+    const client = fake({ "tools/call:ok": text({}) });
+    const result = await run(client, [{ name: "a", tool: "missing" }, { name: "b", tool: "ok" }], { secrets: ["scripted"] });
+    expect(result.steps.map((s: any) => s.ok)).toEqual([false, true]);
+    expect(result.steps[0].problems[0]).toBe("no answer <hidden> for tools/call:missing");
+  });
+
+  it("does not parse a tool answer that is not JSON when only the text is checked, and reports it when JSON is needed", async () => {
+    const client = fake({ "tools/call:plain": text("just words") });
+    expect((await run(client, [{ name: "s", tool: "plain", expect: { contains: "words" } }])).ok).toBe(true);
+    expect((await run(client, [{ name: "s", tool: "plain", expect: { json: { a: 1 } } }])).steps[0].problems[0]).toMatch(/tool text is not JSON: just words/);
+  });
+});
+
+describe("secrets", () => {
+  it("prints the name of a variable and its value only where the value is not sensitive", () => {
+    const env = { PORT: "3000", AUTH_TOKEN: "super-secret-token", GATEWAY_KEY_ALPHA: "k-123456", RULES_FILE: "/data/rules.yaml", HOST: "127.0.0.1" };
+    const shown = lib.describeEnv(env).join(" | ");
+    expect(shown).toContain("PORT=3000");
+    expect(shown).toContain("HOST=127.0.0.1");
+    expect(shown).toContain("AUTH_TOKEN (set)");
+    expect(shown).toContain("GATEWAY_KEY_ALPHA (set)");
+    expect(shown).toContain("RULES_FILE (set)");
+    expect(shown).not.toContain("super-secret-token");
+    expect(shown).not.toContain("k-123456");
+  });
+
+  it("collects the values of secret-looking variables (not the short ones) and hides them in any text", () => {
+    const secrets = lib.secretValues({ AUTH_TOKEN: "super-secret-token", GATEWAY_KEY_A: "ab", PORT: "3000", API_PASSWORD: "hunter22" }, ["extra-value"]);
+    expect(secrets.sort()).toEqual(["extra-value", "hunter22", "super-secret-token"]);
+    expect(lib.redact("Bearer super-secret-token and hunter22 twice hunter22", secrets)).toBe("Bearer <hidden> and <hidden> twice <hidden>");
+  });
+
+  it("hands a child only the variables it needs (nothing else of the caller's environment)", () => {
+    process.env.DRIVE_TEST_LEAK = "leaky-value";
+    try {
+      const env = lib.baseEnv({ A: "1" });
+      expect(env.A).toBe("1");
+      expect(env.PATH).toBe(process.env.PATH);
+      expect(Object.keys(env)).not.toContain("DRIVE_TEST_LEAK");
+      expect(JSON.stringify(env)).not.toContain("leaky-value");
+    } finally {
+      delete process.env.DRIVE_TEST_LEAK;
+    }
+  });
+});
+
+describe("command line helpers", () => {
+  it("parses values, flags and repeated options, and refuses an unknown option or a missing value", () => {
+    const spec = { string: ["scenario", "env"], boolean: ["json"], repeat: ["env"] };
+    expect(lib.parseArgs(["--scenario", "basic", "--json", "--env", "A=1", "--env", "B=2", "rest"], spec)).toEqual({ _: ["rest"], scenario: "basic", json: true, env: ["A=1", "B=2"] });
+    expect(() => lib.parseArgs(["--nope"], spec)).toThrow(/unknown option --nope/);
+    expect(() => lib.parseArgs(["--scenario"], spec)).toThrow(/--scenario needs a value/);
+    expect(() => lib.parseArgs(["--nope"], spec)).toThrow(lib.UsageError);
+  });
+
+  it("splits NAME=VALUE at the first = only, and checks the name without echoing the value", () => {
+    expect(lib.parseEnvPairs(["A=1", "B=x=y", "C="])).toEqual({ A: "1", B: "x=y", C: "" });
+    let message = "";
+    try { lib.parseEnvPairs(["1BAD=secret-value"]); } catch (e) { message = (e as Error).message; }
+    expect(message).toMatch(/expects NAME=VALUE, got "1BAD"/);
+    expect(message).not.toContain("secret-value");
+  });
+});
+
+describe("work directories", () => {
+  it("makes a directory with the driver's prefix, and removes only such a directory", () => {
+    const dir = lib.makeWorkdir();
+    expect(path.basename(dir).startsWith(lib.WORKDIR_PREFIX)).toBe(true);
+    fs.writeFileSync(path.join(dir, "f"), "x");
+    lib.removeWorkdir(dir);
+    expect(fs.existsSync(dir)).toBe(false);
+    const other = fs.mkdtempSync(path.join(os.tmpdir(), "not-a-drive-dir-"));
+    try {
+      expect(() => lib.removeWorkdir(other)).toThrow(/refusing to remove a directory this driver did not create/);
+      expect(() => lib.removeWorkdir(root)).toThrow(/refusing/);
+      expect(fs.existsSync(other)).toBe(true);
+    } finally {
+      fs.rmSync(other, { recursive: true, force: true });
+    }
+  });
+
+  it("names the missing build when the server's entry point is not there", () => {
+    expect(() => lib.entryPoint(os.tmpdir(), "main.js")).toThrow(/does not exist: run "npm run build"/);
+  });
+});
+
+describe("formatReport", () => {
+  it("prints PASS, FAIL, SKIP and KNOWN with the problems and the verdict, counting what ran", () => {
+    const step = (name: string, extra: object) => ({ name, ok: true, ms: 3, summary: "ok", problems: [], ...extra });
+    const results = [{ scenario: "s", ok: false, steps: [step("a", {}), step("b", { ok: false, problems: ["it broke"] }), step("c", { skipped: true }), step("d", { status: "KNOWN", notes: ["a note"] })] }];
+    const text: string = lib.formatReport({ driver: "x", target: "t", results, notes: ["n1"] });
+    expect(text).toMatch(/1\s+a\s+PASS/);
+    expect(text).toMatch(/2\s+b\s+FAIL/);
+    expect(text).toContain("- it broke");
+    expect(text).toMatch(/3\s+c\s+SKIP/);
+    expect(text).toMatch(/4\s+d\s+KNOWN/);
+    expect(text).toContain(". a note");
+    expect(text).toContain("FAIL 1 of 3 steps (1 skipped: they write data) (1 KNOWN");
+    const passing = lib.formatReport({ driver: "x", target: "t", results: [{ scenario: "s", ok: true, steps: [step("a", {})] }] });
+    expect(passing).toContain("PASS 1/1");
+  });
+});
+
+describe("the stdio client against fake servers", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "drive-fake-"));
+  const server = path.join(dir, "fake.js");
+  const open: any[] = [];
+  beforeAll(() => {
+    fs.writeFileSync(server, `
+      const mode = process.env.FAKE_MODE || "ok";
+      if (mode === "garbage") console.log("hello, this is not json");
+      if (mode === "stubborn") { process.on("SIGTERM", () => {}); process.stdin.on("end", () => {}); setInterval(() => {}, 1000); }
+      const send = (o) => process.stdout.write(JSON.stringify(o) + "\\n");
+      let buf = "";
+      process.stdin.setEncoding("utf8");
+      process.stdin.on("data", (d) => {
+        buf += d; let i;
+        while ((i = buf.indexOf("\\n")) >= 0) {
+          const line = buf.slice(0, i); buf = buf.slice(i + 1);
+          if (!line.trim()) continue;
+          const m = JSON.parse(line);
+          if (mode === "silent") continue;
+          if (mode === "crash") process.exit(7);
+          if (m.id === undefined) continue;
+          if (m.method === "initialize") send({ jsonrpc: "2.0", id: m.id, result: { protocolVersion: "x", capabilities: { tools: {} }, serverInfo: { name: "increadible", version: "0.0.0" } } });
+          else send({ jsonrpc: "2.0", id: m.id, result: {} });
+        }
+      });
+      if (mode !== "stubborn") process.stdin.on("end", () => process.exit(0));
+    `);
+  });
+  afterEach(async () => {
+    for (const c of open.splice(0)) await c.proc.stop({ stdinFirst: false, graceMs: 100 });
+  });
+  afterAll(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const client = (mode: string, extra: object = {}) => {
+    const c = new lib.StdioClient({ args: [server], env: lib.baseEnv({ FAKE_MODE: mode }), requestTimeoutMs: 400, ...extra });
+    open.push(c);
+    return c;
+  };
+
+  it("matches answers to requests by id, performs the handshake and leaves on stdin close with code 0", async () => {
+    const c = client("ok");
+    expect((await c.initialize()).serverInfo.name).toBe("increadible");
+    expect((await c.request("ping")).result).toEqual({});
+    expect(await c.stop(1000)).toMatchObject({ how: "stdin closed", code: 0 });
+  });
+
+  it("gives up on a request nobody answers, naming the method and the time", async () => {
+    const c = client("silent");
+    await expect(c.request("ping")).rejects.toThrow("no answer to ping within 400 ms");
+  });
+
+  it("fails a request the server dies on, saying how it died", async () => {
+    const c = client("crash");
+    await expect(c.request("ping")).rejects.toThrow(/exited \(code 7\)/);
+    await expect(c.request("ping")).rejects.toThrow(/has exited/); // and a request after that does not hang
+  });
+
+  it("keeps a stdout line that is not JSON apart, so the clean-stdout check can fail on it", async () => {
+    const c = client("garbage");
+    await c.request("ping");
+    expect(c.nonJsonLines).toEqual(["hello, this is not json"]);
+  });
+
+  it("keeps answers nobody waits for (a string id) and hands them out in order", async () => {
+    const c = client("ok");
+    c.sendRaw('{"jsonrpc":"2.0","id":"s-1","method":"ping"}');
+    expect((await c.takeUnmatched(1, 1000)).map((m: any) => m.id)).toEqual(["s-1"]);
+    expect(await c.takeUnmatched(1, 100)).toEqual([]);
+  });
+
+  it("goes down the ladder when a server ignores a polite goodbye: stdin close, SIGTERM, then SIGKILL", async () => {
+    const c = client("stubborn");
+    await c.request("ping");
+    const ended = await c.stop(150);
+    expect(ended.how).toBe("SIGKILL");
+    expect(ended.signal).toBe("SIGKILL");
+  });
+
+  it("stops a server that is already gone without error", async () => {
+    const c = client("crash");
+    await c.request("ping").catch(() => undefined);
+    await c.proc.exited;
+    expect(await c.stop(100)).toMatchObject({ how: "already exited", code: 7 });
+  });
+
+  it("writes nothing to a dead server without throwing (a late write is answered by the exit, not by an exception)", async () => {
+    const c = client("crash");
+    await c.request("ping").catch(() => undefined);
+    await c.proc.exited;
+    expect(() => c.notify("notifications/initialized")).not.toThrow();
+  });
+
+  it("hides a secret in the server's stderr tail", async () => {
+    const script = path.join(dir, "noisy.js");
+    fs.writeFileSync(script, 'console.error("token is the-secret-value ok"); process.stdin.on("end", () => process.exit(0)); process.stdin.resume();');
+    const proc = new lib.ManagedProcess({ args: [script], env: lib.baseEnv({}), secrets: ["the-secret-value"] });
+    await new Promise((r) => setTimeout(r, 300));
+    await proc.stop({ stdinFirst: true, graceMs: 1000 });
+    expect(proc.stderrText()).toBe("token is <hidden> ok\n");
+  });
+});
+
+describe("driveStdio against fake servers", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "drive-fake2-"));
+  afterAll(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const scenario = { name: "one", steps: [{ name: "ping", method: "ping" }] };
+  const write = (name: string, code: string) => { const f = path.join(dir, name); fs.writeFileSync(f, code); return f; };
+  const answerer = `
+    process.stdin.setEncoding("utf8"); let buf = "";
+    process.stdin.on("data", (d) => { buf += d; let i; while ((i = buf.indexOf("\\n")) >= 0) { const m = JSON.parse(buf.slice(0, i)); buf = buf.slice(i + 1); if (m.id === undefined) continue;
+      process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: m.id, result: m.method === "initialize" ? { protocolVersion: "x", capabilities: { tools: {} }, serverInfo: { name: "increadible", version: "VERSION" } } : {} }) + "\\n"); } });`;
+  const drive = (file: string, extra: object = {}) => lib.driveStdio({ args: [file], env: lib.baseEnv({}), scenario, expectVersion: "1.2.3", requestTimeoutMs: 400, ...extra });
+  const verdicts = (run: any) => Object.fromEntries(run.results[0].steps.map((s: any) => [s.name, s.ok]));
+
+  it("passes a server that answers, has the right version and leaves cleanly", async () => {
+    const run = await drive(write("good.js", answerer.replace("VERSION", "1.2.3") + 'process.stdin.on("end", () => process.exit(0));'));
+    expect(verdicts(run)).toEqual({ handshake: true, ping: true, shutdown: true, "stdout is protocol only": true });
+  });
+
+  it("fails the handshake for the wrong version and for a server that does not answer, and does not run the scenario", async () => {
+    const wrong = await drive(write("wrong.js", answerer.replace("VERSION", "9.9.9") + 'process.stdin.on("end", () => process.exit(0));'));
+    expect(verdicts(wrong).handshake).toBe(false);
+    expect(wrong.results[0].steps[0].problems[0]).toMatch(/serverInfo\.version should be 1\.2\.3, got "9\.9\.9"/);
+    const silent = await drive(write("silent.js", 'process.stdin.resume(); process.stdin.on("end", () => process.exit(0));'));
+    expect(verdicts(silent)).toEqual({ handshake: false, shutdown: true, "stdout is protocol only": true });
+    expect(silent.results[0].steps[0].problems[0]).toBe("no answer to initialize within 400 ms");
+  });
+
+  it("fails the stdout check for an answer nobody asked for (a well-formed message with an id no request used)", async () => {
+    const run = await drive(write("unsolicited.js", answerer.replace("VERSION", "1.2.3") + 'process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: 999, result: {} }) + "\\n"); process.stdin.on("end", () => process.exit(0));'));
+    expect(verdicts(run)).toEqual({ handshake: true, ping: true, shutdown: true, "stdout is protocol only": false });
+    expect(run.results[0].steps.find((s: any) => s.name === "stdout is protocol only").problems[0]).toMatch(/^an answer nobody asked for: .*"id":999/);
+  });
+
+  it("fails the shutdown check for a nonzero exit, and the stdout check for a stray line", async () => {
+    const run = await drive(write("bad.js", answerer.replace("VERSION", "1.2.3") + 'console.log("stray words"); process.stdin.on("end", () => process.exit(3));'));
+    expect(verdicts(run)).toEqual({ handshake: true, ping: true, shutdown: false, "stdout is protocol only": false });
+    expect(run.results[0].steps.find((s: any) => s.name === "shutdown").problems[0]).toBe("the server left with code 3, expected 0");
+    expect(run.results[0].steps.find((s: any) => s.name === "stdout is protocol only").problems[0]).toBe("stdout line that is not JSON: stray words");
+  });
+});
+
+describe("the HTTP client", () => {
+  let server: http.Server;
+  let base = "";
+  const seen: Array<{ method: string; url: string; auth?: string; body: string }> = [];
+  let ready = 200;
+  beforeAll(async () => {
+    server = http.createServer((req, res) => {
+      let body = "";
+      req.on("data", (d) => (body += d));
+      req.on("end", () => {
+        seen.push({ method: req.method as string, url: req.url as string, auth: req.headers.authorization, body });
+        if (req.url === "/ready") { res.statusCode = ready; res.end("{}"); return; }
+        if (req.url === "/echo-secret") { res.setHeader("Content-Type", "application/json"); res.end(JSON.stringify({ leaked: "the-token-value" })); return; }
+        if (req.url === "/html") { res.end("<html>nope</html>"); return; }
+        res.setHeader("Content-Type", "application/json");
+        if (req.url !== "/mcp") { res.end("{}"); return; }
+        res.end(JSON.stringify({ jsonrpc: "2.0", id: JSON.parse(body).id, result: { echoed: JSON.parse(body).method } }));
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
+    base = `http://127.0.0.1:${(server.address() as any).port}`;
+  });
+  afterAll(() => new Promise<void>((resolve) => { server.closeAllConnections?.(); server.close(() => resolve()); }));
+
+  it("sends the bearer token unless told not to, and increments the request id", async () => {
+    const c = new lib.HttpClient({ baseUrl: base, token: "the-token-value", secrets: ["the-token-value"] });
+    seen.length = 0;
+    expect((await c.rpc("ping")).result).toEqual({ echoed: "ping" });
+    await c.request("GET", "/health", { auth: false });
+    expect(seen.map((s) => [s.url, s.auth])).toEqual([["/mcp", "Bearer the-token-value"], ["/health", undefined]]);
+    expect(JSON.parse(seen[0].body)).toMatchObject({ jsonrpc: "2.0", id: 1, method: "ping" });
+  });
+
+  it("hides the token in what it returns, and refuses an answer that is not JSON-RPC (a 401 page, HTML)", async () => {
+    const c = new lib.HttpClient({ baseUrl: base, token: "the-token-value", secrets: ["the-token-value"] });
+    expect((await c.request("GET", "/echo-secret")).text).toBe('{"leaked":"<hidden>"}');
+    const original = c.request.bind(c);
+    c.request = (method: string, p: string, o: any) => original(method, p === "/mcp" ? "/html" : p, o);
+    await expect(c.rpc("ping")).rejects.toThrow(/HTTP 200 without a JSON-RPC body/);
+  });
+
+  it("waits for /ready, and gives up with the last answer it saw", async () => {
+    const c = new lib.HttpClient({ baseUrl: base });
+    ready = 503;
+    await expect(c.waitReady(300)).rejects.toThrow(/did not answer 200 within 300 ms \(last: HTTP 503\)/);
+    ready = 200;
+    await expect(c.waitReady(300)).resolves.toBeUndefined();
+    await expect(c.waitReady(300, () => false)).rejects.toThrow(/exited before it was ready/);
+  });
+
+  it("times out on a server that never answers", async () => {
+    const silent = http.createServer(() => undefined);
+    await new Promise<void>((resolve) => silent.listen(0, "127.0.0.1", () => resolve()));
+    try {
+      const c = new lib.HttpClient({ baseUrl: `http://127.0.0.1:${(silent.address() as any).port}`, timeoutMs: 200 });
+      await expect(c.request("GET", "/x")).rejects.toThrow(/no answer to GET \/x within 200 ms/);
+    } finally {
+      silent.closeAllConnections?.();
+      silent.close();
+    }
+  });
+});
