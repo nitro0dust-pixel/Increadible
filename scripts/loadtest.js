@@ -18,6 +18,7 @@
 "use strict";
 const { spawn } = require("child_process");
 const http = require("http");
+const net = require("net");
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
@@ -153,9 +154,29 @@ async function serverToolMeanMs(port, tool) {
   return { sum: get("sum"), count: get("count") };
 }
 
+/**
+ * A port nothing listens on, chosen by the operating system. A random port could be taken: in 20000-40000 it overlaps the
+ * outgoing-connection range (32768-60999 on Linux), and a server that loses the race exits with EADDRINUSE (seen once in CI).
+ */
+const freePort = () =>
+  new Promise((resolve, reject) => {
+    const probe = net.createServer();
+    probe.once("error", reject);
+    probe.listen(0, "127.0.0.1", () => {
+      const { port } = probe.address();
+      probe.close(() => resolve(port));
+    });
+  });
+/** Why a server exited: its first error line (an uncaught error's message), not Node's trailer, then the last lines. */
+const exitReason = (stderr) => {
+  const lines = stderr.split("\n").filter((l) => l.trim() !== "");
+  const first = lines.find((l) => /Error|EADDRINUSE|Refusing/.test(l));
+  return [first, ...lines.slice(-3)].filter(Boolean).join(" | ");
+};
+
 async function startServer(scenario) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "increadible-load-"));
-  const port = 20000 + Math.floor(Math.random() * 20000);
+  const port = await freePort();
   const child = spawn(process.execPath, [path.join(ROOT, "dist/src/index.js")], {
     env: { ...process.env, PORT: String(port), HOST: "127.0.0.1", RULES_FILE: path.join(dir, "rules.yaml"), EXPERIMENTS_FILE: path.join(dir, "experiments.yaml"), ...scenario.env(dir) },
     stdio: ["ignore", "ignore", "pipe"],
@@ -163,7 +184,7 @@ async function startServer(scenario) {
   let stderr = "";
   child.stderr.on("data", (d) => (stderr += d));
   for (let i = 0; i < 100; i++) {
-    if (child.exitCode !== null) throw new Error(`server exited early: ${stderr.split("\n").slice(-5).join("\n")}`);
+    if (child.exitCode !== null) throw new Error(`server exited early: ${exitReason(stderr)}`);
     if (await new Promise((r) => http.get({ host: "127.0.0.1", port, path: "/health", agent: false }, (res) => { res.resume(); r(res.statusCode === 200); }).on("error", () => r(false)))) break;
     await new Promise((r) => setTimeout(r, 100));
   }

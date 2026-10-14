@@ -73,7 +73,7 @@ owner's annotated tag (object `aeba41b2`, 2026-10-14 03:56 UTC, unsigned), its c
 `73c5f4d`), and the records. **Not verified before the tag:** the setting Contact for providers reaching the server. Both
 `get_api_stats` answers in Claude Desktop said `user_agent_has_contact: false`; the same built server, started the way the manifest
 starts it, says `true` with an email address in `GATEWAY_CONTACT` and `false` with a plain name, so the setting was either not saved
-or not an email address or URL. The owner tagged with that check open. The owner installed the final 1.0.3 file (`1fd5ac75...`); the first test build (`c9eef367...`, same server code) was also downloaded, which is why the file name alone cannot tell them apart.
+or not an email address or URL. The owner tagged with that check open. `v1.0.5` is at step 1 (the version bump, PR #68, 2026-10-14), so that the start-up line of PR #67 (`User-Agent contact: set` or `not set`) reaches the owner's Claude Desktop and settles that open check. The owner installed the final 1.0.3 file (`1fd5ac75...`); the first test build (`c9eef367...`, same server code) was also downloaded, which is why the file name alone cannot tell them apart.
 
 ## 4. A version number names one file only once it is released
 
