@@ -5,6 +5,7 @@ import {
   UniversalAPIGateway,
   APIDefinition,
   gatewayOptionsFromEnv,
+  contactStatusLine,
   processToolCall,
 } from "../features/09-api-gateway/src/mcp-server";
 import { buildRequestUrl, liveGet, redact, LiveCallError, LiveOptions } from "../features/09-api-gateway/src/live";
@@ -330,6 +331,14 @@ describe("the options read from the environment", () => {
     }
     process.env.GATEWAY_USER_AGENT = "own/2 (x@example.org)"; // the whole header, as before, wins
     expect(ua("ops@example.org")).toBe("own/2 (x@example.org)");
+  });
+
+  it("says at start-up whether the User-Agent carries a contact, and never prints the contact", () => {
+    const line = (contact: string) => ((process.env.GATEWAY_CONTACT = contact), contactStatusLine(gatewayOptionsFromEnv().userAgent!));
+    expect(line("ops@example.org")).toBe("User-Agent contact: set");
+    expect(line("https://example.org/contact")).toBe("User-Agent contact: set");
+    for (const missing of ["", "   ", "me"]) expect(line(missing)).toMatch(/^User-Agent contact: not set \(GATEWAY_CONTACT; in Claude Desktop, the setting Contact for providers\)$/);
+    for (const c of ["ops@example.org", "https://example.org/contact"]) expect(line(c)).not.toContain(c);
   });
 
   it("reads production from NODE_ENV=production only", () => {
