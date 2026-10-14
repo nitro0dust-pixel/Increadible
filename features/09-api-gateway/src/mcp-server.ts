@@ -108,6 +108,16 @@ export function hasContact(userAgent: string): boolean {
   return userAgent.split(/[\s()<>;,]+/).some((token) => token !== "" && isValidContact(token.replace(/^\+/, "")));
 }
 
+/**
+ * The start-up line that says whether the User-Agent carries a contact, never the contact itself: in Claude Desktop the setting
+ * Contact for providers reaches the server only as GATEWAY_CONTACT, and this line in the server's log shows whether it arrived.
+ */
+export function contactStatusLine(userAgent: string): string {
+  return hasContact(userAgent)
+    ? "User-Agent contact: set"
+    : "User-Agent contact: not set (GATEWAY_CONTACT; in Claude Desktop, the setting Contact for providers)";
+}
+
 /** The APIs whose operator asks every client for a User-Agent with contact information: Wikimedia's sites. */
 export function isWikimediaUrl(url: string): boolean {
   try {
@@ -643,7 +653,9 @@ class UniversalAPIGateway {
 }
 
 // Initialize gateway
-const apiGateway = new UniversalAPIGateway(gatewayOptionsFromEnv());
+const gatewayOptions = gatewayOptionsFromEnv();
+const apiGateway = new UniversalAPIGateway(gatewayOptions);
+console.error(contactStatusLine(gatewayOptions.userAgent ?? DEFAULT_USER_AGENT));
 
 // Tool: Discover APIs
 export const discoverAPIsTool = {

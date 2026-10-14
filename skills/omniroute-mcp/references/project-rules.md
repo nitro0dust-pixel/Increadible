@@ -92,7 +92,7 @@ Details and defaults: `README.md` and `DEPLOYMENT.md`.
 - Reachable: npm, PyPI, the Go module proxy. **Not reachable:** GitHub release pages, Docker Hub's registry, other repositories, and the gateway's providers (`ENOTFOUND`). The web fetcher reached `github.com` but not `coingecko.com` or Wikimedia's sites (2026-10-10); web search works, but its answers are summaries: terms found that way are leads for the owner, never a sign-off. No Docker daemon,
   no cluster. So scanners or images cannot be looked up and pinned from there: that needs the owner's approval to look them up.
 - `go install pkg@version` does not work for Prometheus (`replace` directives); `scripts/install-promtool.sh` documents the workaround.
-- GitHub-hosted runners were starved on 2026-10-05 (queued jobs cancelled after 15 minutes, no step run); retry once, do not change the workflow for it.
+- GitHub-hosted runners were starved on 2026-10-05 (queued jobs cancelled after 15 minutes, no step run); retry once, do not change the workflow for it. On 2026-10-14 the `prometheus` job failed once downloading the Go toolchain from `proxy.golang.org` (a stream error, before any rule was checked) and passed on one re-run: the same rule.
 - Windows: `type-check`, `lint`, `build` work in PowerShell; `test` runs, but 8 tests in four suites (`ab-boundaries`, `entry-point`, `mcpb`, `scripts`: signals, file modes, directory fsync, promtool) fail on Windows, on unchanged `main` too (reported from the owner's machine on 2026-10-09 by the session that made PR #43; not reproduced here, no Windows), so CI on Linux is the test run that counts; the `*.sh` scripts need Git Bash or WSL; LF line endings are forced by `.gitattributes`.
 
 ## Resume point

@@ -110,6 +110,14 @@ describe("what the server says when it starts", () => {
     expect(server.stderr()).toContain(`increadible listening on http://127.0.0.1:${port}`);
   });
 
+  it("says whether the gateway's User-Agent carries a contact (the Claude Desktop setting arrives as GATEWAY_CONTACT), never the contact", async () => {
+    const without = await start({ PORT: String(await freePort()), HOST: "127.0.0.1" });
+    expect(without.stderr()).toContain("User-Agent contact: not set (GATEWAY_CONTACT; in Claude Desktop, the setting Contact for providers)");
+    const withContact = await start({ PORT: String(await freePort()), HOST: "127.0.0.1", GATEWAY_CONTACT: "probe@example.org" });
+    expect(withContact.stderr()).toContain("User-Agent contact: set");
+    expect(withContact.stderr()).not.toContain("probe@example.org");
+  });
+
   it("listens on port 3000 when started with --http and no PORT", async () => {
     const taken = await new Promise<boolean>((resolve) => {
       const probe = net.createServer();
