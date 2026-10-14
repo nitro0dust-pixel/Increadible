@@ -9,9 +9,7 @@ import * as path from "path";
 import { CATALOG } from "../features/09-api-gateway/src/catalog";
 import { UniversalAPIGateway } from "../features/09-api-gateway/src/mcp-server";
 
-// eslint-disable-next-line @typescript-eslint/no-require-imports
 const { parsePublicApis, counts } = require("../scripts/seed-candidates.js");
-// eslint-disable-next-line @typescript-eslint/no-require-imports
 const { report, matchCatalog, DOC } = require("../scripts/candidate-report.js");
 
 const root = path.join(__dirname, "..");
@@ -151,7 +149,6 @@ describe("the candidate report (docs/GATEWAY-CANDIDATES.md, scripts/candidate-re
 describe("gate proposals for the first batch (features/09-api-gateway/data/gate-proposals.json)", () => {
   const P = "features/09-api-gateway/data/gate-proposals.json";
   const file = JSON.parse(fs.readFileSync(path.join(root, P), "utf8"));
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
   const { buildRequestUrl } = require("../features/09-api-gateway/src/live");
 
   it("proposes the five the owner chose, each from a keyless HTTPS Cryptocurrency candidate, none already in the catalog", () => {
