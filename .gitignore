@@ -46,6 +46,8 @@ Thumbs.db
 .cache
 
 # Project specific
+# Probe histories (scripts/run-probes.js) belong to the machine that ran them
+probe-history*.jsonl
 .claude/
 submodules/
 features/*/node_modules/
