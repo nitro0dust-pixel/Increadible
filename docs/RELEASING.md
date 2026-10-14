@@ -28,10 +28,11 @@ chat). A green CI run is not enough: version 1.0.0 passed CI, installed, and nev
    ```sh
    npm version X.Y.Z --no-git-tag-version   # package.json and package-lock.json only
    ```
-   then set the same version by hand in two more places: `"version"` in `mcpb/manifest.json`, and `SERVER_INFO` in `src/server.ts`
-   (the version the server reports to Claude Desktop and in its `ready on stdio` line). Run `node scripts/mcpb.js problems` (it must
+   then set the same version by hand in two more places: `"version"` in `mcpb/manifest.json`, and `VERSION` in `src/version.ts`
+   (from 1.0.4; before, `SERVER_INFO` in `src/server.ts`): the version the server reports to Claude Desktop, in its `ready on stdio`
+   line, and in the gateway's User-Agent (`increadible-gateway/<version>`). Run `node scripts/mcpb.js problems` (it must
    print `mcpb: manifest is consistent with package.json`) and the **whole** `npm test`. Leaving either place behind is caught: a manifest
-   left behind makes `problems` exit 1 and 14 tests fail; `SERVER_INFO` left behind fails a test in `tests/mcpb.test.ts` and, after a
+   left behind makes `problems` exit 1 and 14 tests fail; `VERSION` left behind fails a test in `tests/mcpb.test.ts` (checked again for 1.0.4: 1.0.3 left in `src/version.ts` failed it) and, after a
    build, the banner test in `tests/entry-point.test.ts`. (The first rehearsal, on 2026-10-09, ran only `tests/config.test.ts` and
    `tests/mcpb.test.ts` and missed `SERVER_INFO`; it was found when 1.0.3 was made, and the direct test was added then.)
 2. **CHANGELOG:** say under `## [Unreleased]` that the version is X.Y.Z. The entries move to `## [X.Y.Z] - YYYY-MM-DD` (the tag's date) in the pull request that records the tag, so that no release date is written before the version answered in Claude Desktop (as for `v1.0.2`, whose section was written after its tag).
@@ -63,7 +64,8 @@ written after the tag (PR #41), which is now step 2. `v1.0.3` went through all e
 and CHANGELOG note (PR #47), merge (`916206f`, its tree equal to the CI-verified head `af43e10`), the package SHA-256 from CI and from
 a local build (`1fd5ac75...`, equal), the owner's install and live calls in Claude Desktop, the owner's annotated tag (object
 `5dd6620d`, 2026-10-10 00:34 UTC, unsigned), its check through the GitHub API (it points at `916206f`), and the records (the PR that
-moved the CHANGELOG to `[1.0.3]`). The owner installed the final file (`1fd5ac75...`); the first test build (`c9eef367...`, same server code) was also downloaded, which is why the file name alone cannot tell them apart.
+moved the CHANGELOG to `[1.0.3]`). `v1.0.4` is at step 1 (the version bump, with the gateway changes of PRs #50 to #63 in the
+package; 2026-10-13). The owner installed the final 1.0.3 file (`1fd5ac75...`); the first test build (`c9eef367...`, same server code) was also downloaded, which is why the file name alone cannot tell them apart.
 
 ## 4. A version number names one file only once it is released
 
