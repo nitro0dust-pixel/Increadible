@@ -1,5 +1,6 @@
 import * as crypto from "crypto";
 import { Credential, LiveCallError, LiveOptions, buildRequestUrl, liveGet, redact } from "./live";
+import { VERSION } from "../../../src/version";
 import { APIDefinition, catalogCredentials, catalogDefinitions, gateSummaries } from "./catalog";
 
 interface CacheEntry {
@@ -30,6 +31,26 @@ export const MAX_LIVE_WAITING = 100;
 /** A per-API rate limit (GATEWAY_RATE_LIMITS) counts the live calls sent in this rolling window, and may be at most this many. */
 export const RATE_LIMIT_WINDOW_MS = 60_000;
 export const MAX_RATE_LIMIT = 100_000;
+/**
+ * The limit for every live API without its own GATEWAY_RATE_LIMITS entry, unless GATEWAY_DEFAULT_RATE_LIMIT says otherwise (0 turns
+ * it off). This is the project's own conservative choice, not a provider's number: it is the lowest figure any source gave for any
+ * of the live APIs (CoinGecko's keyless API, "5 to 15 calls per minute", from third parties; the terms review,
+ * `docs/GATEWAY-GATED-CATALOG.md` section 11), so it stays under every limit seen so far.
+ */
+export const DEFAULT_RATE_LIMIT = 5;
+/** Retries of one call after a transient failure (GATEWAY_RETRIES, at most MAX_RETRIES), and the longest wait before one (GATEWAY_RETRY_MAX_WAIT_MS). */
+export const DEFAULT_RETRIES = 1;
+export const MAX_RETRIES = 3;
+export const DEFAULT_RETRY_MAX_WAIT_MS = 5_000;
+/** Without a Retry-After, the n-th retry waits RETRY_BASE_MS * 2^(n-1). */
+export const RETRY_BASE_MS = 1_000;
+/**
+ * After an HTTP 429 without a Retry-After, no live call goes to that API for this long (the rate-limit window): the provider said
+ * "too many" without saying for how long, so the gateway backs off for a whole window rather than guess shorter.
+ */
+export const COOLDOWN_AFTER_429_MS = RATE_LIMIT_WINDOW_MS;
+/** The product token of the User-Agent: an identifiable name and the server's version (Wikimedia's User-Agent policy asks for both). */
+export const USER_AGENT_PRODUCT = `increadible-gateway/${VERSION}`;
 
 /** Where each key-based API takes its credential: the catalog's `credential` fields (`catalog.ts`). */
 const DEFAULT_CREDENTIALS = catalogCredentials();
@@ -45,18 +66,87 @@ export interface GatewayOptions {
   /** Replaces the built-in registry (used by tests to point an API at a local server). */
   apis?: APIDefinition[];
   credentials?: Record<string, Credential>;
-  /**
-   * At most this many live calls per API in any rolling minute (GATEWAY_RATE_LIMITS). An API without an entry has no limit of its
-   * own: no default is set, because no provider's limit has been measured or read (an owner decision, `ROADMAP.md`).
-   */
+  /** At most this many live calls per API in any rolling minute (GATEWAY_RATE_LIMITS); an API without an entry gets `defaultRateLimit`. */
   rateLimits?: Record<string, number>;
+  /**
+   * The limit for every API without its own entry in `rateLimits` (calls per rolling minute). Default here: none, so an options
+   * object gets exactly what it says; from the environment the default is DEFAULT_RATE_LIMIT (`gatewayOptionsFromEnv`).
+   */
+  defaultRateLimit?: number;
+  /** Retries after a transient failure (429, 502, 503, 504, a dropped connection). Default here: 0; from the environment DEFAULT_RETRIES. */
+  retries?: number;
+  /** The longest wait before a retry; a Retry-After longer than this is not waited for. Default: DEFAULT_RETRY_MAX_WAIT_MS. */
+  retryMaxWaitMs?: number;
+  /** In production (NODE_ENV=production) a live call to a Wikimedia API is refused while the User-Agent has no contact. */
+  production?: boolean;
   /** The clock for the rate limit, in milliseconds (tests replace it). Default: performance.now (monotonic). */
   now?: () => number;
+  /** How a retry waits (tests replace it). Default: a timer. */
+  sleep?: (ms: number) => Promise<void>;
 }
 
 const DEFAULT_TIMEOUT_MS = 10_000;
 const DEFAULT_MAX_RESPONSE_BYTES = 1024 * 1024;
-const DEFAULT_USER_AGENT = "increadible-gateway";
+const DEFAULT_USER_AGENT = USER_AGENT_PRODUCT;
+
+const EMAIL = /^[^\s@()<>,;"]+@[^\s@()<>,;"]+\.[A-Za-z]{2,}$/;
+
+/** True for a value usable as the contact in a User-Agent: one email address, or one http(s) URL with a dotted host name. */
+export function isValidContact(value: string): boolean {
+  if (EMAIL.test(value)) return true;
+  if (/[\s()<>"]/.test(value)) return false;
+  try {
+    const u = new URL(value);
+    return (u.protocol === "https:" || u.protocol === "http:") && u.hostname.includes(".") && u.username === "" && u.password === "";
+  } catch {
+    return false;
+  }
+}
+
+/** True when a User-Agent carries contact information: an email address or an http(s) URL somewhere in it. */
+export function hasContact(userAgent: string): boolean {
+  return userAgent.split(/[\s()<>;,]+/).some((token) => token !== "" && isValidContact(token.replace(/^\+/, "")));
+}
+
+/**
+ * The start-up line that says whether the User-Agent carries a contact, never the contact itself: in Claude Desktop the setting
+ * Contact for providers reaches the server only as GATEWAY_CONTACT, and this line in the server's log shows whether it arrived.
+ */
+export function contactStatusLine(userAgent: string): string {
+  return hasContact(userAgent)
+    ? "User-Agent contact: set"
+    : "User-Agent contact: not set (GATEWAY_CONTACT; in Claude Desktop, the setting Contact for providers)";
+}
+
+/** The APIs whose operator asks every client for a User-Agent with contact information: Wikimedia's sites. */
+export function isWikimediaUrl(url: string): boolean {
+  try {
+    return /(^|\.)(wikipedia|wikidata|wikimedia|mediawiki|wiktionary|wikiquote|wikibooks|wikisource|wikinews|wikiversity|wikivoyage)\.org$/.test(new URL(url).hostname);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The User-Agent from the environment: GATEWAY_USER_AGENT as given (the whole header, kept for existing deployments), otherwise
+ * `increadible-gateway/<version> (<contact>)` from GATEWAY_CONTACT, or the product token alone when no contact is set. A
+ * GATEWAY_CONTACT written the old way, as a whole User-Agent such as `increadible (you@example.org)`, gives up the email address or
+ * URL inside it; one with neither is reported and not used. No contact is ever made up.
+ */
+export function userAgentFromEnv(): string {
+  const override = process.env.GATEWAY_USER_AGENT?.trim();
+  if (override) return override;
+  const raw = process.env.GATEWAY_CONTACT?.trim() ?? "";
+  if (raw === "") return USER_AGENT_PRODUCT;
+  const contact = isValidContact(raw)
+    ? raw
+    : raw.split(/[\s()<>;,]+/).map((t) => t.replace(/^\+/, "")).find((t) => t !== "" && isValidContact(t));
+  if (contact === undefined) {
+    console.error("GATEWAY_CONTACT must be an email address or an http(s) URL; ignored (the User-Agent carries no contact)");
+    return USER_AGENT_PRODUCT;
+  }
+  return `${USER_AGENT_PRODUCT} (${contact})`;
+}
 
 function boundedInt(raw: string | undefined, name: string, min: number, max: number, fallback: number): number {
   if (raw === undefined || raw.trim() === "") return fallback;
@@ -86,15 +176,22 @@ export function parseRateLimits(raw: string | undefined): Record<string, number>
   return limits;
 }
 
-/** The gateway's options from the environment: GATEWAY_LIVE_APIS, GATEWAY_TIMEOUT_MS, GATEWAY_MAX_RESPONSE_BYTES, GATEWAY_USER_AGENT, GATEWAY_RATE_LIMITS. */
+/**
+ * The gateway's options from the environment: GATEWAY_LIVE_APIS, GATEWAY_TIMEOUT_MS, GATEWAY_MAX_RESPONSE_BYTES, GATEWAY_USER_AGENT,
+ * GATEWAY_CONTACT, GATEWAY_RATE_LIMITS, GATEWAY_DEFAULT_RATE_LIMIT, GATEWAY_RETRIES, GATEWAY_RETRY_MAX_WAIT_MS, and NODE_ENV.
+ */
 export function gatewayOptionsFromEnv(): GatewayOptions {
   const live = (process.env.GATEWAY_LIVE_APIS ?? "").trim();
   return {
     liveApis: live === "*" ? "*" : live === "" ? [] : live.split(",").map((x) => x.trim()).filter((x) => x !== ""),
     timeoutMs: boundedInt(process.env.GATEWAY_TIMEOUT_MS, "GATEWAY_TIMEOUT_MS", 100, 120_000, DEFAULT_TIMEOUT_MS),
     maxResponseBytes: boundedInt(process.env.GATEWAY_MAX_RESPONSE_BYTES, "GATEWAY_MAX_RESPONSE_BYTES", 1024, 32 * 1024 * 1024, DEFAULT_MAX_RESPONSE_BYTES),
-    userAgent: process.env.GATEWAY_USER_AGENT?.trim() || DEFAULT_USER_AGENT,
+    userAgent: userAgentFromEnv(),
     rateLimits: parseRateLimits(process.env.GATEWAY_RATE_LIMITS),
+    defaultRateLimit: boundedInt(process.env.GATEWAY_DEFAULT_RATE_LIMIT, "GATEWAY_DEFAULT_RATE_LIMIT", 0, MAX_RATE_LIMIT, DEFAULT_RATE_LIMIT),
+    retries: boundedInt(process.env.GATEWAY_RETRIES, "GATEWAY_RETRIES", 0, MAX_RETRIES, DEFAULT_RETRIES),
+    retryMaxWaitMs: boundedInt(process.env.GATEWAY_RETRY_MAX_WAIT_MS, "GATEWAY_RETRY_MAX_WAIT_MS", 0, 60_000, DEFAULT_RETRY_MAX_WAIT_MS),
+    production: process.env.NODE_ENV === "production",
   };
 }
 
@@ -113,6 +210,14 @@ class UniversalAPIGateway {
   private rateLimits: Map<string, number> = new Map();
   /** Per rate-limited API, the send times (ms) of its live calls in the current window, oldest first: at most its limit. */
   private sent: Map<string, number[]> = new Map();
+  private defaultRateLimit: number | undefined;
+  private retries: number;
+  private retryMaxWaitMs: number;
+  private production: boolean;
+  private contact: boolean;
+  /** Per API, the time (on `now`) before which no live call is sent, because the provider answered 429 or 503 with a wait. */
+  private cooldownUntil: Map<string, number> = new Map();
+  private sleep: (ms: number) => Promise<void>;
   private now: () => number;
   private stats = {
     total_calls: 0,
@@ -121,6 +226,10 @@ class UniversalAPIGateway {
     cached_hits: 0,
     live_calls: 0,
     rate_limited: 0,
+    retries: 0,
+    throttled: 0,
+    cooldown_refused: 0,
+    contact_refused: 0,
     api_distribution: {} as Record<string, number>,
   };
 
@@ -145,11 +254,28 @@ class UniversalAPIGateway {
       else if (!Number.isSafeInteger(limit) || limit < 1 || limit > MAX_RATE_LIMIT) console.error(`GATEWAY_RATE_LIMITS: ignored ${id}=${limit}; that API has no limit`);
       else this.rateLimits.set(id, limit);
     }
-    if (this.rateLimits.size > 0) {
-      console.error(`Rate limits (live calls per minute): ${[...this.rateLimits].map(([id, n]) => `${id}=${n}`).join(", ")}`);
-    }
+    const d = options.defaultRateLimit;
+    this.defaultRateLimit = d !== undefined && Number.isSafeInteger(d) && d >= 1 && d <= MAX_RATE_LIMIT ? d : undefined;
+    this.retries = Math.min(MAX_RETRIES, Math.max(0, Math.floor(options.retries ?? 0)));
+    this.retryMaxWaitMs = Math.max(0, options.retryMaxWaitMs ?? DEFAULT_RETRY_MAX_WAIT_MS);
+    this.production = options.production ?? false;
+    this.contact = hasContact(this.live.userAgent);
+    this.sleep = options.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
     const names = this.liveApis === "*" ? "all APIs" : [...this.liveApis].filter((id) => this.apis.has(id)).join(", ");
-    if (names !== "") console.error(`Live API calls enabled for: ${names}`);
+    if (names !== "") {
+      console.error(`Live API calls enabled for: ${names}`);
+      const limits = [...this.rateLimits].map(([id, n]) => `${id}=${n}`);
+      if (this.defaultRateLimit !== undefined) limits.unshift(`${this.defaultRateLimit} per API unless named`);
+      console.error(`Rate limits (live calls per minute): ${limits.length > 0 ? limits.join(", ") : "none"}; retries after a transient failure: ${this.retries}`);
+      for (const api of this.apis.values()) {
+        if (!this.isLive(api.id) || !isWikimediaUrl(api.endpoint) || this.contact) continue;
+        console.error(
+          this.production
+            ? `${api.id}: live calls are refused until the User-Agent carries contact information (set GATEWAY_CONTACT to an email address or URL): Wikimedia requires it`
+            : `warning: ${api.id}: live calls are sent without contact information in the User-Agent, which Wikimedia's policy requires; set GATEWAY_CONTACT to an email address or URL (in production these calls are refused)`
+        );
+      }
+    }
   }
 
   private isLive(apiId: string): boolean {
@@ -255,17 +381,23 @@ class UniversalAPIGateway {
       if (credential && /[\r\n\u0000]/.test(secret as string)) {
         throw new LiveCallError(`the credential in ${credential.env} contains characters that are not allowed`);
       }
+      if (this.production && !this.contact && isWikimediaUrl(api.endpoint)) {
+        this.stats.contact_refused++;
+        throw new LiveCallError("not sent: Wikimedia requires a User-Agent with contact information; set GATEWAY_CONTACT to an email address or URL");
+      }
       const url = buildRequestUrl(api.endpoint, endpoint, params, credential?.in === "query" ? credential.name : undefined);
       const headers: Record<string, string> = {};
       if (credential) {
         if (credential.in === "query") url.searchParams.set(credential.name, secret as string);
         else headers[credential.name] = secret as string;
       }
-      return await this.withLiveSlot(() => {
-        this.admit(api.id); // counted when it is sent, after any wait for a slot
-        this.stats.live_calls++;
-        return liveGet(url, headers, this.live, secrets);
-      });
+      return await this.sendWithRetries(api.id, () =>
+        this.withLiveSlot(() => {
+          this.admit(api.id); // counted when it is sent, after any wait for a slot; a retry is counted again
+          this.stats.live_calls++;
+          return liveGet(url, headers, this.live, secrets);
+        })
+      );
     } catch (error: any) {
       // The original error is deliberately not attached as `cause` in either throw below: its message and stack could carry a
       // credential from the request, and the cause would travel with the error to wherever it is logged or serialised.
@@ -277,11 +409,66 @@ class UniversalAPIGateway {
   }
 
   /**
+   * Sends once, and again (at most `retries` more times) after a transient failure: HTTP 429, 502, 503 or 504, or a dropped
+   * connection; never after a timeout, so the slowest call takes at most (1 + retries) timeouts plus the waits. The wait is the
+   * provider's Retry-After when it gave one, else RETRY_BASE_MS doubling; a wait longer than `retryMaxWaitMs` is not made, and the
+   * error goes back to the caller. A 429 (or a 503 with a Retry-After) also starts a cooldown for the API: until it ends, live calls
+   * to it are refused here, before any request leaves. Each retry passes the rate limit like any call, so it can be refused too.
+   */
+  private async sendWithRetries<T>(apiId: string, send: () => Promise<T>): Promise<T> {
+    for (let attempt = 0; ; attempt++) {
+      this.checkCooldown(apiId);
+      try {
+        return await send();
+      } catch (error) {
+        if (!(error instanceof LiveCallError)) throw error;
+        const { status, retryAfterMs, retryable } = error.hint;
+        if (status === 429 || (status === 503 && retryAfterMs !== undefined)) {
+          this.stats.throttled++;
+          this.startCooldown(apiId, retryAfterMs ?? COOLDOWN_AFTER_429_MS);
+        }
+        if (!retryable || attempt >= this.retries) throw error;
+        const wait = retryAfterMs ?? RETRY_BASE_MS * 2 ** attempt;
+        if (wait > this.retryMaxWaitMs || this.cooldownLeft(apiId) > wait) throw error;
+        this.stats.retries++;
+        await this.sleep(wait);
+        // A timer can fire a little early, and another call may have started a longer cooldown meanwhile: wait out what is left of
+        // it (within the same cap) rather than have the retry refused by the cooldown its own answer started.
+        const rest = this.cooldownLeft(apiId);
+        if (rest > this.retryMaxWaitMs) throw error;
+        if (rest > 0) await this.sleep(rest);
+      }
+    }
+  }
+
+  private startCooldown(apiId: string, ms: number): void {
+    const until = this.now() + ms;
+    if (until > (this.cooldownUntil.get(apiId) ?? 0)) this.cooldownUntil.set(apiId, until);
+  }
+
+  /** Milliseconds until live calls to `apiId` may be sent again; 0 when it is not cooling down. */
+  private cooldownLeft(apiId: string): number {
+    const until = this.cooldownUntil.get(apiId);
+    if (until === undefined) return 0;
+    const left = until - this.now();
+    if (left <= 0) this.cooldownUntil.delete(apiId);
+    return Math.max(0, left);
+  }
+
+  private checkCooldown(apiId: string): void {
+    const left = this.cooldownLeft(apiId);
+    if (left > 0) {
+      this.stats.cooldown_refused++;
+      throw new LiveCallError(`the provider asked the gateway to slow down (HTTP 429 or 503); no live calls to this API for another ${Math.ceil(left / 1000)} s`);
+    }
+  }
+
+  /**
    * Refuses a live call to `apiId` when its limit of calls in the last RATE_LIMIT_WINDOW_MS is used up; otherwise records it.
    * A refused call reaches no provider and is not recorded. Cache hits never get here, so they do not count.
    */
   private admit(apiId: string): void {
-    const limit = this.rateLimits.get(apiId);
+    const limit = this.rateLimits.get(apiId) ?? this.defaultRateLimit;
     if (limit === undefined) return;
     const now = this.now();
     const times = this.sent.get(apiId) ?? [];
@@ -289,7 +476,8 @@ class UniversalAPIGateway {
     if (times.length >= limit) {
       this.stats.rate_limited++;
       const wait = Math.max(1, Math.ceil((times[0] + RATE_LIMIT_WINDOW_MS - now) / 1000));
-      throw new LiveCallError(`rate limit reached: at most ${limit} live calls per minute to this API (GATEWAY_RATE_LIMITS); try again in ${wait} s`);
+      const source = this.rateLimits.has(apiId) ? "GATEWAY_RATE_LIMITS" : "GATEWAY_DEFAULT_RATE_LIMIT";
+      throw new LiveCallError(`rate limit reached: at most ${limit} live calls per minute to this API (${source}); try again in ${wait} s`);
     }
     times.push(now);
     this.sent.set(apiId, times);
@@ -440,7 +628,15 @@ class UniversalAPIGateway {
       live_calls: this.stats.live_calls,
       live_apis: this.liveApis === "*" ? "*" : [...this.liveApis].filter((id) => this.apis.has(id)),
       rate_limits: Object.fromEntries(this.rateLimits),
+      default_rate_limit: this.defaultRateLimit ?? null,
       rate_limited: this.stats.rate_limited,
+      retries: this.stats.retries,
+      max_retries: this.retries,
+      throttled: this.stats.throttled,
+      cooldown_refused: this.stats.cooldown_refused,
+      cooldowns: Object.fromEntries([...this.cooldownUntil.keys()].map((id) => [id, Math.ceil(this.cooldownLeft(id) / 1000)]).filter(([, s]) => (s as number) > 0)),
+      user_agent_has_contact: this.contact,
+      contact_refused: this.stats.contact_refused,
       gates: gateSummaries(this.apis.keys()),
     };
   }
@@ -457,7 +653,9 @@ class UniversalAPIGateway {
 }
 
 // Initialize gateway
-const apiGateway = new UniversalAPIGateway(gatewayOptionsFromEnv());
+const gatewayOptions = gatewayOptionsFromEnv();
+const apiGateway = new UniversalAPIGateway(gatewayOptions);
+console.error(contactStatusLine(gatewayOptions.userAgent ?? DEFAULT_USER_AGENT));
 
 // Tool: Discover APIs
 export const discoverAPIsTool = {

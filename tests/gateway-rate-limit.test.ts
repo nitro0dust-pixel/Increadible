@@ -1,6 +1,7 @@
 /**
  * Per-API rate limit for live calls (GATEWAY_RATE_LIMITS; step 2 of the gated catalog's order of work,
- * `docs/GATEWAY-GATED-CATALOG.md`). No API has a limit unless one is set: no provider's limit has been measured or read.
+ * `docs/GATEWAY-GATED-CATALOG.md`). Given in code, no API has a limit unless one is set; from the environment every API also gets
+ * GATEWAY_DEFAULT_RATE_LIMIT (tests/gateway-resilience.test.ts).
  * The network is a mocked `fetch` and the clock is a fake one, so every boundary is exact.
  */
 import { describe, it, expect, beforeEach, afterEach, jest } from "@jest/globals";
@@ -46,7 +47,7 @@ afterEach(() => {
 });
 
 describe("per-API rate limit of live calls (GATEWAY_RATE_LIMITS)", () => {
-  it("limits nothing when no limit is set (the default)", async () => {
+  it("limits nothing when the options set no limit", async () => {
     const gw = open({});
     for (let i = 0; i < 20; i++) await call(gw);
     expect(sent).toHaveLength(20);
@@ -139,7 +140,7 @@ describe("per-API rate limit of live calls (GATEWAY_RATE_LIMITS)", () => {
     const messages = errors.mock.calls.map((c: unknown[]) => String(c[0]));
     expect(messages).toContain("GATEWAY_RATE_LIMITS names an unknown API: nope");
     expect(messages).toContain("GATEWAY_RATE_LIMITS: ignored wikipedia=0; that API has no limit");
-    expect(messages).toContain("Rate limits (live calls per minute): coingecko=1");
+    expect(messages).toContain("Rate limits (live calls per minute): coingecko=1; retries after a transient failure: 0");
     expect(gw.getStats().rate_limits).toEqual({ coingecko: 1 });
     await call(gw);
     expect(await fail(call(gw))).toMatch(/rate limit reached/);

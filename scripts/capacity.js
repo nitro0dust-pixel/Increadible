@@ -12,6 +12,7 @@
 "use strict";
 const { spawn } = require("child_process");
 const http = require("http");
+const net = require("net");
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
@@ -37,12 +38,32 @@ const get = (port, p) => new Promise((resolve) => { const t = performance.now();
 const status = (pid, key) => { try { return Number(new RegExp(`${key}:\\s+(\\d+) kB`).exec(fs.readFileSync(`/proc/${pid}/status`, "utf8"))[1]) / 1024; } catch { return NaN; } };
 const pct = (a, p) => { const s = [...a].sort((x, y) => x - y); return s.length ? s[Math.min(s.length - 1, Math.ceil((p / 100) * s.length) - 1)] : NaN; };
 
-function spawnServer(dir, file) {
-  const port = 20000 + Math.floor(Math.random() * 20000);
+/**
+ * A port nothing listens on, chosen by the operating system. A random port could be taken: in 20000-40000 it overlaps the
+ * outgoing-connection range (32768-60999 on Linux), and a server that loses the race exits with EADDRINUSE (seen once in CI).
+ */
+const freePort = () =>
+  new Promise((resolve, reject) => {
+    const probe = net.createServer();
+    probe.once("error", reject);
+    probe.listen(0, "127.0.0.1", () => {
+      const { port } = probe.address();
+      probe.close(() => resolve(port));
+    });
+  });
+/** Why a server exited: its first error line (an uncaught error's message), not Node's trailer, then the last lines. */
+const exitReason = (stderr) => {
+  const lines = stderr.split("\n").filter((l) => l.trim() !== "");
+  const first = lines.find((l) => /Error|EADDRINUSE|Refusing/.test(l));
+  return [first, ...lines.slice(-3)].filter(Boolean).join(" | ");
+};
+
+async function spawnServer(dir, file) {
+  const port = await freePort();
   const child = spawn(process.execPath, [path.join(ROOT, "dist/src/index.js")], { env: { ...process.env, PORT: String(port), HOST: "127.0.0.1", RULES_FILE: path.join(dir, "rules.yaml"), EXPERIMENTS_FILE: path.join(dir, "experiments.yaml"), AB_DATA_FILE: file }, stdio: ["ignore", "ignore", "pipe"] });
   let stderr = ""; child.stderr.on("data", (d) => (stderr += d));
   const t0 = performance.now();
-  const ready = (async () => { for (;;) { if (child.exitCode !== null) throw new Error(`server exited: ${stderr.split("\n").slice(-4).join(" | ")}`); const r = await get(port, "/health"); if (r.status === 200) return (performance.now() - t0) / 1000; await new Promise((r2) => setTimeout(r2, 25)); } })();
+  const ready = (async () => { for (;;) { if (child.exitCode !== null) throw new Error(`server exited: ${exitReason(stderr)}`); const r = await get(port, "/health"); if (r.status === 200) return (performance.now() - t0) / 1000; await new Promise((r2) => setTimeout(r2, 25)); } })();
   const stop = () => new Promise((resolve) => { if (child.exitCode !== null) return resolve(); child.once("exit", resolve); child.kill("SIGTERM"); });
   return { child, port, ready, stop, stderr: () => stderr };
 }
@@ -70,12 +91,12 @@ async function toolMean(port, tool) {
   for (const n of sizes) {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "increadible-cap-")); const file = path.join(dir, "ab.jsonl");
     try {
-      let s = spawnServer(dir, file); await s.ready;
+      let s = await spawnServer(dir, file); await s.ready;
       const baselineRss = status(s.child.pid, "VmRSS");
       const f = await fill(s.port, n); await s.stop();
       const bytes = fs.statSync(file).size;
 
-      s = spawnServer(dir, file); const replay = await s.ready;
+      s = await spawnServer(dir, file); const replay = await s.ready;
       // The server says how many measurements it restored: the data must really be N, or every figure below would describe something else.
       const restoredMatch = /Restored (\d+) experiments and (\d+) measurements/.exec(s.stderr());
       const restored = restoredMatch ? Number(restoredMatch[2]) : NaN;

@@ -42,6 +42,7 @@ targets, not results).
 | `bash scripts/probe-image.sh <image>` | the image the way a deployment runs it: needs Docker, curl, jq. **Only CI has a Docker daemon**; locally it can be tried against a stubbed `docker`, which proves the script's logic but not the image |
 | `npm run loadtest`, `npm run capacity` | per-tool throughput and latency; A/B data size against restart, memory and query cost (not in CI: shared runners are too noisy; `smoke.sh` only checks they still run). Use an idle machine and read `PERFORMANCE.md` first |
 | `node scripts/record-contracts.js [--where M] [api ...]` | after `npm run build`, with `GATEWAY_USER_AGENT` set: sends each keyless API's health probe through the gateway and records the answer to `tests/fixtures/contracts/` for the contract tests (gated catalog, step 1b). Needs a machine that reaches the providers: **not the authoring sandbox** |
+| `node scripts/run-probes.js [--history F] [--where M] [api ...]`, `... report [--history F]` | after `npm run build`, with `GATEWAY_CONTACT` set: sends each keyless API's health probe once through the gateway and appends the outcome (passed or not, latency, HTTP status, problems; never the body or the User-Agent) to a probe history, default `probe-history.jsonl`; `report` prints runs, failures, failures in a row and median latency per API. For a scheduler on a machine that reaches the providers: **not the authoring sandbox**; nothing in the server runs it |
 | `node scripts/seed-candidates.js <README.md> <LICENSE> --fetched-on D --source-url U` | the gated catalog's seed import (step 4): a snapshot of the public-apis list into `features/09-api-gateway/data/candidates-public-apis.json`, candidates only, read by no server code. The input is fetched by hand (not in CI) |
 | `node scripts/candidate-report.js` | after `npm run build`: regenerates `docs/GATEWAY-CANDIDATES.md` from the candidate store and the catalog (a test fails while the document is stale) |
 | `node scripts/make-ab-data.js --file <f> --measurements <N>` | writes an A/B data file of N measurements (fast, no server); smoke and the image probe use it to start on a large file |
@@ -69,7 +70,7 @@ image by digest and probes it again. The package `ghcr.io/nitro0dust-pixel/incre
 Configuration (names only; values come from the environment, never commit them): `PORT`, `HOST`, `AUTH_TOKEN`,
 `ALLOW_UNAUTHENTICATED`, `RULES_FILE`, `EXPERIMENTS_FILE`, `AB_DATA_FILE`, `AB_FSYNC`, `AB_LAZY_OPEN`, `AB_DATA_WARN_BYTES`,
 `HTTP_HEADERS_TIMEOUT_MS`, `HTTP_REQUEST_TIMEOUT_MS`, `RATE_LIMIT_PER_MINUTE`, `SHUTDOWN_DRAIN_MS`, `SHUTDOWN_TIMEOUT_MS`,
-`GATEWAY_LIVE_APIS`, `GATEWAY_TIMEOUT_MS`, `GATEWAY_MAX_RESPONSE_BYTES`, `GATEWAY_USER_AGENT`, `GATEWAY_RATE_LIMITS` (and one `GATEWAY_KEY_<API>` per key-based API, named in `DEPLOYMENT.md`).
+`GATEWAY_LIVE_APIS`, `GATEWAY_TIMEOUT_MS`, `GATEWAY_MAX_RESPONSE_BYTES`, `GATEWAY_USER_AGENT`, `GATEWAY_CONTACT`, `GATEWAY_RATE_LIMITS`, `GATEWAY_DEFAULT_RATE_LIMIT`, `GATEWAY_RETRIES`, `GATEWAY_RETRY_MAX_WAIT_MS`, `NODE_ENV` (production refuses Wikimedia calls without a contact) (and one `GATEWAY_KEY_<API>` per key-based API, named in `DEPLOYMENT.md`).
 Details and defaults: `README.md` and `DEPLOYMENT.md`.
 
 ## Working rules that have paid for themselves
@@ -91,7 +92,7 @@ Details and defaults: `README.md` and `DEPLOYMENT.md`.
 - Reachable: npm, PyPI, the Go module proxy. **Not reachable:** GitHub release pages, Docker Hub's registry, other repositories, and the gateway's providers (`ENOTFOUND`). The web fetcher reached `github.com` but not `coingecko.com` or Wikimedia's sites (2026-10-10); web search works, but its answers are summaries: terms found that way are leads for the owner, never a sign-off. No Docker daemon,
   no cluster. So scanners or images cannot be looked up and pinned from there: that needs the owner's approval to look them up.
 - `go install pkg@version` does not work for Prometheus (`replace` directives); `scripts/install-promtool.sh` documents the workaround.
-- GitHub-hosted runners were starved on 2026-10-05 (queued jobs cancelled after 15 minutes, no step run); retry once, do not change the workflow for it.
+- GitHub-hosted runners were starved on 2026-10-05 (queued jobs cancelled after 15 minutes, no step run); retry once, do not change the workflow for it. On 2026-10-14 the `prometheus` job failed once downloading the Go toolchain from `proxy.golang.org` (a stream error, before any rule was checked) and passed on one re-run: the same rule.
 - Windows: `type-check`, `lint`, `build` work in PowerShell; `test` runs, but 8 tests in four suites (`ab-boundaries`, `entry-point`, `mcpb`, `scripts`: signals, file modes, directory fsync, promtool) fail on Windows, on unchanged `main` too (reported from the owner's machine on 2026-10-09 by the session that made PR #43; not reproduced here, no Windows), so CI on Linux is the test run that counts; the `*.sh` scripts need Git Bash or WSL; LF line endings are forced by `.gitattributes`.
 
 ## Resume point

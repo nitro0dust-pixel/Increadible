@@ -36,7 +36,7 @@ title. Only the latest `main` is supported.
 | Image signing; reading the SBOM attestation back | not done / `NOT VERIFIED` |
 | TLS, ingress and a NetworkPolicy | TLS and ingress not built. Egress: the manifests allow DNS only, and `k8s/egress-live-cilium.yaml` allows HTTPS to the four keyless providers on a Cilium cluster (`DEPLOYMENT.md`); never applied to a cluster, so **NOT VERIFIED**. Railway has no egress policy |
 | A cluster deployment | never done; the production manifest and the monitoring have never been applied to anything |
-| Live provider calls | verified for the four keyless APIs only (coingecko, hackernews, wikipedia, wikidata: one real call each from Claude Desktop on the owner's Windows PC, 2026-10-10, package 1.0.3); the key-based APIs have never run live; provider terms and rate limits not reviewed |
+| Live provider calls | verified for the four keyless APIs only (coingecko, hackernews, wikipedia, wikidata: one real call each from Claude Desktop on the owner's Windows PC, 2026-10-10, package 1.0.3); the key-based APIs have never run live; provider terms and rate limits reviewed on 2026-10-12 but **not approved** (only HN's read on its page; `docs/GATEWAY-GATED-CATALOG.md`, section 11); the User-Agent carries a contact only when `GATEWAY_CONTACT` (or `GATEWAY_USER_AGENT`) gives one, and production refuses Wikimedia calls without it |
 
 ## Handling secrets in this project
 

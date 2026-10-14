@@ -1,6 +1,6 @@
 import * as http from "http";
 import { AddressInfo } from "net";
-import { UniversalAPIGateway, APIDefinition, GatewayOptions, gatewayOptionsFromEnv } from "../features/09-api-gateway/src/mcp-server";
+import { UniversalAPIGateway, APIDefinition, GatewayOptions, gatewayOptionsFromEnv, USER_AGENT_PRODUCT } from "../features/09-api-gateway/src/mcp-server";
 import { buildRequestUrl, liveGet, redact, LiveCallError } from "../features/09-api-gateway/src/live";
 import { rng } from "./helpers/ab-golden-data";
 
@@ -161,10 +161,13 @@ describe("which APIs are live", () => {
   it("reads its settings from the environment, and falls back (with a note) on a bad number", () => {
     const keep = { ...process.env };
     try {
-      for (const k of ["GATEWAY_LIVE_APIS", "GATEWAY_TIMEOUT_MS", "GATEWAY_MAX_RESPONSE_BYTES", "GATEWAY_USER_AGENT", "GATEWAY_RATE_LIMITS"]) delete process.env[k];
-      expect(gatewayOptionsFromEnv()).toEqual({ liveApis: [], timeoutMs: 10000, maxResponseBytes: 1048576, userAgent: "increadible-gateway", rateLimits: {} });
-      Object.assign(process.env, { GATEWAY_LIVE_APIS: " coingecko, wikipedia ,", GATEWAY_TIMEOUT_MS: "2500", GATEWAY_MAX_RESPONSE_BYTES: "4096", GATEWAY_USER_AGENT: "me (a@b.example)" });
-      expect(gatewayOptionsFromEnv()).toEqual({ liveApis: ["coingecko", "wikipedia"], timeoutMs: 2500, maxResponseBytes: 4096, userAgent: "me (a@b.example)", rateLimits: {} });
+      for (const k of ["GATEWAY_LIVE_APIS", "GATEWAY_TIMEOUT_MS", "GATEWAY_MAX_RESPONSE_BYTES", "GATEWAY_USER_AGENT", "GATEWAY_CONTACT", "GATEWAY_RATE_LIMITS", "GATEWAY_DEFAULT_RATE_LIMIT", "GATEWAY_RETRIES", "GATEWAY_RETRY_MAX_WAIT_MS", "NODE_ENV"]) delete process.env[k];
+      const defaults = { liveApis: [], timeoutMs: 10000, maxResponseBytes: 1048576, userAgent: USER_AGENT_PRODUCT, rateLimits: {}, defaultRateLimit: 5, retries: 1, retryMaxWaitMs: 5000, production: false };
+      expect(gatewayOptionsFromEnv()).toEqual(defaults);
+      Object.assign(process.env, { GATEWAY_LIVE_APIS: " coingecko, wikipedia ,", GATEWAY_TIMEOUT_MS: "2500", GATEWAY_MAX_RESPONSE_BYTES: "4096", GATEWAY_USER_AGENT: "me (a@b.example)", GATEWAY_DEFAULT_RATE_LIMIT: "0", GATEWAY_RETRIES: "3", GATEWAY_RETRY_MAX_WAIT_MS: "0", NODE_ENV: "production" });
+      expect(gatewayOptionsFromEnv()).toEqual({ liveApis: ["coingecko", "wikipedia"], timeoutMs: 2500, maxResponseBytes: 4096, userAgent: "me (a@b.example)", rateLimits: {}, defaultRateLimit: 0, retries: 3, retryMaxWaitMs: 0, production: true });
+      Object.assign(process.env, { GATEWAY_RETRIES: "4", GATEWAY_DEFAULT_RATE_LIMIT: "-1" });
+      expect(gatewayOptionsFromEnv()).toMatchObject({ retries: 1, defaultRateLimit: 5 });
       process.env.GATEWAY_LIVE_APIS = "*";
       expect(gatewayOptionsFromEnv().liveApis).toBe("*");
       Object.assign(process.env, { GATEWAY_TIMEOUT_MS: "soon", GATEWAY_MAX_RESPONSE_BYTES: "5" });

@@ -2,7 +2,7 @@
   "manifest_version": "0.2",
   "name": "increadible",
   "display_name": "Increadible",
-  "version": "1.0.3",
+  "version": "1.0.5",
   "description": "Routing rules, A/B testing and a public-API gateway as one local MCP server. The gateway answers mock data unless live calls are switched on.",
   "long_description": "Increadible is one local MCP server with three components: routing plugins (apply team routing rules, see statistics, update and suggest rules), A/B testing (experiments with two to ten variants, sticky assignment, a Welch t-test with Holm correction, guardrail metrics, a winner only when it is significantly better) and an API gateway (discover, call and aggregate public APIs; it answers built-in mock data unless live calls are enabled, and live calls have been run against the real providers only for the four APIs that need no key, one call each on 2026-10-10). Everything stays on this computer. Your rules and all A/B measurements are kept in the folder you choose when you install it.",
   "author": {
@@ -23,7 +23,7 @@
         "AB_FSYNC": "${user_config.durable_writes}",
         "AB_LAZY_OPEN": "true",
         "GATEWAY_LIVE_APIS": "${user_config.live_apis}",
-        "GATEWAY_USER_AGENT": "${user_config.contact}"
+        "GATEWAY_CONTACT": "${user_config.contact}"
       }
     }
   },
@@ -65,8 +65,8 @@
     },
     "contact": {
       "type": "string",
-      "title": "Contact for providers (User-Agent)",
-      "description": "Sent as the User-Agent of real calls, so that a provider can reach you, for example: increadible (you@example.com). Wikipedia and Wikidata ask for one. Leave empty to send increadible-gateway. Used only when Live APIs is set.",
+      "title": "Contact for providers (email or URL)",
+      "description": "Your email address or a web address (URL), sent in the User-Agent of real calls as increadible-gateway/<version> (<contact>) so that a provider can reach you. Wikipedia and Wikidata require one: without it their real calls go out with a warning here, and are refused in production. Used only when Live APIs is set.",
       "default": "",
       "required": false
     }

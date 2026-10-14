@@ -1,8 +1,9 @@
 import * as routing from "../features/07-routing-plugins/src/mcp-server";
 import * as abTesting from "../features/08-ab-testing/src/mcp-server";
 import * as gateway from "../features/09-api-gateway/src/mcp-server";
+import { VERSION } from "./version";
 
-export const SERVER_INFO = { name: "increadible", version: "1.0.3" };
+export const SERVER_INFO = { name: "increadible", version: VERSION };
 const DEFAULT_PROTOCOL_VERSION = "2024-11-05";
 /** MCP protocol versions are dates. Anything else a client sends is not echoed back as the version this server speaks. */
 const PROTOCOL_VERSION_FORMAT = /^\d{4}-\d{2}-\d{2}$/;

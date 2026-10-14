@@ -64,7 +64,13 @@ You should see one JSON line listing 13 tools. Logs appear on stderr. Press Ctrl
 | `GATEWAY_LIVE_APIS names an unknown API: <id>` | a typo in the list | use ids from `discover_apis` |
 | `GATEWAY_TIMEOUT_MS must be an integer from 100 to 120000; using 10000` (and the other bounds) | a setting out of range | correct it |
 | `GATEWAY_RATE_LIMITS: ignored "..." ...; that API has no limit`, or `GATEWAY_RATE_LIMITS names an unknown API: ...` | an entry that is not `<api>=<1 to 100000>`, or an id not in the catalog | correct it; until then that API is not limited |
-| `<api>: rate limit reached: at most N live calls per minute to this API (GATEWAY_RATE_LIMITS); try again in S s` | the operator's per-API limit is used up; nothing was sent to the provider | wait S seconds, or raise the limit |
+| `<api>: rate limit reached: at most N live calls per minute to this API (GATEWAY_RATE_LIMITS); try again in S s` (or `GATEWAY_DEFAULT_RATE_LIMIT`) | the per-API limit, or the default of 5 a minute for every API without its own, is used up; nothing was sent to the provider | wait S seconds, or raise the limit |
+| `<api>: the provider asked the gateway to slow down (HTTP 429 or 503); no live calls to this API for another S s` | the provider answered 429 (or 503 with a Retry-After); the gateway waits as asked, or a minute when no wait was given; nothing was sent | wait S seconds; if it recurs, lower that API's limit |
+| `<api>: HTTP 429 (retry after N)` | the provider refused for rate; its Retry-After was longer than `GATEWAY_RETRY_MAX_WAIT_MS`, so no retry was made | wait; the API cools down for that long |
+| `<api>: not sent: Wikimedia requires a User-Agent with contact information; set GATEWAY_CONTACT to an email address or URL` | production (`NODE_ENV=production`) and no contact in the User-Agent | set `GATEWAY_CONTACT` to your email address or a URL, and restart |
+| `warning: <api>: live calls are sent without contact information in the User-Agent ...` (at start-up) | Wikipedia or Wikidata is live outside production without a contact | set `GATEWAY_CONTACT` (in Claude Desktop: the setting **Contact for providers**) |
+| `GATEWAY_CONTACT must be an email address or an http(s) URL; ignored ...` | the contact is something else (a name, `localhost`, an `ftp:` address) | give an email address or an http(s) URL |
+| `User-Agent contact: not set (GATEWAY_CONTACT; in Claude Desktop, the setting Contact for providers)` (at start-up, from 1.0.5) | no contact reached the server: `GATEWAY_CONTACT` is empty, or holds something that is not an email address or http(s) URL (then the line above appears too). `User-Agent contact: set` means one arrived; the contact itself is never printed | in Claude Desktop: fill **Contact for providers** with a full email address or `https://` URL, save, quit the app from the tray and reopen it; then look for this line again in the server's log |
 
 ## 4. Tool errors (inside a chat)
 

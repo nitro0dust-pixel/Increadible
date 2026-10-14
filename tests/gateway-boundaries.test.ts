@@ -5,9 +5,11 @@ import {
   UniversalAPIGateway,
   APIDefinition,
   gatewayOptionsFromEnv,
+  contactStatusLine,
   processToolCall,
 } from "../features/09-api-gateway/src/mcp-server";
 import { buildRequestUrl, liveGet, redact, LiveCallError, LiveOptions } from "../features/09-api-gateway/src/live";
+import { VERSION } from "../src/version";
 
 /**
  * Edges of the gateway that no test pinned until the mutation-testing pass of the audit: every limit at exactly the limit and one
@@ -249,13 +251,19 @@ describe("liveGet: how a failed fetch is reported (the real fetch is replaced)",
 });
 
 describe("the options read from the environment", () => {
-  const NAMES = ["GATEWAY_LIVE_APIS", "GATEWAY_TIMEOUT_MS", "GATEWAY_MAX_RESPONSE_BYTES", "GATEWAY_USER_AGENT", "GATEWAY_RATE_LIMITS"] as const;
+  const NAMES = [
+    "GATEWAY_LIVE_APIS", "GATEWAY_TIMEOUT_MS", "GATEWAY_MAX_RESPONSE_BYTES", "GATEWAY_USER_AGENT", "GATEWAY_CONTACT", "GATEWAY_RATE_LIMITS",
+    "GATEWAY_DEFAULT_RATE_LIMIT", "GATEWAY_RETRIES", "GATEWAY_RETRY_MAX_WAIT_MS", "NODE_ENV",
+  ] as const;
   const saved: Record<string, string | undefined> = {};
   beforeEach(() => NAMES.forEach((n) => ((saved[n] = process.env[n]), delete process.env[n])));
   afterEach(() => NAMES.forEach((n) => (saved[n] === undefined ? delete process.env[n] : (process.env[n] = saved[n]))));
 
-  it("defaults to no live API, 10 s, 1 MiB, a named user agent and no rate limit", () => {
-    expect(gatewayOptionsFromEnv()).toEqual({ liveApis: [], timeoutMs: 10_000, maxResponseBytes: 1_048_576, userAgent: "increadible-gateway", rateLimits: {} });
+  it("defaults to no live API, 10 s, 1 MiB, a named and versioned user agent without contact, 5 calls a minute per API, one retry within 5 s", () => {
+    expect(gatewayOptionsFromEnv()).toEqual({
+      liveApis: [], timeoutMs: 10_000, maxResponseBytes: 1_048_576, userAgent: `increadible-gateway/${VERSION}`, rateLimits: {},
+      defaultRateLimit: 5, retries: 1, retryMaxWaitMs: 5_000, production: false,
+    });
     expect(errors).not.toHaveBeenCalled();
   });
 
@@ -307,7 +315,37 @@ describe("the options read from the environment", () => {
     process.env.GATEWAY_USER_AGENT = "  my-agent/1.0  ";
     expect(gatewayOptionsFromEnv().userAgent).toBe("my-agent/1.0");
     process.env.GATEWAY_USER_AGENT = "   ";
-    expect(gatewayOptionsFromEnv().userAgent).toBe("increadible-gateway");
+    expect(gatewayOptionsFromEnv().userAgent).toBe(`increadible-gateway/${VERSION}`);
+  });
+
+  it("builds name/version (contact) from GATEWAY_CONTACT, takes the contact out of a whole User-Agent written there, and never makes one up", () => {
+    const ua = (contact: string) => ((process.env.GATEWAY_CONTACT = contact), gatewayOptionsFromEnv().userAgent);
+    expect(ua("ops@example.org")).toBe(`increadible-gateway/${VERSION} (ops@example.org)`);
+    expect(ua(" https://example.org/contact ")).toBe(`increadible-gateway/${VERSION} (https://example.org/contact)`);
+    expect(ua("increadible (ops@example.org)")).toBe(`increadible-gateway/${VERSION} (ops@example.org)`);
+    expect(errors).not.toHaveBeenCalled();
+    for (const bad of ["me", "ops@localhost", "ftp://example.org", "https://localhost", "ops at example.org"]) {
+      errors.mockClear();
+      expect(ua(bad)).toBe(`increadible-gateway/${VERSION}`);
+      expect(errors).toHaveBeenCalledWith("GATEWAY_CONTACT must be an email address or an http(s) URL; ignored (the User-Agent carries no contact)");
+    }
+    process.env.GATEWAY_USER_AGENT = "own/2 (x@example.org)"; // the whole header, as before, wins
+    expect(ua("ops@example.org")).toBe("own/2 (x@example.org)");
+  });
+
+  it("says at start-up whether the User-Agent carries a contact, and never prints the contact", () => {
+    const line = (contact: string) => ((process.env.GATEWAY_CONTACT = contact), contactStatusLine(gatewayOptionsFromEnv().userAgent!));
+    expect(line("ops@example.org")).toBe("User-Agent contact: set");
+    expect(line("https://example.org/contact")).toBe("User-Agent contact: set");
+    for (const missing of ["", "   ", "me"]) expect(line(missing)).toMatch(/^User-Agent contact: not set \(GATEWAY_CONTACT; in Claude Desktop, the setting Contact for providers\)$/);
+    for (const c of ["ops@example.org", "https://example.org/contact"]) expect(line(c)).not.toContain(c);
+  });
+
+  it("reads production from NODE_ENV=production only", () => {
+    for (const [v, p] of [["production", true], ["development", false], ["Production", false], ["", false]] as const) {
+      process.env.NODE_ENV = v;
+      expect(gatewayOptionsFromEnv().production).toBe(p);
+    }
   });
 });
 
@@ -576,7 +614,8 @@ describe("the tools around the gateway", () => {
   it("reports its statistics through get_api_stats", async () => {
     const stats = await call("get_api_stats");
     expect(Object.keys(stats).sort()).toEqual([
-      "api_distribution", "cache_evictions", "cache_hit_rate", "cached_items", "failed", "gates", "live_apis", "live_calls", "rate_limited", "rate_limits", "successful", "total_calls",
+      "api_distribution", "cache_evictions", "cache_hit_rate", "cached_items", "contact_refused", "cooldown_refused", "cooldowns", "default_rate_limit", "failed", "gates", "live_apis",
+      "live_calls", "max_retries", "rate_limited", "rate_limits", "retries", "successful", "throttled", "total_calls", "user_agent_has_contact",
     ]);
   });
 });

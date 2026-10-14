@@ -2,7 +2,7 @@
 
 # API gateway: gated catalog architecture (proposal, option A)
 
-**Status: APPROVED by the owner on 2026-10-10 (option A). Being built: steps 1a, 2, 3 and 4 done; step 1b in progress (probes, recordings and contract tests done for the keyless four; sign-offs and terms wait on the owner). Section 4 has the detail.**
+**Status: APPROVED by the owner on 2026-10-10 (option A). Being built: steps 1a, 2, 3 and 4 done; step 1b in progress (probes, recordings, contract tests and a probe runner with a probe history done for the keyless four; sign-offs, terms and the retirement threshold wait on the owner). Section 4 has the detail.**
 
 This expands recommendation "A, with a gated catalog" in [`GATEWAY.md`](../GATEWAY.md) into components and an order of work.
 It was drafted in a separate Claude session on 2026-10-10 from the owner's local copy, then checked line by line against
@@ -49,7 +49,7 @@ seed sources (offline) -> candidate store -> gate pipeline -> registry (gated on
 3. **Registry.** Gated APIs only. The advertised count is the number of gated APIs, never the number of candidates (`GATEWAY.md`, recommendation 3).
 4. **Live switch.** Unchanged: `GATEWAY_LIVE_APIS` opts an API in; a gated API answers sample data until then.
 5. **Call layer.** Unchanged. The host allowlist becomes each API's pinned base URL.
-6. **Evidence record.** Per API: gate status, auth class, terms, probe history (latency, error rate), date of last change. Read-only, through `get_api_stats` (owner decision, 2026-10-10; the `gates` field, without probe history until a scheduled probe exists).
+6. **Evidence record.** Per API: gate status, auth class, terms, probe history (latency, error rate), date of last change. Read-only, through `get_api_stats` (owner decision, 2026-10-10; the `gates` field). Probe history: `scripts/run-probes.js` writes one, on the machine that runs it; the server does not read it, so `get_api_stats` shows none yet.
 7. **Retirement.** A probe that keeps failing moves the API to `degraded`: hidden from `discover_apis`, kept in the store. The number of failures is a design choice, not a measured value.
 
 ## 4. Order of work
@@ -85,16 +85,32 @@ seed sources (offline) -> candidate store -> gate pipeline -> registry (gated on
        test, and `get_api_stats` shows it; a test holds the catalog and the recordings to each other both ways (a contract test
        named without a recording fails, and so does a recording whose API names none). This is evidence, not a sign-off: the four
        stay `candidate`.
+     - **Done: a probe runner and a probe history (2026-10-14).** `scripts/run-probes.js` sends each keyless API's probe once
+       through the gateway's live path (no retry, which would hide the failure; the User-Agent with `GATEWAY_CONTACT`, refused
+       without one) and appends one JSON line per probe to a history file (default `probe-history.jsonl`, ignored by git): when,
+       where, the API, passed or not, the latency, the HTTP status and the problems found; never the body, the User-Agent or a
+       credential. `run-probes.js report` prints, per API, the runs, the failures, the failures in a row at the end and the median
+       latency of the passed probes. Scheduling it (cron, Task Scheduler) is the operator's: nothing in the server runs or reads it.
+       `tests/run-probes.test.ts` runs it against the recorded answers in place of the network. **Never run against the real
+       providers from here** (the sandbox cannot reach them); its first real history comes from the owner's machine.
      - **Waiting on the owner:** the sign-offs on each pinned URL and auth class, and the terms (read on a machine that reaches the
        providers, summarised, signed off). What was found so far, and what each page still has to confirm, is in section 10.
    Output of step 1: nine gated records, each with a pinned URL, an auth class, terms and a probe history.
-2. **Per-API rate limit and a retry policy** (both open in `ROADMAP.md`), before more APIs are switched to live.
-   - **Rate limit: the mechanism is built** (`GATEWAY_RATE_LIMITS`, e.g. `coingecko=30`: live calls per API in any rolling minute;
-     a call over it is refused before it reaches the provider and counted as `rate_limited` in `get_api_stats`). **No limit is
-     set**: the values depend on each provider's terms, which are not read yet (step 1b), so they are the owner's decision.
-   - **Retry policy: no retries for now (owner decision, 2026-10-10).** A live call that fails is reported, not repeated; to be
-     revisited when real traffic exists. It was the owner's call because a retry sends another request to a provider on the
-     operator's behalf.
+2. **Per-API rate limit and a retry policy**, before more APIs are switched to live.
+   - **Rate limit: built** (`GATEWAY_RATE_LIMITS`, e.g. `coingecko=30`: live calls per API in any rolling minute; a call over it is
+     refused before it reaches the provider and counted as `rate_limited` in `get_api_stats`). **No per-API value is set**: only
+     HN's limit was read on its own page (section 11). **A default of 5 calls a minute** for every API without its own entry
+     (`GATEWAY_DEFAULT_RATE_LIMIT`; owner's instruction of 2026-10-12 to set conservative configurable limits): the project's own
+     choice, the lowest figure any source gave for any live API, not a provider's number.
+   - **Retry policy: bounded retries (owner's instruction of 2026-10-12, which replaces "no retries for now" of 2026-10-10).** One
+     retry by default (`GATEWAY_RETRIES`, 0 to 3), only after an HTTP 429, 502, 503 or 504 or a dropped connection, never after a
+     timeout; the wait is the provider's `Retry-After` when given (seconds or a date), else 1 s doubling, and never longer than
+     `GATEWAY_RETRY_MAX_WAIT_MS` (5 s). A 429 (or a 503 with `Retry-After`) starts a **cooldown**: no live call goes to that API
+     until the `Retry-After` has passed, or for a minute without one. Each retry passes the rate limit like any call.
+   - **User-Agent: built** (owner's instruction of 2026-10-12, section 10's finding). The gateway sends
+     `increadible-gateway/<version>`, with ` (<contact>)` when `GATEWAY_CONTACT` holds an email address or URL; it never makes one
+     up. Wikipedia and Wikidata without a contact: a warning at start-up in development, a refusal before sending in production
+     (`NODE_ENV=production`, as the image sets).
 3. **Egress allowlist at deploy time**: a NetworkPolicy limited to the pinned hosts; a prerequisite for live mode in a cluster.
    - **Written, NOT VERIFIED on a cluster** (`DEPLOYMENT.md`, "Egress"): the deployment manifests allow DNS only; `k8s/egress-live-cilium.yaml`
      allows HTTPS to the four keyless providers by host name, on Cilium only, because standard NetworkPolicy cannot name hosts.
@@ -130,10 +146,21 @@ seed sources (offline) -> candidate store -> gate pipeline -> registry (gated on
 - [x] Approve starting step 1 above (`GATEWAY.md`, second box): **approved 2026-10-10**.
 - [ ] Option D: wanted or not (`GATEWAY.md`, third box).
 - [ ] Where API keys live once more than the keyless APIs are switched on (`GATEWAY.md`, fourth box).
-- [ ] Probe retirement threshold: needs a proposal, then a decision.
+- [ ] Probe retirement threshold. **Proposal (2026-10-14), not decided:** an API becomes `degraded` after **3 failed probes in a
+  row**, the probes **at least 1 hour apart**, and goes back after **2 passed probes in a row**; one failure is never enough (a
+  provider's bad minute), and a run of failures within the same hour counts once. The numbers are design choices, not measured
+  values: no probe history exists yet to measure them against. `run-probes.js report` already prints the failures in a row; moving
+  an API to `degraded` stays a person's change to `catalog.ts` until the owner decides whether it should be automatic.
 - [x] Where gate status is shown (section 3, item 6): **read-only in `get_api_stats`, decided by the owner on 2026-10-10**; built as the
   `gates` field (status, auth class, sign-off dates, terms address, probe path, contract test, live evidence; no probe history yet).
-- [x] Retries for live calls: **none for now, decided by the owner on 2026-10-10** (step 2).
+- [x] Retries for live calls: **none for now, decided by the owner on 2026-10-10**; **replaced on 2026-10-12** by the owner's
+  instruction: bounded, configurable retries with HTTP 429 and Retry-After handled (step 2).
+- [x] The Wikimedia User-Agent: **decided by the owner on 2026-10-12**: an identifiable name and version, a contact URL or email
+  that is never made up; a warning in development, a refusal in production while it is missing (step 2).
+- [x] CoinCap: **deferred for this release, owner, 2026-10-12** (section 9).
+- [ ] Sign-offs: each API's pinned URL, auth class and terms (gates 1 to 3). The terms review of section 11 approves nothing.
+- [ ] Per-API rate limits from the official documentation: only HN's was read on its page (none); the others need the owner's
+  reading of the provider pages or an account tier to be chosen (section 11).
 - [x] The first new APIs to gate: **one category's keyless HTTPS candidates, decided by the owner on 2026-10-10**
   ([`GATEWAY-CANDIDATES.md`](GATEWAY-CANDIDATES.md), section 3). **Category: Cryptocurrency** (owner, 2026-10-10: the most keyless
   HTTPS candidates, 36, and CoinGecko already answered live); **first five: CoinCap, CoinPaprika, CoinLore, DefiLlama, Mempool**
@@ -143,7 +170,7 @@ seed sources (offline) -> candidate store -> gate pipeline -> registry (gated on
 ## 7. Not verified
 
 - Catalogue sizes, the no-auth share, the broken-API estimate, and the ContextForge and Docker advisory details (`GATEWAY.md`, "Not verified").
-- Probe success criteria and retirement thresholds: design choices, not measured. The four probes have never been sent to the real providers (only replayed against a stubbed `fetch`).
+- Probe success criteria and retirement thresholds: design choices, not measured. The four probes were sent to the real providers once, by the recorder on the owner's PC on 2026-10-10 (each passed); everything since is a replay of those answers. `scripts/run-probes.js` has never run against the real providers.
 - The effort of step 1: not estimated.
 
 ## 8. Corrections to the first draft
@@ -177,7 +204,7 @@ they are; the providers' sites do not resolve from the sandbox, so none of it wa
 
 | API | Finding | Consequence |
 |---|---|---|
-| CoinCap | `api.coincap.io` reportedly no longer resolves; v3 (`rest.coincap.io/v3`) answers 401 without a key | **Likely out of this batch** (keyless only). Owner: confirm on CoinCap's own docs, then drop it or pick a replacement from the Cryptocurrency candidates |
+| CoinCap | `api.coincap.io` reportedly no longer resolves; v3 (`rest.coincap.io/v3`) answers 401 without a key | **Deferred for this release (owner, 2026-10-12)**; its proposal is kept with status `deferred` |
 | CoinPaprika | Keyless free tier; its own docs state the limit two ways (20,000 a month; 1,000 a day without a key); a third party says a public or commercial instance needs an enterprise agreement | Commercial use is the clause to read |
 | CoinLore | Keyless; no official terms or limit found (third parties: about one request a second); endpoint paths differ between sources | The probe path `/global/` must be checked live |
 | DefiLlama | Keyless; its own Pro page gives the open tier 10 to 200 requests a minute | `/v2/chains` was not confirmed by any result |
@@ -200,7 +227,8 @@ with the date; only then is `gate.terms` filled in `catalog.ts`.
 | wikipedia (content) | <https://www.wikidata.org/wiki/Wikidata:Licensing>, Wikimedia Terms of Use | Text is CC BY-SA 4.0, so text passed on to users needs attribution and share-alike | Search summary of Wikidata's licensing page | How attribution should be shown when the gateway returns article text |
 | wikidata (content) | <https://www.wikidata.org/wiki/Wikidata:Licensing> | Structured data in the main, property and lexeme namespaces is CC0 (no attribution required) | Search summary of Wikidata's own page | Nothing for the probe's use (labels are main-namespace data) |
 
-**One finding for the code, not a terms question.** When `GATEWAY_USER_AGENT` is not set, the gateway sends the User-Agent
+**One finding for the code, not a terms question** (resolved on 2026-10-12, step 2: `GATEWAY_CONTACT`, a warning in development, a
+refusal in production; the paragraph below is kept as found). When `GATEWAY_USER_AGENT` is not set, the gateway sends the User-Agent
 `increadible-gateway` (`features/09-api-gateway/src/mcp-server.ts`), which carries no contact. That is against Wikimedia's policy
 above, so live calls to wikipedia or wikidata need `GATEWAY_USER_AGENT` set with a contact (Railway and the owner's Claude Desktop
 set it). Whether the gateway should refuse or warn about live Wikimedia calls without a contact is an owner decision (a behaviour
@@ -209,3 +237,28 @@ change); nothing is changed here.
 **What the owner confirms, per API:** the page's URL and the date read; licence; attribution (wording, and whether the gateway must
 pass it on to its users); commercial use; the rate limit (which becomes the `GATEWAY_RATE_LIMITS` value); then a sign-off with name and
 date. For coingecko, also whether keyless use fits the gateway at all, given "not for production".
+
+## 11. Terms review of the catalog's nine APIs (2026-10-12): found, not approved
+
+`features/09-api-gateway/data/terms-review.json` records, per API, the official pages to read, each finding with its source and
+how it was read (**read on the page**, **search summary of the official page**, or **third party**), the rate limit seen and
+whether it is verified, the restrictions, the open questions, and the account tier actually configured. `owner_signoff` is
+`null` everywhere, and `tests/gateway-terms.test.ts` refuses anything else; `gate.terms` stays empty in `catalog.ts`. The sandbox
+could fetch `github.com` but not CoinGecko's or Wikimedia's sites (`ENOTFOUND`, again on 2026-10-12).
+
+| API | Account tier configured | Rate limit | How sure | Restriction found |
+|---|---|---|---|---|
+| hackernews | none (anonymous) | none ("There is currently no rate limit.") | **read on the page** | none stated |
+| coingecko | none (anonymous, keyless) | not published for keyless; 5 to 15 a minute | third party | not for production; attribution "Data provided by CoinGecko"; no redistribution (search summaries) |
+| wikipedia | none (anonymous) | not fixed; 200 a second on a 2019 page | search summary | User-Agent with contact required; obey slow-down answers; text CC BY-SA 4.0 |
+| wikidata | none (anonymous) | not found | search summary | User-Agent with contact required; data CC0 |
+| newsapi | none (no key set) | 100 a day (Developer plan) | search summary | **Developer plan: no staging or production use** |
+| openweathermap | none (no key set) | 60 a minute, 1,000,000 a month (free) | search summary | not found; the catalog's `/data/2.5` may be outdated |
+| weatherapi | none (no key set) | 1,000,000 a month or 1,000 a day | third party | not found |
+| finnhub | none (no key set) | 60 a minute | third party | personal, non-commercial (third party) |
+| thesportsdb | none (test key in the URL) | about 30 a minute | third party | personal, non-commercial on the free key (third party) |
+
+What the gateway does with this, without approval: the **default limit of 5 calls a minute per API** stays under every figure
+above; **no per-API value is set**, because none but HN's is verified; the key-based five have never run live and no account tier
+is configured for them. **For the owner:** read each page, confirm or correct the line, decide NewsAPI's place (its free plan
+forbids production use) and whether keyless CoinGecko fits "not for production", then sign off (name and date).
