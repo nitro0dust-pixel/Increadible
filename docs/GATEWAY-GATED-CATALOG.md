@@ -4,8 +4,8 @@
 
 This expands recommendation "A, with a gated catalog" in [`GATEWAY.md`](../GATEWAY.md) into components and an order of work.
 It was drafted in a separate Claude session on 2026-10-10 from the owner's local copy, then checked line by line against
-`main` at `64cdefb` (PR #38). Four statements of the draft were wrong and are corrected here (section 8). Nothing in this
-document is built, installed or run.
+`main` at `64cdefb` (PR #38). Four statements of the draft were wrong and are corrected here (section 8). When it was drafted,
+nothing in this document was built, installed or run; the status line above says what is built now.
 
 ## 1. Proven in the repository today
 
@@ -17,7 +17,7 @@ document is built, installed or run.
 | The live layer refuses other hosts and paths, `..` and encoded dots or slashes, full URLs, redirects, non-JSON, oversize and slow responses; GET only; the gateway adds the credential from an environment variable and redacts it from errors and logs | `features/09-api-gateway/src/live.ts` |
 | **The registry is data** (since step 1a, below): `features/09-api-gateway/src/catalog.ts` holds the nine APIs, each with its `APIDefinition` (`id`, `name`, `category`, `endpoint`, `methods`, `auth`, `free`, `description`, `docs_url`), its credential source if it takes a key, and a gate record; the gateway reads it at start-up, and the `apis` option replaces it only in tests. Before step 1a it was hard-coded in `initializeAPIRegistry()` and `DEFAULT_CREDENTIALS` | `catalog.ts`, `mcp-server.ts` |
 | Bounds: cache 500 entries and 16 MiB, at most 100 calls per `aggregate_apis`, 10 live calls in flight, 100 waiting | `mcp-server.ts`, `MAX_CACHE_ENTRIES`, `MAX_CACHE_BYTES`, `MAX_AGGREGATE_CALLS`, `MAX_LIVE_IN_FLIGHT`, `MAX_LIVE_WAITING` |
-| Known gaps: the rate limit is global and off by default; no per-API limiter; no retry or backoff; no egress policy (no NetworkPolicy exists, so a pod can reach any host) | `ROADMAP.md`, Backlog, "Gateway live mode"; `DEPLOYMENT.md`, live-mode section |
+| Known gaps at `64cdefb`: the rate limit was global and off by default; no per-API limiter; no retry or backoff; no egress policy. Since closed by steps 2 and 3: a per-API limiter (PR #52) with a default of 5 calls a minute per API, bounded retries with Retry-After (PR #63), an egress allowlist (PR #53, never applied to a cluster). The global rate limit is still off by default | `ROADMAP.md`, Backlog, "Gateway live mode"; `DEPLOYMENT.md`, live-mode section |
 
 ## 2. Verified by the research (`GATEWAY.md`)
 
