@@ -13,6 +13,7 @@ Entries marked **behaviour change** can affect an existing deployment.
 **Version 1.0.5** (bumped in [#68](https://github.com/nitro0dust-pixel/Increadible/pull/68), merged as `61ff561`, package `20cb5740...` equal from CI and a local build; not yet tagged): `package.json`, `package-lock.json`, `mcpb/manifest.json` and `src/version.ts`. The entries below move to `[1.0.5]` once the owner has installed the package in Claude Desktop, a tool has answered, and the tag is pushed (`docs/RELEASING.md`). A package built from `main` after #67 already differs from the released 1.0.4 file under the same name (`docs/RELEASING.md`, section 4), so the next release could not be a second 1.0.4.
 
 ### Changed
+- **Documents: stale statements corrected (no code change).** ROADMAP's backlog and `docs/GATEWAY-GATED-CATALOG.md` section 1 said the gateway had no retries, no rate limit and no terms review, and the release process still said the next release was 1.0.3; they now match PR #63 and the terms review of 2026-10-12 ([#71](https://github.com/nitro0dust-pixel/Increadible/pull/71)). Not an operator-facing change.
 - **`docs/RELEASING.md`, step 6 (tag) checks each step**: `git remote -v` names the right repository, `git rev-parse C` proves the clone has the commit, the push must print `[new tag]`, and `git ls-remote` proves the tag reached GitHub. Written after the owner's `v1.0.5` push twice did not reach GitHub. ([#70](https://github.com/nitro0dust-pixel/Increadible/pull/70))
 
 ### Fixed
