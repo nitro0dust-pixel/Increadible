@@ -534,6 +534,19 @@ describe("a driver refuses to start a writing own-server scenario on a folder th
     expect(again.status).toBe(2);
     expect(again.stderr).toContain("already in the data folder");
   });
+
+  it("drive-bundle.js: a setting it refuses makes no data folder (a usage error creates nothing)", () => {
+    const unknown = path.join(tmp, "never-made-unknown");
+    const ranUnknown = drive("drive-bundle.js", ["--bundle", bundle, "--scenario", "routing-rules", "--setting", "no_such_setting=1", "--data-dir", unknown]);
+    expect(ranUnknown.status).toBe(2);
+    expect(ranUnknown.stderr).toContain("the manifest has no such setting");
+    expect(fs.existsSync(unknown)).toBe(false);
+    const live = path.join(tmp, "never-made-live");
+    const ranLive = drive("drive-bundle.js", ["--bundle", bundle, "--scenario", "routing-rules", "--setting", "live_apis=*", "--data-dir", live]);
+    expect(ranLive.status).toBe(2);
+    expect(ranLive.stderr).toContain("switches on calls to real providers");
+    expect(fs.existsSync(live)).toBe(false);
+  });
 });
 
 describe("a driver that starts no server of its own refuses a scenario that changes one", () => {
