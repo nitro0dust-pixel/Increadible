@@ -37,6 +37,7 @@ const REFERENCES = {
   "docs/RELEASING.md": "releasing.md",
   "docs/GATEWAY-GATED-CATALOG.md": "gated-catalog.md",
   "docs/USING-THE-GATEWAY.md": "using-the-gateway.md",
+  "docs/DRIVERS.md": "drivers.md",
 };
 
 const header = (source) =>

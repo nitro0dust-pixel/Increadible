@@ -14,6 +14,8 @@ RULES_FILE=/tmp/rules.yaml AB_DATA_FILE=/tmp/ab.jsonl node dist/src/index.js
 
 You should see one JSON line listing 13 tools. Logs appear on stderr. Press Ctrl-C to stop; the lock file is released.
 
+Or let a driver do it: `npm run build && npm run drive:stdio` performs the handshake, 16 real calls and the shutdown the way Claude Desktop does, and names the step that failed with the server's own stderr ([DRIVERS.md](DRIVERS.md)). For the Desktop package use `npm run drive:bundle`.
+
 ## 2. Claude Desktop does not show the server
 
 | Symptom | Likely cause | Fix |

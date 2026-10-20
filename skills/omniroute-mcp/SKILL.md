@@ -58,6 +58,7 @@ Features #1 to #6 (`features/01` to `06`) are third-party submodules. They run b
 | `node scripts/run-probes.js [--history F] [--where M] [api ...]`, `... report` | after `npm run build`, with `GATEWAY_CONTACT` set: one probe per keyless API through the gateway, the outcome appended to a probe history (`probe-history.jsonl`, never the body); `report` summarises it per API. Needs a machine that reaches the providers |
 | `node scripts/seed-candidates.js`, `node scripts/candidate-report.js` | the candidate store from the public-apis list (2,032 entries, read by no server code); the generated report `docs/GATEWAY-CANDIDATES.md` (a test fails while it is stale) |
 | `node scripts/make-ab-data.js --file F --measurements N` | a large A/B data file for smoke and capacity checks |
+| `npm run drive:stdio`, `drive:http`, `drive:probe`, `drive:bundle` | the request drivers (`scripts/drive-stdio.js`, `drive-http.js`, `drive-probe.js`, `drive-bundle.js`; `references/drivers.md`): real JSON-RPC calls to the built server (stdio the way Claude Desktop runs it, HTTP, the unpacked `.mcpb`) checked against a scenario, and a protocol probe that records where the server differs from the MCP specification. They refuse to switch live gateway calls on, skip A/B writes against `--url`, and clean up when interrupted. Linux only verified; Windows NOT VERIFIED |
 
 Node 24 in the image and CI; `engines` is `>=22`. The authoring sandbox has no Docker daemon and no cluster, and cannot reach GitHub release pages or Docker Hub. Its web fetcher reached `github.com` but not `coingecko.com` or Wikimedia's sites (2026-10-10); a web search works there, but its answers are summaries, so a provider's terms found that way are leads for the owner to read, never a sign-off.
 
@@ -129,3 +130,4 @@ These steps are Path B (the config file): verified only up to the handshake, **N
 | `references/releasing.md` | making a release: version bump, the package's SHA-256 from two builds, the owner's tag, the check |
 | `references/gated-catalog.md` | building the gated catalog: the gates, the order of work, what is done, the first batch (section 9) and the terms found (section 10) |
 | `references/using-the-gateway.md` | calling the gateway from a chat: prompts, mock versus live answers, `get_api_stats` |
+| `references/drivers.md` | driving the server with real requests: the four drivers, their exact steps, how to read a report, the scenario format, what the probe records about the MCP specification |
