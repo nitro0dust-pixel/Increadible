@@ -1,6 +1,6 @@
 {
   "name": "ab-statistics",
-  "description": "Known measurements in, known statistics out. Variant A gets 10 + (i mod 7) and variant B 14 + (i mod 5) for i = 0..59, so mean(A) = 12.9, mean(B) = 16, s(A) = 2.0059, s(B) = 1.4261 and Cohen's d = -1.78, worked out by hand (the test of this scenario repeats the arithmetic from the values below). The p-value is checked as a bound only: the server turns t into an approximate z. It adds 240 measurements to the server's A/B data, which is never compacted, so it runs only against a server the driver starts itself.",
+  "description": "Known measurements in, known statistics out; and the variants that known users get. Variant A gets 10 + (i mod 7) and variant B 14 + (i mod 5) for i = 0..59, so mean(A) = 12.9, mean(B) = 16, s(A) = 2.0059, s(B) = 1.4261 and Cohen's d = -1.78, worked out by hand (the test of this scenario repeats the arithmetic from the values below). The p-value is checked as a bound only: the server turns t into an approximate z. The assignment golden (16 users in one experiment) is a regression record taken from the server itself, not worked out: a change in it means existing users would be given other variants. It adds 360 measurements to the server's A/B data, which is never compacted, so it runs only against a server the driver starts itself.",
   "scope": "own-server",
   "steps": [
     {
@@ -279,36 +279,235 @@
       }
     },
     {
-      "name": "a user keeps their variant",
-      "tool": "assign_variant",
+      "name": "a third experiment: nearly equal data",
+      "tool": "create_experiment",
       "writes": true,
       "arguments": {
-        "experiment_id": "stats-${run_id}",
-        "user_id": "driver-user"
-      },
-      "save": {
-        "first_variant": "variant_id"
+        "id": "nearly-${run_id}",
+        "name": "known data",
+        "hypothesis": "a difference of 1/60 is not significant",
+        "variants": [
+          {
+            "id": "A",
+            "name": "a",
+            "config": {}
+          },
+          {
+            "id": "B",
+            "name": "b",
+            "config": {}
+          }
+        ],
+        "metrics": [
+          {
+            "id": "quality",
+            "name": "quality",
+            "type": "continuous",
+            "aggregation": "mean"
+          }
+        ]
       },
       "expect": {
         "json": {
-          "variant_id": {
-            "$matches": "^(A|B)$"
-          },
-          "experiment_id": "stats-${run_id}"
+          "status": "success",
+          "experiment_id": "nearly-${run_id}"
         }
       }
     },
     {
-      "name": "the same user gets the same variant again",
-      "tool": "assign_variant",
+      "name": "nearly equal: 60 measurements for A",
+      "tool": "record_metric",
       "writes": true,
+      "each": [10, 11, 12, 13, 14, 15, 16, 10, 11, 12, 13, 14, 15, 16, 10, 11, 12, 13, 14, 15, 16, 10, 11, 12, 13, 14, 15, 16, 10, 11, 12, 13, 14, 15, 16, 10, 11, 12, 13, 14, 15, 16, 10, 11, 12, 13, 14, 15, 16, 10, 11, 12, 13, 14, 15, 16, 10, 11, 12, 13],
       "arguments": {
-        "experiment_id": "stats-${run_id}",
-        "user_id": "driver-user"
+        "experiment_id": "nearly-${run_id}",
+        "variant_id": "A",
+        "metrics": {
+          "quality": "${each}"
+        }
       },
       "expect": {
         "json": {
-          "variant_id": "${first_variant}"
+          "status": "recorded"
+        }
+      }
+    },
+    {
+      "name": "nearly equal: the same 60 with the first raised by 1 for B",
+      "tool": "record_metric",
+      "writes": true,
+      "each": [11, 11, 12, 13, 14, 15, 16, 10, 11, 12, 13, 14, 15, 16, 10, 11, 12, 13, 14, 15, 16, 10, 11, 12, 13, 14, 15, 16, 10, 11, 12, 13, 14, 15, 16, 10, 11, 12, 13, 14, 15, 16, 10, 11, 12, 13, 14, 15, 16, 10, 11, 12, 13, 14, 15, 16, 10, 11, 12, 13],
+      "arguments": {
+        "experiment_id": "nearly-${run_id}",
+        "variant_id": "B",
+        "metrics": {
+          "quality": "${each}"
+        }
+      },
+      "expect": {
+        "json": {
+          "status": "recorded"
+        }
+      }
+    },
+    {
+      "name": "results: a leader that is not significant is not a winner",
+      "tool": "get_experiment_results",
+      "arguments": {
+        "experiment_id": "nearly-${run_id}"
+      },
+      "expect": {
+        "json": {
+          "status": "complete",
+          "variant_results.A.metrics.quality.mean": {
+            "$near": [12.9, 0.0001]
+          },
+          "variant_results.B.metrics.quality.mean": {
+            "$near": [12.916667, 0.0001]
+          },
+          "statistical_analysis.p_values.quality": {
+            "$gte": 0.9,
+            "$lte": 1
+          },
+          "statistical_analysis.effect_sizes.quality": {
+            "$near": [-0.0083, 0.01]
+          },
+          "confidence": {
+            "$lte": 0.1
+          },
+          "winner": {
+            "$exists": false
+          }
+        }
+      }
+    },
+    {
+      "name": "no clear winner for it either",
+      "tool": "recommend_winner",
+      "arguments": {
+        "experiment_id": "nearly-${run_id}"
+      },
+      "expect": {
+        "json": {
+          "recommendation": "No clear winner"
+        }
+      }
+    },
+    {
+      "name": "assignment: the experiment for the users",
+      "tool": "create_experiment",
+      "writes": true,
+      "arguments": {
+        "id": "assign-golden",
+        "name": "known data",
+        "hypothesis": "users keep their variant, version after version",
+        "variants": [
+          {
+            "id": "A",
+            "name": "a",
+            "config": {}
+          },
+          {
+            "id": "B",
+            "name": "b",
+            "config": {}
+          }
+        ],
+        "metrics": [
+          {
+            "id": "quality",
+            "name": "quality",
+            "type": "continuous",
+            "aggregation": "mean"
+          }
+        ]
+      },
+      "expect": {
+        "json": {
+          "status": "success",
+          "experiment_id": "assign-golden"
+        }
+      }
+    },
+    {
+      "name": "assignment: 16 users get the variants recorded for them, and the same one again when asked a second time",
+      "tool": "assign_variant",
+      "writes": true,
+      "each": [
+        {
+          "user": "user-1",
+          "variant": "B"
+        },
+        {
+          "user": "user-2",
+          "variant": "A"
+        },
+        {
+          "user": "user-3",
+          "variant": "A"
+        },
+        {
+          "user": "user-4",
+          "variant": "A"
+        },
+        {
+          "user": "user-5",
+          "variant": "B"
+        },
+        {
+          "user": "user-6",
+          "variant": "A"
+        },
+        {
+          "user": "user-7",
+          "variant": "A"
+        },
+        {
+          "user": "user-8",
+          "variant": "B"
+        },
+        {
+          "user": "user-9",
+          "variant": "B"
+        },
+        {
+          "user": "user-10",
+          "variant": "B"
+        },
+        {
+          "user": "user-11",
+          "variant": "B"
+        },
+        {
+          "user": "user-12",
+          "variant": "A"
+        },
+        {
+          "user": "user-13",
+          "variant": "B"
+        },
+        {
+          "user": "user-14",
+          "variant": "B"
+        },
+        {
+          "user": "user-15",
+          "variant": "A"
+        },
+        {
+          "user": "user-16",
+          "variant": "B"
+        }
+      ],
+      "same_again": true,
+      "arguments": {
+        "experiment_id": "assign-golden",
+        "user_id": "${each.user}"
+      },
+      "expect": {
+        "json": {
+          "variant_id": "${each.variant}",
+          "experiment_id": "assign-golden"
         }
       }
     },

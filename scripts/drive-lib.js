@@ -148,6 +148,12 @@ function dataEnv(dir) {
   };
 }
 
+/** The files of the server's own data a work directory would hold: the rules, the experiments and the A/B measurements. */
+function dataFiles(dir) {
+  const env = dataEnv(dir);
+  return [env.RULES_FILE, env.EXPERIMENTS_FILE, env.AB_DATA_FILE];
+}
+
 function entryPoint(root, name) {
   const file = path.join(root, "dist", "src", name);
   if (!fs.existsSync(file)) throw new Error(`${file} does not exist: run "npm run build" in ${root} first`);
@@ -426,7 +432,11 @@ const isWrite = (step) => step.writes !== undefined && step.writes !== false;
 /** The most calls one looped step may make: a scenario file must not be able to hammer a server it was pointed at. */
 const MAX_EACH = 1000;
 const TYPE_NAMES = new Set(["string", "number", "boolean", "array", "object", "null"]);
-const STEP_KEYS = new Set(["name", "method", "params", "tool", "arguments", "expect", "save", "writes", "each"]);
+const STEP_KEYS = new Set(["name", "method", "params", "tool", "arguments", "expect", "save", "writes", "each", "same_again"]);
+/** Names the runner puts into the variables itself; a step may not save one of them. */
+const RESERVED_NAMES = new Set(["each", "index", "run_id"]);
+/** The most requests a scenario may make in all (a looped step counts for its values). */
+const MAX_CALLS = 5000;
 const EXPECT_KEYS = new Set(["rpc_error", "message_contains", "tool_error", "contains", "json", "result", "tools_include"]);
 const MATCHERS = new Set(["$type", "$gte", "$lte", "$near", "$includes", "$matches", "$exists"]);
 const isToolStep = (step) => step.tool !== undefined || step.method === "tools/call";
@@ -465,6 +475,8 @@ function validateScenario(scenario, where = "scenario") {
       if (step.save !== undefined) fail(`${label}: "save" cannot go with "each" (a loop has no single answer to save)`);
     }
     if (step.save !== undefined && (!isPlainObject(step.save) || !Object.values(step.save).every((v) => typeof v === "string"))) fail(`${label}: "save" must map names to dotted paths`);
+    for (const name of Object.keys(step.save || {})) if (RESERVED_NAMES.has(name)) fail(`${label}: "save" cannot name "${name}": the runner uses that name itself`);
+    if (step.same_again !== undefined && typeof step.same_again !== "boolean") fail(`${label}: "same_again" must be true or false`);
     if (step.expect !== undefined && !isPlainObject(step.expect)) fail(`${label}: "expect" must be an object`);
     const expect = step.expect || {};
     for (const key of Object.keys(expect)) if (!EXPECT_KEYS.has(key)) fail(`${label}: unknown expectation "${key}"`);
@@ -500,6 +512,8 @@ function validateScenario(scenario, where = "scenario") {
     }
     if (expect.tools_include !== undefined && step.method !== "tools/list") fail(`${label}: "tools_include" applies to the method "tools/list"`);
   });
+  const calls = scenario.steps.reduce((sum, s) => sum + (Array.isArray(s.each) ? s.each.length : 1), 0);
+  if (calls > MAX_CALLS) fail(`the steps make ${calls} requests in all; at most ${MAX_CALLS} per scenario`);
   return scenario;
 }
 
@@ -554,7 +568,7 @@ function matchValue(actual, wanted) {
     else if (key === "$type") ok = typeOf(actual) === arg;
     else if (key === "$gte") ok = typeof actual === "number" && actual >= arg;
     else if (key === "$lte") ok = typeof actual === "number" && actual <= arg;
-    else if (key === "$near") ok = typeof actual === "number" && Math.abs(actual - arg[0]) <= arg[1];
+    else if (key === "$near") ok = typeof actual === "number" && Math.abs(actual - arg[0]) <= arg[1] + Number.EPSILON * Math.max(1, Math.abs(arg[0])) * 4; // the ends are in, up to the rounding of the sum
     else if (key === "$includes") ok = Array.isArray(actual) ? actual.some((x) => sameJson(x, arg)) : typeof actual === "string" && actual.includes(arg);
     else if (key === "$matches") ok = typeof actual === "string" && new RegExp(arg).test(actual);
     else return `unknown matcher ${key}`;
@@ -563,15 +577,27 @@ function matchValue(actual, wanted) {
   return null;
 }
 
-/** Replaces ${name} in every string of a value. A string that is exactly ${name} keeps the variable's own type. */
+/**
+ * Replaces ${name} and ${name.dotted.path} (a field of a saved value, or of ${each} in a looped step) in every string of a value, in the keys of an object as well as
+ * in its values (an expectation's path may name the place in the loop). A string that is exactly ${name} keeps the variable's own type. Only the variable's own properties
+ * are looked at, so ${constructor} is an unknown variable, not Object's function.
+ */
 function substitute(value, vars) {
   if (typeof value === "string") {
-    const whole = /^\$\{([A-Za-z0-9_]+)\}$/.exec(value);
-    const lookup = (name) => { if (!(name in vars)) throw new Error(`unknown variable \${${name}} (no earlier step saved it)`); return vars[name]; };
-    return whole ? lookup(whole[1]) : value.replace(/\$\{([A-Za-z0-9_]+)\}/g, (_, name) => String(lookup(name)));
+    const NAME = "([A-Za-z0-9_]+(?:\\.[A-Za-z0-9_]+)*)";
+    const whole = new RegExp(`^\\$\\{${NAME}\\}$`).exec(value);
+    const lookup = (name) => {
+      const [head, ...rest] = name.split(".");
+      if (!Object.prototype.hasOwnProperty.call(vars, head)) throw new Error(`unknown variable \${${name}} (no earlier step saved it)`);
+      if (rest.length === 0) return vars[head];
+      const found = getPath(vars[head], rest.join("."));
+      if (found === undefined) throw new Error(`unknown variable \${${name}} (the value of ${head} has nothing at ${rest.join(".")})`);
+      return found;
+    };
+    return whole ? lookup(whole[1]) : value.replace(new RegExp(`\\$\\{${NAME}\\}`, "g"), (_, name) => String(lookup(name)));
   }
   if (Array.isArray(value)) return value.map((v) => substitute(v, vars));
-  if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, substitute(v, vars)]));
+  if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).map(([k, v]) => [String(substitute(k, vars)), substitute(v, vars)]));
   return value;
 }
 
@@ -597,11 +623,19 @@ async function runOne(client, step, vars, secrets) {
   const problems = [];
   let message;
   let summary = "";
+  let method;
+  let params;
+  let expect;
   try {
-    const method = step.tool !== undefined ? "tools/call" : step.method;
-    const params = step.tool !== undefined ? { name: step.tool, arguments: substitute(step.arguments ?? {}, vars) } : substitute(step.params ?? {}, vars);
+    method = step.tool !== undefined ? "tools/call" : step.method;
+    params = step.tool !== undefined ? { name: step.tool, arguments: substitute(step.arguments ?? {}, vars) } : substitute(step.params ?? {}, vars);
+    expect = substitute(step.expect || {}, vars); // the expectations may name a variable too (the run id, a saved value, the place in a loop)
+  } catch (error) {
+    // a mistake in the scenario, found before anything was sent: not the server's silence
+    return { message: undefined, problems: [redact(error.message, secrets)], summary: "scenario error" };
+  }
+  try {
     message = await client.rpc(method, params);
-    const expect = substitute(step.expect || {}, vars); // the expectations may name a variable too (the run id, a saved value)
     let base; // what json/save look at: the parsed text of a tool answer, or the result itself
     const show = (text, n) => redact(String(text), secrets).slice(0, n); // hidden BEFORE it is cut, or the cut can leave half a secret
     const wrong = malformed(message);
@@ -650,6 +684,13 @@ async function runOne(client, step, vars, secrets) {
         }
       } else if (step.save) problems.push("save: there is nothing to save from this answer");
     }
+    if (step.same_again === true && !wrong) {
+      // the request once more: an answer that is not the same shows state that should not be there (a user given another variant)
+      const again = await client.rpc(method, params);
+      const first = JSON.stringify(message.result !== undefined ? message.result : message.error);
+      const second = JSON.stringify(again && (again.result !== undefined ? again.result : again.error));
+      if (first !== second) problems.push(`the same request, sent again, was answered differently: ${redact(first, secrets).slice(0, 80)} then ${redact(String(second), secrets).slice(0, 80)}`);
+    }
   } catch (error) {
     problems.push(redact(error.message, secrets));
     summary = summary || "no answer";
@@ -659,18 +700,22 @@ async function runOne(client, step, vars, secrets) {
 }
 
 const EACH_PROBLEMS_SHOWN = 5;
+/** How long one looped step may run: a target that answers every call just inside its deadline must not keep a driver for a thousand of them. */
+const EACH_BUDGET_MS = 120000;
 
 /**
  * A step with "each": the same request once per value, ${each} naming the value and ${index} its place (from 0). One row in the report: how many
  * calls failed and the first few problems, each with the number of its call. A server that does not answer a call ends the loop: twenty
  * seconds of waiting for each of a thousand calls would be a long way to learn the same thing.
  */
-async function runEach(client, step, vars, secrets) {
+async function runEach(client, step, vars, secrets, budgetMs = EACH_BUDGET_MS) {
   const total = step.each.length;
   const problems = [];
   let failed = 0;
   let last;
+  const started = Date.now();
   for (let i = 0; i < total; i++) {
+    if (Date.now() - started > budgetMs) { problems.push(`stopped after ${i} of ${total} calls: the step used up its time budget (${Math.round(budgetMs / 1000)} s)`); break; }
     const one = await runOne(client, step, { ...vars, each: step.each[i], index: i }, secrets);
     last = one;
     if (one.problems.length) {
@@ -678,13 +723,14 @@ async function runEach(client, step, vars, secrets) {
       if (failed <= EACH_PROBLEMS_SHOWN) problems.push(`call ${i + 1} of ${total} (${redact(JSON.stringify(step.each[i]), secrets).slice(0, 60)}): ${one.problems.join("; ")}`);
     }
     if (one.summary === "no answer") { problems.push(`stopped after call ${i + 1} of ${total}: the server gave no answer`); break; }
+    if (one.summary === "scenario error") { problems.push(`stopped after call ${i + 1} of ${total}: the scenario is wrong, so no call was sent`); break; }
   }
   if (failed > EACH_PROBLEMS_SHOWN) problems.push(`... and ${failed - EACH_PROBLEMS_SHOWN} more calls had problems`);
   return { message: last.message, problems, summary: failed ? `${failed} of ${total} calls failed` : `ok (${total} calls)` };
 }
 
 /** Runs the steps of a scenario against a client (anything with rpc(method, params)). Never throws for a failed step; the step records the problems. */
-async function runScenario(client, scenario, { secrets = [], onStep, vars: initialVars = {}, skipWrites = false } = {}) {
+async function runScenario(client, scenario, { secrets = [], onStep, vars: initialVars = {}, skipWrites = false, eachBudgetMs } = {}) {
   const vars = { ...initialVars };
   const steps = [];
   for (const step of scenario.steps) {
@@ -695,7 +741,7 @@ async function runScenario(client, scenario, { secrets = [], onStep, vars: initi
       if (onStep) onStep(skipped);
       continue;
     }
-    const { message, problems, summary } = step.each === undefined ? await runOne(client, step, vars, secrets) : await runEach(client, step, vars, secrets);
+    const { message, problems, summary } = step.each === undefined ? await runOne(client, step, vars, secrets) : await runEach(client, step, vars, secrets, eachBudgetMs);
     // text that came from a server is scrubbed wherever it ends up: in a problem, in the summary, in the stored answer
     const entry = { name: step.name, ok: problems.length === 0, ms: Date.now() - started, summary: redact(summary, secrets), problems: problems.map((p) => redact(p, secrets)), response: message === undefined ? undefined : redactDeep(message, secrets) };
     steps.push(entry);
@@ -835,6 +881,17 @@ function parseInteger(name, text, { min = 1, max = 2147483647 } = {}) {
 }
 
 /** These drivers never switch the gateway's live calls on: a live call goes to a real provider, which is Stage 4 and the owner's decision (docs/DRIVERS.md, section 10). */
+/**
+ * A scenario that is "own-server" and writes (A/B measurements, routing rules) expects a server that starts empty: it asserts the built-in rules, replaces the rules and
+ * creates experiments under fixed names. Started on a folder that already holds the server's files it would fail in confusing ways and, worse, replace the user's rules.yaml.
+ * So it is refused, naming the files, before anything is started or created. `files` are the paths of the data files the server would use.
+ */
+function assertFreshData(files, scenario) {
+  if (scenario.scope !== "own-server" || !scenario.steps.some(isWrite)) return;
+  const present = files.filter((f) => f && fs.existsSync(f));
+  if (present.length > 0) throw new UsageError(`the scenario "${scenario.name}" writes data and replaces the routing rules of the server it starts, and ${present.map((f) => path.basename(f)).join(" and ")} ${present.length > 1 ? "are" : "is"} already in the data folder: give an empty folder (or none, and the driver makes its own)`);
+}
+
 function assertNoLive(env, source) {
   const live = Object.entries(env).find(([name]) => name.toUpperCase() === "GATEWAY_LIVE_APIS"); // Windows does not distinguish the case of a variable's name
   if (live && String(live[1] ?? "").trim() !== "") throw new UsageError(`${source}: GATEWAY_LIVE_APIS switches on calls to real providers, which these drivers do not make (live calls are Stage 4 and need the owner's decision)`);
@@ -858,7 +915,7 @@ function newRunId() {
 }
 
 module.exports = {
-  REPO_ROOT, SCENARIO_DIR, DEFAULT_PROTOCOL_VERSION, WORKDIR_PREFIX, INHERITED_ENV, SECRET_NAME, MAX_EACH, isWrite,
+  REPO_ROOT, SCENARIO_DIR, DEFAULT_PROTOCOL_VERSION, WORKDIR_PREFIX, INHERITED_ENV, SECRET_NAME, MAX_EACH, MAX_CALLS, isWrite, assertFreshData, dataFiles,
   baseEnv, describeEnv, secretValues, scrub, redact, redactDeep, sameJson,
   makeWorkdir, removeWorkdir, tryRemoveWorkdir, keepWorkdir, dataEnv, entryPoint,
   cleanupNow, ManagedProcess, StdioClient, HttpClient, freePort,

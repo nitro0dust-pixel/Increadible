@@ -71,6 +71,7 @@ async function main(argv) {
   if (remote && (opts["data-dir"] || opts.env || opts.root || opts.keep)) throw new lib.UsageError("--data-dir, --env, --root and --keep belong to the self-contained mode; with --url the server is already running");
   if (!remote && (opts["token-env"] || opts["allow-writes"])) throw new lib.UsageError("--token-env and --allow-writes belong to --url");
   const extra = remote ? {} : lib.parseEnvPairs(opts.env);
+  if (!remote && opts["data-dir"]) lib.assertFreshData(lib.dataFiles(path.resolve(opts["data-dir"])), scenario);
   lib.assertNoLive(extra, "--env");
 
   const notes = [`node: ${process.version}`];

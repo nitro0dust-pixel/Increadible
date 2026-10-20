@@ -1,6 +1,6 @@
 {
   "name": "routing-rules",
-  "description": "The routing rules: the three built-in rules, then a rule set of our own (priority order, ties, a disabled rule, lists, a rule id that is also an Object property), rule sets that are refused and change nothing, and no rules at all. Every expected provider is worked out from the rules written in the scenario. It replaces the server's routing rules, and the server saves them to its rules file, so it runs only against a server the driver starts itself.",
+  "description": "The routing rules: the three built-in rules, then a rule set of our own, sent in an order that disagrees with its priority numbers (so the order is the server's doing: priority order, ties, a disabled rule, lists, a rule id that is also an Object property and its statistics), rule sets that are refused and change nothing, and no rules at all. Every expected provider is worked out from the rules written in the scenario. It replaces the server's routing rules, and the server saves them to its rules file, so it runs only against a server the driver starts itself.",
   "scope": "own-server",
   "steps": [
     {
@@ -143,24 +143,27 @@
       "arguments": {
         "rules": [
           {
-            "id": "first",
+            "id": "tie-a",
             "enabled": true,
-            "priority": 1,
-            "match": {
-              "task_type": "x"
-            },
-            "provider": "p-first",
-            "fallback": [
-              "f0"
-            ],
-            "reason": "first rule"
+            "priority": 5,
+            "match": {},
+            "provider": "p-a"
           },
           {
-            "id": "off",
-            "enabled": false,
-            "priority": 0,
+            "id": "tie-b",
+            "enabled": true,
+            "priority": 5,
             "match": {},
-            "provider": "p-off"
+            "provider": "p-b"
+          },
+          {
+            "id": "constructor",
+            "enabled": true,
+            "priority": 3,
+            "match": {
+              "task_type": "proto"
+            },
+            "provider": "p-ctor"
           },
           {
             "id": "listed",
@@ -180,27 +183,24 @@
             "reason": "listed types"
           },
           {
-            "id": "constructor",
+            "id": "first",
             "enabled": true,
-            "priority": 3,
+            "priority": 1,
             "match": {
-              "task_type": "proto"
+              "task_type": "x"
             },
-            "provider": "p-ctor"
+            "provider": "p-first",
+            "fallback": [
+              "f0"
+            ],
+            "reason": "first rule"
           },
           {
-            "id": "tie-a",
-            "enabled": true,
-            "priority": 5,
+            "id": "off",
+            "enabled": false,
+            "priority": 0,
             "match": {},
-            "provider": "p-a"
-          },
-          {
-            "id": "tie-b",
-            "enabled": true,
-            "priority": 5,
-            "match": {},
-            "provider": "p-b"
+            "provider": "p-off"
           }
         ]
       },
@@ -270,6 +270,21 @@
       }
     },
     {
+      "name": "own rules: the statistics count that rule by its name, as a percentage and not NaN%, and count the rules as sent",
+      "tool": "get_rule_stats",
+      "expect": {
+        "json": {
+          "total_requests": 12,
+          "rules_applied.constructor": 1,
+          "provider_breakdown.p-ctor": {
+            "$matches": "^[0-9]+\\.[0-9]%$"
+          },
+          "rules_count": 6,
+          "enabled_rules": 5
+        }
+      }
+    },
+    {
       "name": "own rules: of two rules with the same number the first in the list wins",
       "tool": "apply_routing_rules",
       "arguments": {
@@ -289,24 +304,27 @@
       "arguments": {
         "rules": [
           {
-            "id": "first",
+            "id": "tie-b",
             "enabled": true,
-            "priority": 1,
-            "match": {
-              "task_type": "x"
-            },
-            "provider": "p-first",
-            "fallback": [
-              "f0"
-            ],
-            "reason": "first rule"
+            "priority": 5,
+            "match": {},
+            "provider": "p-b"
           },
           {
-            "id": "off",
-            "enabled": false,
-            "priority": 0,
+            "id": "tie-a",
+            "enabled": true,
+            "priority": 5,
             "match": {},
-            "provider": "p-off"
+            "provider": "p-a"
+          },
+          {
+            "id": "constructor",
+            "enabled": true,
+            "priority": 3,
+            "match": {
+              "task_type": "proto"
+            },
+            "provider": "p-ctor"
           },
           {
             "id": "listed",
@@ -326,27 +344,24 @@
             "reason": "listed types"
           },
           {
-            "id": "constructor",
+            "id": "first",
             "enabled": true,
-            "priority": 3,
+            "priority": 1,
             "match": {
-              "task_type": "proto"
+              "task_type": "x"
             },
-            "provider": "p-ctor"
+            "provider": "p-first",
+            "fallback": [
+              "f0"
+            ],
+            "reason": "first rule"
           },
           {
-            "id": "tie-b",
-            "enabled": true,
-            "priority": 5,
+            "id": "off",
+            "enabled": false,
+            "priority": 0,
             "match": {},
-            "provider": "p-b"
-          },
-          {
-            "id": "tie-a",
-            "enabled": true,
-            "priority": 5,
-            "match": {},
-            "provider": "p-a"
+            "provider": "p-off"
           }
         ]
       },

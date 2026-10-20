@@ -132,10 +132,11 @@ async function main(argv) {
       const manifest = JSON.parse(fs.readFileSync(path.join(home, "manifest.json"), "utf8"));
       if (manifest.user_config && manifest.user_config.data_directory && settings.data_directory === undefined) settings.data_directory = dataDir;
       const userConfig = resolveUserConfig(manifest, settings);
-      fs.mkdirSync(dataDir, { recursive: true }); // after the settings are known to be valid: a usage error creates nothing in the user's folder
       const config = manifest.server.mcp_config;
       const manifestEnv = Object.fromEntries(Object.entries(config.env || {}).map(([k, v]) => [k, substitute(v, home, userConfig)]));
       lib.assertNoLive(manifestEnv, "the manifest's environment");
+      lib.assertFreshData([manifestEnv.RULES_FILE, manifestEnv.EXPERIMENTS_FILE, manifestEnv.AB_DATA_FILE], scenario);
+      fs.mkdirSync(dataDir, { recursive: true }); // after the settings are known to be valid and the folder is known to be fit: a usage error creates nothing in the user's folder
       const env = lib.baseEnv(manifestEnv);
       const command = config.command === "node" ? opts.node || process.execPath : config.command;
       const args = (config.args || []).map((a) => substitute(a, home, userConfig));

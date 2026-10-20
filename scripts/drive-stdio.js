@@ -28,6 +28,7 @@ async function main(argv) {
   const scenario = lib.loadScenario(opts.scenario || "basic");
   const version = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8")).version;
 
+  if (opts["data-dir"]) lib.assertFreshData(lib.dataFiles(path.resolve(opts["data-dir"])), scenario);
   const own = !opts["data-dir"];
   const dir = own ? lib.makeWorkdir() : path.resolve(opts["data-dir"]);
   try {

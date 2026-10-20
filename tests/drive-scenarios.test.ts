@@ -133,7 +133,8 @@ describe("what a writing step writes (writes)", () => {
 
   describe("and what the package driver looks for afterwards (dataChecks)", () => {
     const bundleDriver = require("../scripts/drive-bundle.js");
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "datachecks-kinds-"));
+    let dir = "";
+    beforeAll(() => { dir = fs.mkdtempSync(path.join(os.tmpdir(), "datachecks-kinds-")); });
     afterAll(() => fs.rmSync(dir, { recursive: true, force: true }));
     const file = (name: string, content?: string) => { const f = path.join(dir, name); if (content !== undefined) fs.writeFileSync(f, content); else fs.rmSync(f, { force: true }); return f; };
     const verdict = (steps: any[]) => Object.fromEntries(steps.map((s: any) => [s.name, s]));
@@ -177,6 +178,164 @@ describe("what a writing step writes (writes)", () => {
   });
 });
 
+describe("variables in a scenario (the review's findings)", () => {
+  it("looks inside a saved value or the value of a loop with a dotted name, and keeps the type when the whole string is the name", () => {
+    const vars = { each: { user: "u1", n: 7, nested: { deep: [10, 20] } }, run_id: "R1" };
+    expect(lib.substitute("${each.user}", vars)).toBe("u1");
+    expect(lib.substitute("${each.n}", vars)).toBe(7);
+    expect(lib.substitute("${each.nested.deep.1}", vars)).toBe(20);
+    expect(lib.substitute("user-${each.user}-${run_id}", vars)).toBe("user-u1-R1");
+    expect(lib.substitute({ a: ["${each.n}"], b: { c: "${each.nested}" } }, vars)).toEqual({ a: [7], b: { c: { deep: [10, 20] } } });
+  });
+
+  it("says what is missing: a variable nobody saved, or a field the value does not have", () => {
+    expect(() => lib.substitute("${nope}", {})).toThrow("unknown variable ${nope} (no earlier step saved it)");
+    expect(() => lib.substitute("${each.nope}", { each: { user: "u1" } })).toThrow("unknown variable ${each.nope} (the value of each has nothing at nope)");
+    expect(() => lib.substitute("a ${x.y} b", { x: {} })).toThrow(/unknown variable \$\{x\.y\}/);
+  });
+
+  it("looks at the variables' own properties only: ${constructor} and ${toString} are unknown, not Object's functions", () => {
+    for (const name of ["constructor", "toString", "hasOwnProperty", "__proto__"]) expect(() => lib.substitute("${" + name + "}", {})).toThrow(/unknown variable/);
+    expect(() => lib.substitute("${each.constructor}", { each: {} })).toThrow(/unknown variable/);
+    expect(lib.substitute("${hasOwnProperty}", { hasOwnProperty: "mine" })).toBe("mine"); // a saved variable of that name is a variable
+  });
+
+  it("substitutes the keys of objects too, so an expectation's path can name the place in a loop", () => {
+    expect(lib.substitute({ "apis.${index}.id": { $exists: false } }, { index: 3 })).toEqual({ "apis.3.id": { $exists: false } });
+    expect(lib.substitute({ "k-${each}": 1 }, { each: "z" })).toEqual({ "k-z": 1 });
+  });
+
+  it("makes an expectation with the place in its path check the right place (it used to look for the text ${index})", async () => {
+    const answer = (n: number) => ({ jsonrpc: "2.0", result: { content: [{ type: "text", text: JSON.stringify({ apis: [{ id: "a" }, { id: "b" }, { id: "c" }], n }) }], isError: false } });
+    const client = { rpc: async () => answer(1) };
+    const ok = await lib.runScenario(client, lib.validateScenario({ name: "t", steps: [{ name: "s", tool: "t", each: [0, 1, 2], expect: { json: { "apis.${index}.id": { $type: "string" } } } }] }), {});
+    expect(ok.ok).toBe(true);
+    const never = await lib.runScenario(client, lib.validateScenario({ name: "t", steps: [{ name: "s", tool: "t", each: [0, 1], expect: { json: { "apis.${index}.id": { $exists: false } } } }] }), {});
+    expect(never.ok).toBe(false); // the id is there at every place: a check that "it is absent" must fail, whatever the path says
+    expect(never.steps[0].problems[0]).toMatch(/json\.apis\.0\.id: expected \$exists false/);
+  });
+
+  it("does not let a step save a name the runner uses itself", () => {
+    for (const name of ["each", "index", "run_id"]) {
+      expect(() => lib.validateScenario({ name: "t", steps: [{ name: "s", tool: "t", save: { [name]: "x" } }] })).toThrow(`"save" cannot name "${name}"`);
+    }
+    expect(() => lib.validateScenario({ name: "t", steps: [{ name: "s", tool: "t", save: { mine: "x" } }] })).not.toThrow();
+  });
+});
+
+describe("the same request twice (same_again)", () => {
+  const text = (value: unknown) => ({ jsonrpc: "2.0", result: { content: [{ type: "text", text: JSON.stringify(value) }], isError: false } });
+  const run = (client: any, step: object) => lib.runScenario(client, lib.validateScenario({ name: "t", steps: [{ name: "s", tool: "t", ...step }] }), {});
+
+  it("passes when the second answer is the first one, and sends exactly two requests", async () => {
+    const calls: number[] = [];
+    const client = { rpc: async () => { calls.push(1); return text({ variant: "A" }); } };
+    const out = await run(client, { same_again: true, expect: { json: { variant: "A" } } });
+    expect(out.ok).toBe(true);
+    expect(calls).toHaveLength(2);
+  });
+
+  it("fails when the second answer differs, showing both", async () => {
+    let n = 0;
+    const out = await run({ rpc: async () => text({ variant: n++ % 2 ? "B" : "A" }) }, { same_again: true });
+    expect(out.ok).toBe(false);
+    expect(out.steps[0].problems[0]).toMatch(/^the same request, sent again, was answered differently: .*"variant\\":\\"A.* then .*"variant\\":\\"B/);
+  });
+
+  it("does not send the second request when the first answer was malformed or the step has no same_again", async () => {
+    const calls: number[] = [];
+    await run({ rpc: async () => { calls.push(1); return { result: {} }; } }, { same_again: true });
+    expect(calls).toHaveLength(1);
+    const plain: number[] = [];
+    await run({ rpc: async () => { plain.push(1); return text({}); } }, {});
+    expect(plain).toHaveLength(1);
+  });
+
+  it("compares error answers too, and reports a second request that gets no answer", async () => {
+    const same = await run({ rpc: async () => ({ jsonrpc: "2.0", error: { code: -32601, message: "no" } }) }, { tool: undefined, method: "x", same_again: true, expect: { rpc_error: -32601 } });
+    expect(same.ok).toBe(true);
+    let n = 0;
+    const out = await run({ rpc: async () => { if (n++ === 1) throw new Error("no answer to tools/call within 20000 ms"); return text({}); } }, { same_again: true });
+    expect(out.ok).toBe(false);
+    expect(out.steps[0].problems[0]).toContain("no answer to tools/call");
+  });
+
+  it("must be true or false", () => {
+    for (const bad of ["yes", 1, null, {}]) expect(() => lib.validateScenario({ name: "t", steps: [{ name: "s", tool: "t", same_again: bad }] })).toThrow(/"same_again" must be true or false/);
+  });
+});
+
+describe("a loop that cannot run, or runs too long (the review's findings)", () => {
+  const text = { jsonrpc: "2.0", result: { content: [{ type: "text", text: "{}" }], isError: false } };
+  const run = (client: any, steps: any[], options: any = {}) => lib.runScenario(client, lib.validateScenario({ name: "t", steps }), options);
+
+  it("says the scenario is wrong, sends nothing and stops at once for an unknown variable: not 'the server gave no answer'", async () => {
+    let sent = 0;
+    const out = await run({ rpc: async () => { sent++; return text; } }, [{ name: "s", tool: "t", each: ["a", "b", "c"], arguments: { q: "${nope}" } }]);
+    expect(sent).toBe(0);
+    expect(out.steps[0].summary).toBe("1 of 3 calls failed");
+    expect(out.steps[0].problems.join("\n")).toContain("unknown variable ${nope}");
+    expect(out.steps[0].problems.join("\n")).toContain("stopped after call 1 of 3: the scenario is wrong, so no call was sent");
+    expect(out.steps[0].problems.join("\n")).not.toContain("gave no answer");
+  });
+
+  it("still says the server gave no answer when the request itself fails, and a plain step with an unknown variable says scenario error", async () => {
+    const down = await run({ rpc: async () => { throw new Error("socket hang up"); } }, [{ name: "s", tool: "t", each: [1, 2, 3] }]);
+    expect(down.steps[0].problems.join("\n")).toContain("stopped after call 1 of 3: the server gave no answer");
+    const plain = await run({ rpc: async () => text }, [{ name: "s", tool: "t", arguments: { q: "${nope}" } }]);
+    expect(plain.steps[0].summary).toBe("scenario error");
+  });
+
+  it("stops a looped step that has used up its time budget, saying how far it got", async () => {
+    let n = 0;
+    const slow = { rpc: async () => { n++; await new Promise((r) => setTimeout(r, 25)); return text; } };
+    const out = await run(slow, [{ name: "s", tool: "t", each: Array.from({ length: 40 }, (_, i) => i) }], { eachBudgetMs: 120 });
+    expect(n).toBeLessThan(40);
+    expect(n).toBeGreaterThanOrEqual(3);
+    expect(out.ok).toBe(false);
+    expect(out.steps[0].problems.join("\n")).toMatch(new RegExp(`stopped after ${n} of 40 calls: the step used up its time budget \\(0 s\\)`));
+  });
+
+  it("refuses a scenario that makes more than 5000 requests in all, however they are spread over the steps", () => {
+    expect(lib.MAX_CALLS).toBe(5000);
+    const loop = (n: number, name: string) => ({ name, tool: "t", each: Array.from({ length: n }, (_, i) => i) });
+    expect(() => lib.validateScenario({ name: "t", steps: [loop(1000, "a"), loop(1000, "b"), loop(1000, "c"), loop(1000, "d"), loop(1000, "e")] })).not.toThrow(); // 5000
+    expect(() => lib.validateScenario({ name: "t", steps: [loop(1000, "a"), loop(1000, "b"), loop(1000, "c"), loop(1000, "d"), loop(1000, "e"), { name: "f", tool: "t" }] })).toThrow(/the steps make 5001 requests in all; at most 5000 per scenario/);
+  });
+});
+
+describe("a folder that already holds the server's data (the review's first finding)", () => {
+  const writing = lib.validateScenario({ name: "w", scope: "own-server", steps: [{ name: "s", tool: "t", writes: "rules" }] });
+  const reading = lib.validateScenario({ name: "r", scope: "own-server", steps: [{ name: "s", tool: "t" }] });
+  const basic = lib.validateScenario({ name: "b", steps: [{ name: "s", tool: "t", writes: true }] });
+  let dir = "";
+  beforeAll(() => { dir = fs.mkdtempSync(path.join(os.tmpdir(), "fresh-data-test-")); });
+  afterAll(() => fs.rmSync(dir, { recursive: true, force: true }));
+
+  it("lists the three files the server would use in a work directory", () => {
+    expect(lib.dataFiles("/d").map((f: string) => path.basename(f)).sort()).toEqual(["ab-data.jsonl", "experiments.yaml", "rules.yaml"]);
+  });
+
+  it("refuses an own-server scenario that writes when any of them is there, naming it", () => {
+    const folder = fs.mkdtempSync(path.join(dir, "used-"));
+    expect(() => lib.assertFreshData(lib.dataFiles(folder), writing)).not.toThrow(); // empty folder
+    fs.writeFileSync(path.join(folder, "rules.yaml"), "rules: []\n");
+    expect(() => lib.assertFreshData(lib.dataFiles(folder), writing)).toThrow(/rules\.yaml is already in the data folder: give an empty folder/);
+    fs.writeFileSync(path.join(folder, "ab-data.jsonl"), "{}\n");
+    expect(() => lib.assertFreshData(lib.dataFiles(folder), writing)).toThrow(/ab-data\.jsonl and rules\.yaml are already in the data folder|rules\.yaml and ab-data\.jsonl are already in the data folder/);
+    expect(() => lib.assertFreshData(lib.dataFiles(folder), writing)).toThrow(lib.UsageError);
+  });
+
+  it("lets a scenario through that does not write, one that is not own-server, and a folder that does not exist yet", () => {
+    const folder = fs.mkdtempSync(path.join(dir, "used2-"));
+    fs.writeFileSync(path.join(folder, "rules.yaml"), "rules: []\n");
+    expect(() => lib.assertFreshData(lib.dataFiles(folder), reading)).not.toThrow();
+    expect(() => lib.assertFreshData(lib.dataFiles(folder), basic)).not.toThrow();
+    expect(() => lib.assertFreshData(lib.dataFiles(path.join(dir, "nope")), writing)).not.toThrow();
+    expect(() => lib.assertFreshData([undefined, undefined, undefined], writing)).not.toThrow();
+  });
+});
+
 describe("the tolerance matcher ($near)", () => {
   it("accepts a number within the tolerance on either side, boundaries included, and nothing else", () => {
     const near = { $near: [12.9, 0.5] };
@@ -184,6 +343,12 @@ describe("the tolerance matcher ($near)", () => {
     for (const bad of [12.3999, 13.4001, 0, -12.9]) expect(lib.matchValue(bad, near)).toMatch(/expected \$near \[12\.9,0\.5\], got /);
     for (const notNumber of ["12.9", null, undefined, [12.9], { a: 1 }, true]) expect(lib.matchValue(notNumber, near)).not.toBeNull();
     expect(lib.matchValue(5, { $near: [5, 0] })).toBeNull(); // a tolerance of 0 is an exact number
+    // "ends included" holds for numbers that are not exactly representable too: 1.1 - 1.0 is 0.10000000000000009 in floating point
+    expect(lib.matchValue(1.0, { $near: [1.1, 0.1] })).toBeNull();
+    expect(lib.matchValue(1.2, { $near: [1.1, 0.1] })).toBeNull();
+    expect(lib.matchValue(0.7, { $near: [0.8, 0.1] })).toBeNull();
+    expect(lib.matchValue(1.2001, { $near: [1.1, 0.1] })).not.toBeNull();
+    expect(lib.matchValue(0.9999, { $near: [1.1, 0.1] })).not.toBeNull();
     expect(lib.matchValue(5.0000001, { $near: [5, 0] })).not.toBeNull();
   });
 
@@ -330,6 +495,47 @@ describe("the shipped scenarios pass against the server as it is", () => {
   });
 });
 
+describe("a driver refuses to start a writing own-server scenario on a folder that already holds the server's data", () => {
+  const mcpb = require("../scripts/mcpb.js");
+  const pkg = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8"));
+  const bundle = path.join(tmp, "bundle3", `${pkg.name}-${pkg.version}.mcpb`);
+  beforeAll(() => { fs.mkdirSync(path.dirname(bundle)); mcpb.build(bundle); }, 240_000);
+  const used = (name: string, files: Record<string, string>) => {
+    const dir = path.join(tmp, name);
+    fs.mkdirSync(dir);
+    for (const [file, content] of Object.entries(files)) fs.writeFileSync(path.join(dir, file), content);
+    return dir;
+  };
+  const drivers: Array<[string, string[]]> = [["drive-stdio.js", ["--root", server]], ["drive-http.js", ["--root", server]], ["drive-bundle.js", ["--bundle", bundle]]];
+
+  for (const [script, extra] of drivers) {
+    it(`${script}: exit 2, the folder untouched, the reason named`, () => {
+      const dir = used("used-" + script, { "rules.yaml": "rules: [] # the user's own\n" });
+      const ran = drive(script, [...extra, "--scenario", "routing-rules", "--data-dir", dir]);
+      expect(ran.status).toBe(2);
+      expect(ran.stderr).toContain('the scenario "routing-rules" writes data and replaces the routing rules of the server it starts, and rules.yaml is already in the data folder');
+      expect(fs.readdirSync(dir)).toEqual(["rules.yaml"]);
+      expect(fs.readFileSync(path.join(dir, "rules.yaml"), "utf8")).toBe("rules: [] # the user's own\n");
+    });
+  }
+
+  it("but the scenarios that do not write, and the basic one, still run in a used folder", () => {
+    const dir = used("used-ok", { "ab-data.jsonl": "" });
+    expect(drive("drive-stdio.js", ["--root", server, "--scenario", "gateway", "--data-dir", dir]).status).toBe(0);
+    expect(drive("drive-stdio.js", ["--root", server, "--scenario", "basic", "--data-dir", dir]).status).toBe(0);
+  });
+
+  it("and a folder that does not exist yet is made and used, once: the second run into it is refused", () => {
+    const dir = path.join(tmp, "made-by-the-driver");
+    const first = drive("drive-stdio.js", ["--root", server, "--scenario", "routing-rules", "--data-dir", dir]);
+    expect(first.status).toBe(0);
+    expect(fs.existsSync(path.join(dir, "rules.yaml"))).toBe(true);
+    const again = drive("drive-stdio.js", ["--root", server, "--scenario", "routing-rules", "--data-dir", dir]);
+    expect(again.status).toBe(2);
+    expect(again.stderr).toContain("already in the data folder");
+  });
+});
+
 describe("a driver that starts no server of its own refuses a scenario that changes one", () => {
   it("drive-http --url: exit 2, the reason named, and nothing sent", () => {
     for (const name of ["gateway", "ab-statistics", "routing-rules"]) {
@@ -364,6 +570,21 @@ describe("routing-rules notices a server that routes wrongly", () => {
     expect(ran.status).toBe(1);
     expect(failing(ran)).toEqual(expect.arrayContaining(["built-in: a low-complexity summary does too (a list of task types)", "own rules: a list matches any of its values (z)"]));
   });
+  it("rules that are not sorted by their priority numbers (the scenario sends them out of order)", () => {
+    const ran = broken(ROUTING, "const sorted = [...newRules].sort((a, b) => a.priority - b.priority);", "const sorted = [...newRules];", run);
+    expect(ran.status).toBe(1);
+    expect(failing(ran)).toContain("own rules: the lowest number among the enabled rules wins (a disabled rule with an even lower number and an empty match is skipped)");
+  });
+  it("statistics that count a disabled rule as enabled", () => {
+    const ran = broken(ROUTING, "enabled_rules: this.rules.filter((r) => r.enabled).length,", "enabled_rules: this.rules.length,", run);
+    expect(ran.status).toBe(1);
+    expect(failing(ran)).toContain("own rules: the statistics count that rule by its name, as a percentage and not NaN%, and count the rules as sent");
+  });
+  it("a provider share that is not a number", () => {
+    const ran = broken(ROUTING, "breakdown[provider] = `${percentage.toFixed(1)}%`;", 'breakdown[provider] = "NaN%";', run);
+    expect(ran.status).toBe(1);
+    expect(failing(ran)).toContain("own rules: the statistics count that rule by its name, as a percentage and not NaN%, and count the rules as sent");
+  });
   it("a refused rule set that is applied anyway", () => {
     const ran = broken(ROUTING, "const problem = rulesProblem(newRules);\n        if (problem)\n            throw new Error(problem);", "const problem = null;", run);
     expect(ran.status).toBe(1);
@@ -389,6 +610,21 @@ describe("ab-statistics notices a server that computes wrongly", () => {
     expect(ran.status).toBe(1);
     expect(failing(ran)).toContain(results);
   });
+  it("a winner announced without significance", () => {
+    const ran = broken(AB, "adjusted.get(x.k) < SIGNIFICANCE_LEVEL && means[leader] !== means[x.other]", "means[leader] !== means[x.other]", run);
+    expect(ran.status).toBe(1);
+    expect(failing(ran)).toEqual(expect.arrayContaining(["results: a leader that is not significant is not a winner", "no clear winner for it either"]));
+  });
+  it("users given a random variant each time", () => {
+    const ran = broken(AB, "? bucket(`${experimentId}:${userId}`)", "? bucket(`${experimentId}:${Math.random()}`)", run);
+    expect(ran.status).toBe(1);
+    expect(failing(ran)).toContain("assignment: 16 users get the variants recorded for them, and the same one again when asked a second time");
+  });
+  it("every user given the same variant", () => {
+    const ran = broken(AB, "function bucket(key) {", "function bucket(key) { return 0;", run);
+    expect(ran.status).toBe(1);
+    expect(failing(ran)).toContain("assignment: 16 users get the variants recorded for them, and the same one again when asked a second time");
+  });
   it("the wrong variant named the winner", () => {
     const ran = broken(AB, "winner = vs[leader].id;", "winner = vs[0].id;", run);
     expect(ran.status).toBe(1);
@@ -401,21 +637,52 @@ describe("gateway notices a server that answers wrongly", () => {
   it("a cache that never hits", () => {
     const ran = broken(GATEWAY, "const cached = this.getFromCache(cacheKey);", "const cached = null;", run);
     expect(ran.status).toBe(1);
-    expect(failing(ran)).toEqual(expect.arrayContaining(["the same call again is answered from the cache", "statistics: the server counted what the driver asked for"]));
+    expect(failing(ran)).toEqual(expect.arrayContaining(["the same call again is answered from the cache", "statistics: the server counted what the driver asked for, API by API"]));
   });
   it("a counter that does not count", () => {
     const ran = broken(GATEWAY, "this.stats.successful++;", "", run);
     expect(ran.status).toBe(1);
-    expect(failing(ran)).toEqual(["statistics: the server counted what the driver asked for"]);
+    expect(failing(ran)).toEqual(["statistics: the server counted what the driver asked for, API by API"]);
   });
   it("an error message that is not the one the tool names", () => {
     const ran = broken(GATEWAY, 'return JSON.stringify({ error: "query must be a string" });', 'return JSON.stringify({ error: "bad query" });', run);
     expect(ran.status).toBe(1);
     expect(failing(ran)).toEqual(["discover: a query that is not text"]);
   });
+  const partial = "aggregate: one call fails, the others keep their answers, in the order asked, and the reply is not an error";
+  it("one failed call that turns the whole aggregation into an error", () => {
+    const ran = broken(GATEWAY, "if (results.length > 0 && failed === results.length) {", "if (results.length > 0 && failed > 0) {", run);
+    expect(ran.status).toBe(1);
+    expect(failing(ran)).toContain(partial);
+  });
+  it("aggregated answers in the wrong order", () => {
+    const ran = broken(GATEWAY, "return JSON.stringify({ data: results, count: results.length, ...(failed > 0 ? { failed } : {}) });", "return JSON.stringify({ data: [...results].reverse(), count: results.length, ...(failed > 0 ? { failed } : {}) });", run);
+    expect(ran.status).toBe(1);
+    expect(failing(ran)).toContain(partial);
+  });
+  it("an aggregation that does not say how many calls failed", () => {
+    const ran = broken(GATEWAY, "...(failed > 0 ? { failed } : {})", "...{}", run);
+    expect(ran.status).toBe(1);
+    expect(failing(ran)).toContain(partial);
+  });
+  it("a cache that ignores the params", () => {
+    const ran = broken(GATEWAY, "const rawKey = `${apiId}:${endpoint}:${JSON.stringify(params)}`;", "const rawKey = `${apiId}:${endpoint}`;", run);
+    expect(ran.status).toBe(1);
+    expect(failing(ran)).toContain("params make a different call: {id: 2} is not answered with the first one's data");
+  });
+  it("calls counted under the wrong API", () => {
+    const ran = broken(GATEWAY, "this.stats.api_distribution[apiId] =\n                (this.stats.api_distribution[apiId] || 0) + 1;", 'const k = apiId === "finnhub" ? "misattributed" : apiId; this.stats.api_distribution[k] = (this.stats.api_distribution[k] || 0) + 1;', run);
+    expect(ran.status).toBe(1);
+    expect(failing(ran)).toContain("statistics: the server counted what the driver asked for, API by API");
+  });
+  it("exactly 100 calls refused as too many", () => {
+    const ran = broken(GATEWAY, "if (apis.length > exports.MAX_AGGREGATE_CALLS)", "if (apis.length >= exports.MAX_AGGREGATE_CALLS)", run);
+    expect(ran.status).toBe(1);
+    expect(failing(ran)).toContain("aggregate: exactly 100 calls in one request are accepted");
+  });
   it("an aggregation limit that is too high", () => {
     const ran = broken(GATEWAY, "exports.MAX_AGGREGATE_CALLS = 100;", "exports.MAX_AGGREGATE_CALLS = 1000;", run);
     expect(ran.status).toBe(1);
-    expect(failing(ran)).toContain("aggregate: more than 100 calls in one request");
+    expect(failing(ran)).toContain("aggregate: 101 calls in one request are refused");
   });
 });
