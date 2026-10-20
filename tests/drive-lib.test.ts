@@ -636,3 +636,76 @@ describe("the stdio client and its stdout (T-10, SEC-08)", () => {
     expect(stray.problems[0]).toBe("stdout text without a line break at the end: goodbye without a newline");
   });
 });
+
+describe("scenario validation, the rules about what a step can evaluate (T-04, D-03, T-13, T-16)", () => {
+  const step = (extra: object) => ({ name: "s", steps: [{ name: "x", method: "ping", ...extra }] });
+  const refused = (scenario: object) => { try { lib.validateScenario(scenario, "t.json"); return ""; } catch (e) { return (e as Error).message; } };
+
+  it("refuses an expectation that this kind of step can never evaluate, naming file and step", () => {
+    const cases: Array<[string, object, RegExp]> = [
+      ["json on a method step", step({ expect: { json: { a: 1 } } }), /"json" applies to a tool step/],
+      ["contains on a method step", step({ expect: { contains: "x" } }), /"contains" applies to a tool step/],
+      ["tool_error on a method step", step({ expect: { tool_error: true } }), /"tool_error" applies to a tool step/],
+      ["message_contains without rpc_error", step({ expect: { message_contains: "x" } }), /"message_contains" needs "rpc_error"/],
+      ["json next to rpc_error (on a tool step)", step({ method: undefined, tool: "t", expect: { rpc_error: -32602, json: { a: 1 } } }), /"json" cannot go with "rpc_error"/],
+      ["result next to rpc_error", step({ expect: { rpc_error: -32601, result: { a: 1 } } }), /"result" cannot go with "rpc_error"/],
+      ["tools_include next to rpc_error", step({ method: "tools/list", expect: { rpc_error: -32601, tools_include: ["a"] } }), /"tools_include" cannot go with "rpc_error"/],
+      ["save next to rpc_error", step({ save: { a: "b" }, expect: { rpc_error: -32601 } }), /"save" cannot go with "rpc_error"/],
+      ["tools_include on another method", step({ expect: { tools_include: ["a"] } }), /"tools_include" applies to the method "tools\/list"/],
+      ["params on a tool step", step({ method: undefined, tool: "t", params: {} }), /"params" belongs to a method step/],
+      ["arguments on a method step", step({ arguments: {} }), /"arguments" belongs to a tool step/],
+      ["a regular expression that does not compile", step({ method: undefined, tool: "t", expect: { json: { a: { $matches: "(" } } } }), /json\.a: \$matches is not a regular expression/],
+      ["rpc_error that is not an integer", step({ expect: { rpc_error: "-32601" } }), /"rpc_error" must be an integer code/],
+      ["message_contains that is not a string", step({ expect: { rpc_error: -1, message_contains: 5 } }), /"message_contains" must be a string/],
+      ["tool_error that is not a boolean", step({ method: undefined, tool: "t", expect: { tool_error: "yes" } }), /"tool_error" must be true or false/],
+      ["contains that is not a string", step({ method: undefined, tool: "t", expect: { contains: 5 } }), /"contains" must be a string/],
+      ["tools_include that is not a list of names", step({ method: "tools/list", expect: { tools_include: "a" } }), /"tools_include" must be a list of tool names/],
+      ["json as a list", step({ method: undefined, tool: "t", expect: { json: [] } }), /"json" must map dotted paths to values/],
+      ["expect that is not an object", step({ expect: [] }), /"expect" must be an object/],
+      ["save that is not a map of paths", step({ save: { a: 1 } }), /"save" must map names to dotted paths/],
+      ["method that is not a string", step({ method: 5 }), /"method" must be a string/],
+    ];
+    for (const [what, scenario, message] of cases) expect({ what, error: refused(scenario) }).toEqual({ what, error: expect.stringMatching(message) });
+    for (const [what, scenario] of cases) expect({ what, names: refused(scenario) }).toEqual({ what, names: expect.stringContaining("t.json: step 1 (x)") });
+  });
+
+  it("accepts what each kind of step can evaluate", () => {
+    const fine: object[] = [
+      step({ expect: { result: { a: 1 } } }),
+      step({ expect: { rpc_error: -32601, message_contains: "not found" } }),
+      step({ method: "tools/list", expect: { tools_include: ["a"], result: { "tools.0.name": "a" } } }),
+      step({ method: "tools/call", params: { name: "t" }, expect: { json: { a: 1 }, contains: "x", tool_error: false } }),
+      step({ method: undefined, tool: "t", save: { v: "a" }, expect: { json: { a: { $matches: "^x$" } } } }),
+    ];
+    for (const scenario of fine) expect(refused(scenario)).toBe("");
+  });
+
+  describe("loadScenario", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "drive-scn-"));
+    afterAll(() => fs.rmSync(dir, { recursive: true, force: true }));
+
+    it("treats a value with a separator or ending in .json as a file, and anything else as a shipped name, whatever is in the current directory", () => {
+      const own = path.join(dir, "own.json");
+      fs.writeFileSync(own, JSON.stringify({ name: "own", steps: [{ name: "p", method: "ping" }] }));
+      expect(lib.loadScenario(own).name).toBe("own");
+      const cwd = process.cwd();
+      fs.writeFileSync(path.join(dir, "basic"), "not a scenario");
+      process.chdir(dir);
+      try {
+        expect(lib.loadScenario("basic").name).toBe("basic"); // the shipped one, not the file called "basic" here
+        expect(lib.loadScenario("./own.json").name).toBe("own");
+      } finally {
+        process.chdir(cwd);
+      }
+    });
+
+    it("names the file in the error for invalid JSON, a directory and a missing file", () => {
+      const broken = path.join(dir, "broken.json");
+      fs.writeFileSync(broken, "{ not json");
+      expect(() => lib.loadScenario(broken)).toThrow(new RegExp(`${broken.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}: not valid JSON`));
+      expect(() => lib.loadScenario(dir + path.sep)).toThrow(dir);
+      expect(() => lib.loadScenario(path.join(dir, "missing.json"))).toThrow(/no scenario .*missing\.json/);
+      expect(() => lib.loadScenario("no-such-name")).toThrow(/no scenario "no-such-name" \(looked for .*drive-scenarios\/no-such-name\.json\)/);
+    });
+  });
+});
