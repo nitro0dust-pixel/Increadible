@@ -617,6 +617,7 @@ describe("the HTTP client's limits (T-11, T-12, SEC-05)", () => {
     server = http.createServer((req, res) => {
       req.resume();
       if (req.url === "/big") { res.write("x".repeat(3000)); res.end("y".repeat(3000)); return; }
+      if (req.url === "/endless") { const t = setInterval(() => res.write("x".repeat(1000)), 5); res.on("close", () => clearInterval(t)); return; }
       if (req.url === "/drip") { res.write("{"); const t = setInterval(() => res.write(" "), 40); res.on("close", () => clearInterval(t)); return; }
       if (req.url === "/escaped") { res.end('{"jsonrpc":"2.0","id":1,"note":"bad \\u0073ecret-value-123"}'); return; }
       if (req.url === "/cut") { res.setHeader("Content-Length", "100"); res.write("short"); setTimeout(() => res.destroy(), 30); return; }
@@ -631,6 +632,13 @@ describe("the HTTP client's limits (T-11, T-12, SEC-05)", () => {
     const c = new lib.HttpClient({ baseUrl: base, maxBytes: 4096 });
     await expect(c.request("GET", "/big")).rejects.toThrow("is larger than 4096 bytes");
     expect((await c.request("GET", "/ok")).status).toBe(200);
+  });
+
+  it("stops reading an answer that never ends as soon as it is over the limit, instead of draining it until the deadline (round 3)", async () => {
+    const c = new lib.HttpClient({ baseUrl: base, maxBytes: 4096, timeoutMs: 8000 });
+    const started = Date.now();
+    await expect(c.request("GET", "/endless")).rejects.toThrow("is larger than 4096 bytes");
+    expect(Date.now() - started).toBeLessThan(3000);
   });
 
   it("holds the whole exchange to its deadline, also when the server keeps sending (not only when it falls silent)", async () => {
