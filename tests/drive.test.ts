@@ -747,6 +747,12 @@ describe("the review's findings", () => {
         expect(other[0].problems[0]).toMatch(/does not contain this run \(RUN1\)/);
       });
 
+      it("fails an empty file on its own account too: a scenario that does not use the run id has no other way to notice that nothing was written (round 3)", () => {
+        const empty = bundleDriver.dataChecks(file("empty-noid.jsonl", ""), noRunId, "RUN1");
+        expect(verdict(empty)["data landed in the chosen folder"]).toBe(false);
+        expect(empty[0].problems[0]).toMatch(/is empty/);
+      });
+
       it("holds the file to this run's id only when a step that WRITES uses it (R-08: the id may appear in a read step, such as a gateway call)", () => {
         const mixed = { name: "s", steps: [{ name: "call", tool: "c", arguments: { driver_run: "${run_id}" } }, { name: "w", tool: "t", writes: true, arguments: { id: "fixed-id" } }] };
         const steps = bundleDriver.dataChecks(file("mixed.jsonl", '{"id":"fixed-id"}\n'), mixed, "RUN1");

@@ -404,6 +404,17 @@ describe("the stdio client against fake servers", () => {
     await proc.stop({ stdinFirst: true, graceMs: 1000 });
     expect(proc.stderrText()).toBe("token is <hidden> ok\n");
   });
+
+  it("hides the secret first and cuts the tail afterwards, so a cut through the secret cannot leave half of it showing (round 3)", async () => {
+    const script = path.join(dir, "noisy-cut.js");
+    fs.writeFileSync(script, 'console.error("x".repeat(50) + " token the-secret-value end"); process.stdin.on("end", () => process.exit(0)); process.stdin.resume();');
+    const proc = new lib.ManagedProcess({ args: [script], env: lib.baseEnv({}), secrets: ["the-secret-value"] });
+    await new Promise((r) => setTimeout(r, 300));
+    await proc.stop({ stdinFirst: true, graceMs: 1000 });
+    // 14 characters from the end would start inside "the-secret-value" (at "ret-value end") if the cut came first
+    expect(proc.stderrText(14)).toBe(" <hidden> end\n");
+    expect(proc.stderrText(14)).not.toContain("ret-value");
+  });
 });
 
 describe("driveStdio against fake servers", () => {
@@ -607,6 +618,7 @@ describe("the HTTP client's limits (T-11, T-12, SEC-05)", () => {
       req.resume();
       if (req.url === "/big") { res.write("x".repeat(3000)); res.end("y".repeat(3000)); return; }
       if (req.url === "/drip") { res.write("{"); const t = setInterval(() => res.write(" "), 40); res.on("close", () => clearInterval(t)); return; }
+      if (req.url === "/escaped") { res.end('{"jsonrpc":"2.0","id":1,"note":"bad \\u0073ecret-value-123"}'); return; }
       if (req.url === "/cut") { res.setHeader("Content-Length", "100"); res.write("short"); setTimeout(() => res.destroy(), 30); return; }
       res.end("{}");
     });
@@ -626,6 +638,13 @@ describe("the HTTP client's limits (T-11, T-12, SEC-05)", () => {
     const started = Date.now();
     await expect(c.request("GET", "/drip")).rejects.toThrow("no answer to GET /drip within 250 ms");
     expect(Date.now() - started).toBeLessThan(2000);
+  });
+
+  it("hides a secret the server wrote as a JSON escape (\\u0073 for s) in the parsed answer: the answer is parsed first, then hidden value by value (round 3)", async () => {
+    const c = new lib.HttpClient({ baseUrl: base, secrets: ["secret-value-123"] });
+    const res = await c.request("GET", "/escaped");
+    expect(res.json.note).toBe("bad <hidden>");
+    expect(JSON.stringify(res.json)).not.toContain("secret-value-123");
   });
 
   it("reports an answer that was cut off, naming the request", async () => {
