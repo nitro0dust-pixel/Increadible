@@ -31,6 +31,7 @@ Node 22 or newer (24 recommended). On Windows the `*.sh` scripts need Git Bash o
 | `npm test` | Jest (`-- --coverage` for coverage); fails if a document drifts from the code (`tests/config.test.ts`) |
 | `npm run build`, `npm run smoke` | compile to `dist/`; real processes over stdio and HTTP |
 | `bash scripts/cleanroom.sh [commit]` | `verify` on exactly what is committed, after `npm ci`; use it for any claim of the form "it passes on commit X" |
+| `npm run drive:stdio`, `drive:http`, `drive:probe`, `drive:bundle` | the request drivers ([docs/DRIVERS.md](docs/DRIVERS.md)): real calls to the built server over stdio and HTTP, a protocol probe, and the Desktop package. Run them after a change to a transport, to the server's answers or to the package; the probe's records fail on purpose when a recorded behaviour changes, and the same pull request updates them |
 | `node scripts/skill.js check` | the global skill carries the same text as the documents |
 | `npm run mcpb`, `node scripts/mcpb.js problems` | build the Claude Desktop package; check `mcpb/manifest.json` against `package.json` (change the manifest whenever a tool, a setting or the version changes: the tests fail otherwise) |
 

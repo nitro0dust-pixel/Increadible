@@ -1,0 +1,108 @@
+{
+  "name": "basic",
+  "description": "One pass through every part of the server: protocol, routing, A/B testing and the gateway (sample data). Steps that write marked writes:true are skipped against a deployment unless --allow-writes is given.",
+  "steps": [
+    { "name": "ping", "method": "ping" },
+    {
+      "name": "tools/list has the 13 tools",
+      "method": "tools/list",
+      "expect": {
+        "tools_include": [
+          "apply_routing_rules", "get_rule_stats", "update_rules", "suggest_rules",
+          "create_experiment", "assign_variant", "record_metric", "get_experiment_results", "recommend_winner",
+          "discover_apis", "call_api", "aggregate_apis", "get_api_stats"
+        ]
+      }
+    },
+    {
+      "name": "routing: a code task gets a provider",
+      "tool": "apply_routing_rules",
+      "arguments": { "task_type": "code" },
+      "expect": { "json": { "provider": { "$type": "string" }, "rule_id": { "$type": "string" } } }
+    },
+    {
+      "name": "routing: rule statistics",
+      "tool": "get_rule_stats",
+      "expect": { "json": { "rules_count": { "$gte": 1 }, "total_requests": { "$gte": 0 } } }
+    },
+    {
+      "name": "A/B: create an experiment",
+      "tool": "create_experiment",
+      "writes": true,
+      "arguments": {
+        "id": "drive-${run_id}", "name": "driver", "hypothesis": "the driver can run a whole experiment",
+        "variants": [{ "id": "A", "name": "a", "config": {} }, { "id": "B", "name": "b", "config": {} }],
+        "metrics": [{ "id": "quality", "name": "quality", "type": "continuous", "aggregation": "mean" }]
+      },
+      "expect": { "json": { "status": "success", "experiment_id": "drive-${run_id}" } }
+    },
+    {
+      "name": "A/B: assign a variant",
+      "tool": "assign_variant",
+      "writes": true,
+      "arguments": { "experiment_id": "drive-${run_id}", "user_id": "driver-user" },
+      "save": { "variant": "variant_id" },
+      "expect": { "json": { "variant_id": { "$matches": "^(A|B)$" } } }
+    },
+    {
+      "name": "A/B: record a measurement",
+      "tool": "record_metric",
+      "writes": true,
+      "arguments": { "experiment_id": "drive-${run_id}", "variant_id": "${variant}", "metrics": { "quality": 0.8 } },
+      "expect": { "json": { "status": "recorded" } }
+    },
+    {
+      "name": "A/B: results count the measurement",
+      "tool": "get_experiment_results",
+      "writes": true,
+      "arguments": { "experiment_id": "drive-${run_id}" },
+      "expect": { "json": { "statistical_analysis.current_samples": 1 } }
+    },
+    {
+      "name": "gateway: discover finds hackernews",
+      "tool": "discover_apis",
+      "arguments": { "query": "hacker" },
+      "expect": { "json": { "0.id": "hackernews", "0.auth": "none" } }
+    },
+    {
+      "name": "gateway: a call answers sample data",
+      "tool": "call_api",
+      "arguments": { "api_id": "hackernews", "endpoint": "/topstories", "params": { "driver_run": "${run_id}" } },
+      "expect": { "json": { "source": "mock", "cached": false } }
+    },
+    {
+      "name": "gateway: aggregate two items",
+      "tool": "aggregate_apis",
+      "arguments": { "apis": [{ "id": "hackernews", "endpoint": "/topstories" }, { "id": "wikipedia", "endpoint": "/page/summary/Pune" }] },
+      "expect": { "json": { "count": 2 } }
+    },
+    {
+      "name": "gateway: statistics show no live call",
+      "tool": "get_api_stats",
+      "expect": { "json": { "total_calls": { "$gte": 3 }, "live_calls": 0 } }
+    },
+    {
+      "name": "error: unknown API is a tool error",
+      "tool": "call_api",
+      "arguments": { "api_id": "no-such-api", "endpoint": "/x" },
+      "expect": { "tool_error": true, "contains": "API not found" }
+    },
+    {
+      "name": "error: unknown experiment is a tool error",
+      "tool": "assign_variant",
+      "arguments": { "experiment_id": "no-such-experiment" },
+      "expect": { "tool_error": true, "contains": "Experiment not found" }
+    },
+    {
+      "name": "error: unknown tool is a JSON-RPC error",
+      "method": "tools/call",
+      "params": { "name": "no_such_tool", "arguments": {} },
+      "expect": { "rpc_error": -32602, "message_contains": "Unknown tool" }
+    },
+    {
+      "name": "error: unknown method is a JSON-RPC error",
+      "method": "no/such",
+      "expect": { "rpc_error": -32601 }
+    }
+  ]
+}

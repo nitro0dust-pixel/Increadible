@@ -321,6 +321,10 @@ GitHub runner image) and takes about 70 seconds from a cold build cache on four 
 **What is not.** The rules have not run against a live Prometheus (none is available here), the `ServiceMonitor` has not scraped
 anything, and there is no dashboard and no cost metric.
 
+## Checking a running server from outside
+
+`npm run drive:http -- --url https://your-service.example --token-env NAME` ([docs/DRIVERS.md](docs/DRIVERS.md), section 3.3) sends the standard scenario to a server that is already running: `/ready`, `/health`, the refusal of a request without the token, the handshake, routing, the gateway on sample data, the errors, and `/metrics`. The token is read from the environment variable `NAME`, never from the command line. It **skips the steps that write A/B data** (the log is append-only) unless you add `--allow-writes`, and its gateway steps expect sample data, so against a server with live APIs switched on they fail on purpose. Expected against a default server: `PASS 17/17 (4 skipped: they write data)`. It has been run against a local server only, **not** against the Railway or Kubernetes rehearsals (NOT VERIFIED there), and it is not a load test ([PERFORMANCE.md](PERFORMANCE.md)).
+
 ## Rollback
 
 `kubectl -n increadible rollout undo deploy/increadible`, or `kubectl set image` back to the previous `sha-` tag.
