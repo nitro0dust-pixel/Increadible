@@ -166,6 +166,10 @@ describe("what a writing step writes (writes)", () => {
       expect(both[0]).toMatchObject({ ok: true, summary: "ab-data.jsonl and rules.yaml written" });
       const otherRun = bundleDriver.dataChecks(file("both.jsonl", '{"id":"x-OTHER"}\n'), scenario("ab-data", "rules"), "RUN1", rules);
       expect(otherRun[0].problems[0]).toMatch(/does not contain this run \(RUN1\)/);
+      // nor does a rules step that uses the run id make the A/B data answer to it: only a step that writes A/B data does (mutation run 4)
+      const mixed = { name: "s", steps: [{ name: "a", tool: "t", writes: "ab-data", arguments: { id: "fixed" } }, { name: "r", tool: "t", writes: "rules", arguments: { id: "x-${run_id}" } }] };
+      const fine = bundleDriver.dataChecks(file("fixed.jsonl", '{"id":"fixed"}\n'), mixed, "RUN1", rules);
+      expect(fine[0]).toMatchObject({ ok: true, summary: "ab-data.jsonl and rules.yaml written" });
       // a rules step with the run id in it does not make the rules file answer to the id
       const rulesOnly = bundleDriver.dataChecks(file("nope.jsonl"), scenario("rules"), "RUN1", rules);
       expect(rulesOnly[0].ok).toBe(true);
