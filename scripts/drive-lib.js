@@ -3,9 +3,11 @@
  * built server the way a client does, send JSON-RPC, check the answers against a scenario file, print a report, stop the server.
  * Zero dependencies; nothing here is imported by the server. How to run each driver: docs/DRIVERS.md.
  *
- * What the library does NOT do: it never prints a secret. The environment it hands the server is printed as names (and values only
- * for the few settings that are not sensitive), and every text that leaves it (report, server stderr, responses) has the secrets it
- * knows about replaced by <hidden>.
+ * Secrets: the environment it hands the server is printed as names (and values only for the few settings that are not sensitive), and
+ * every text the library prints that came from a server (stderr, answers, problems) has the secrets it KNOWS about (the values of
+ * variables whose names look secret, the random token, a token given with --token-env; four characters or more) replaced by <hidden>,
+ * and control characters other than tab and line breaks replaced by "?", so a server cannot steer the terminal. A secret it was not
+ * told about cannot be hidden.
  */
 "use strict";
 const { spawn } = require("node:child_process");
@@ -46,22 +48,63 @@ function secretValues(env, extra = []) {
   return [...values, ...extra].filter((v) => v.length >= 4);
 }
 
+/** Control characters other than tab, line feed and carriage return: what an escape sequence is made of. */
+const CONTROL = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g;
+
 function redact(text, secrets) {
   let out = String(text);
   for (const secret of secrets || []) out = out.split(secret).join("<hidden>");
-  return out;
+  return out.replace(CONTROL, "?");
+}
+
+/** redact() over every string (and key) of a value, so a secret that needs escaping in JSON cannot corrupt the structure. */
+function redactDeep(value, secrets) {
+  if (typeof value === "string") return redact(value, secrets);
+  if (Array.isArray(value)) return value.map((v) => redactDeep(v, secrets));
+  if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).map(([k, v]) => [redact(k, secrets), redactDeep(v, secrets)]));
+  return value;
+}
+
+// ---------------------------------------------------------------- what a run has open: children and work directories
+
+const live = { processes: new Set(), dirs: new Set() };
+
+/** Last resort, synchronous: end every server this run started and remove every work directory it made. Runs when the driver exits for any reason. */
+function cleanupNow() {
+  for (const proc of live.processes) { try { proc.child.kill("SIGTERM"); } catch { /* already gone */ } }
+  live.processes.clear();
+  for (const dir of live.dirs) { try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* best effort */ } }
+  live.dirs.clear();
+}
+
+let handlersInstalled = false;
+/** Called by runCli only (never on import, so tests that import the library keep their own signal handling). */
+function installCleanupHandlers() {
+  if (handlersInstalled) return;
+  handlersInstalled = true;
+  process.on("exit", cleanupNow);
+  process.on("SIGINT", () => process.exit(130));
+  process.on("SIGTERM", () => process.exit(143));
 }
 
 // ---------------------------------------------------------------- work directory
 
 /** A fresh directory for the data files of one run. Only a directory this function made (by its prefix) is ever removed. */
 function makeWorkdir(parent = os.tmpdir()) {
-  return fs.mkdtempSync(path.join(parent, WORKDIR_PREFIX));
+  const dir = fs.mkdtempSync(path.join(parent, WORKDIR_PREFIX));
+  live.dirs.add(dir);
+  return dir;
 }
 
 function removeWorkdir(dir) {
   if (!dir || !path.basename(dir).startsWith(WORKDIR_PREFIX)) throw new Error(`refusing to remove a directory this driver did not create: ${dir}`);
+  live.dirs.delete(dir);
   fs.rmSync(dir, { recursive: true, force: true });
+}
+
+/** The user asked to keep this directory (--keep): an interrupted run must not remove it either. */
+function keepWorkdir(dir) {
+  live.dirs.delete(dir);
 }
 
 /** The data-file settings the server needs, all inside one directory. AB_FSYNC off keeps a driver run fast; the bundle driver uses the manifest's own values instead. */
@@ -92,11 +135,15 @@ class ManagedProcess {
     this.stderr = "";
     this.exit = null; // { code, signal } once the process has ended
     this.child = spawn(command, args, { env, cwd, stdio: ["pipe", "pipe", "pipe"], windowsHide: true });
+    live.processes.add(this);
     this.exited = new Promise((resolve) => {
-      this.child.once("error", (error) => { this.stderr += `spawn error: ${error.message}\n`; this.exit = this.exit || { code: null, signal: null }; resolve(this.exit); });
-      this.child.once("close", (code, signal) => { this.exit = { code, signal }; resolve(this.exit); });
+      this.child.once("error", (error) => { this.stderr += `spawn error: ${error.message}\n`; this.exit = this.exit || { code: null, signal: null }; live.processes.delete(this); resolve(this.exit); });
+      this.child.once("close", (code, signal) => { this.exit = { code, signal }; live.processes.delete(this); resolve(this.exit); });
     });
     this.child.stdin.on("error", () => { /* the server ended first: the answer to a write is its exit, reported by exited */ });
+    // decoded as UTF-8 by a stream decoder, so a character split across two reads stays whole
+    this.child.stderr.setEncoding("utf8");
+    this.child.stdout.setEncoding("utf8");
     this.child.stderr.on("data", (chunk) => { this.stderr = (this.stderr + chunk).slice(-OUTPUT_LIMIT); });
     this.child.stdout.on("data", (chunk) => { if (this.onStdout) this.onStdout(chunk); else this.stdout = (this.stdout + chunk).slice(-OUTPUT_LIMIT); });
   }
@@ -164,7 +211,7 @@ class StdioClient {
       if (message && typeof message === "object" && message.method !== undefined) { this.serverMessages.push(message); continue; }
       const waiter = message && this.pending.get(message.id);
       if (waiter) { this.pending.delete(message.id); clearTimeout(waiter.timer); waiter.resolve(message); } else {
-        this.unmatched.push(JSON.parse(redact(line, this.secrets)));
+        this.unmatched.push(redactDeep(message, this.secrets));
         if (this._unmatchedWaiter) this._unmatchedWaiter();
       }
     }
@@ -230,17 +277,21 @@ class StdioClient {
 // ---------------------------------------------------------------- HTTP client
 
 class HttpClient {
-  constructor({ baseUrl, token, timeoutMs = 20000, secrets = [], protocolVersion = DEFAULT_PROTOCOL_VERSION }) {
+  constructor({ baseUrl, token, timeoutMs = 20000, secrets = [], protocolVersion = DEFAULT_PROTOCOL_VERSION, maxBytes = 8 * 1024 * 1024 }) {
     this.base = new URL(baseUrl);
     this.token = token;
     this.timeoutMs = timeoutMs;
+    this.maxBytes = maxBytes;
     this.secrets = secrets;
     this.protocolVersion = protocolVersion;
     this.nextId = 0;
   }
 
-  /** One HTTP exchange. Never throws on a status; throws on a network failure or a timeout. */
-  request(method, pathname, { headers = {}, body, auth = true } = {}) {
+  /**
+   * One HTTP exchange. Never throws on a status; throws on a network failure, on a timeout (a deadline for the whole exchange, not for
+   * silence) and on an answer larger than maxBytes (a hostile server cannot fill the driver's memory).
+   */
+  request(method, pathname, { headers = {}, body, auth = true, timeoutMs = this.timeoutMs } = {}) {
     const url = new URL(pathname, this.base);
     const lib = url.protocol === "https:" ? https : http;
     const payload = body === undefined ? undefined : Buffer.isBuffer(body) ? body : Buffer.from(String(body));
@@ -248,19 +299,31 @@ class HttpClient {
     if (payload) sent["Content-Length"] = payload.length;
     if (auth && this.token) sent.Authorization = `Bearer ${this.token}`;
     return new Promise((resolve, reject) => {
+      let timer;
+      const fail = (error) => { clearTimeout(timer); reject(error); };
       const req = lib.request(url, { method, headers: sent, agent: false }, (res) => {
         const chunks = [];
-        res.on("data", (c) => chunks.push(c));
+        let size = 0;
+        let overflow = null; // 'end' can still follow the destroy when the whole answer has already arrived: it must not turn into a result
+        res.on("data", (c) => {
+          size += c.length;
+          if (overflow) return;
+          if (size > this.maxBytes) { overflow = new Error(`the answer to ${method} ${url.pathname} is larger than ${this.maxBytes} bytes`); req.destroy(overflow); return; }
+          chunks.push(c);
+        });
         res.on("end", () => {
+          if (overflow) { fail(overflow); return; }
+          clearTimeout(timer);
           const text = redact(Buffer.concat(chunks).toString("utf8"), this.secrets);
           let json;
           try { json = JSON.parse(text); } catch { /* not JSON: text is what there is */ }
           resolve({ status: res.statusCode, headers: res.headers, text, json });
         });
-        res.on("error", reject);
+        res.on("error", fail);
+        res.on("close", () => { if (!res.complete) fail(new Error(`the connection closed before the answer to ${method} ${url.pathname} was complete`)); });
       });
-      req.setTimeout(this.timeoutMs, () => req.destroy(new Error(`no answer to ${method} ${url.pathname} within ${this.timeoutMs} ms`)));
-      req.on("error", reject);
+      req.on("error", fail); // before anything that can throw
+      timer = setTimeout(() => req.destroy(new Error(`no answer to ${method} ${url.pathname} within ${timeoutMs} ms`)), timeoutMs);
       if (payload) req.write(payload);
       req.end();
     });
@@ -285,14 +348,14 @@ class HttpClient {
     return answer.result;
   }
 
-  /** Waits until GET /ready answers 200, or throws after timeoutMs. */
+  /** Waits until GET /ready answers 200, or throws after timeoutMs (each attempt is held to the time that is left). */
   async waitReady(timeoutMs = 15000, alive = () => true) {
     const deadline = Date.now() + timeoutMs;
     let last = "no answer";
     while (Date.now() < deadline) {
       if (!alive()) throw new Error("the server exited before it was ready");
       try {
-        const res = await this.request("GET", "/ready", { auth: false });
+        const res = await this.request("GET", "/ready", { auth: false, timeoutMs: Math.max(50, Math.min(this.timeoutMs, deadline - Date.now())) });
         if (res.status === 200) return;
         last = `HTTP ${res.status}`;
       } catch (error) { last = error.message; }
@@ -315,8 +378,14 @@ function freePort() {
 const STEP_KEYS = new Set(["name", "method", "params", "tool", "arguments", "expect", "save", "writes"]);
 const EXPECT_KEYS = new Set(["rpc_error", "message_contains", "tool_error", "contains", "json", "result", "tools_include"]);
 const MATCHERS = new Set(["$type", "$gte", "$lte", "$includes", "$matches", "$exists"]);
+const isToolStep = (step) => step.tool !== undefined || step.method === "tools/call";
+const isPlainObject = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
 
-/** Throws, naming the file and the step, when a scenario would silently check nothing (a misspelled key, a step with no name). */
+/**
+ * Throws, naming the file and the step, when a scenario would silently check nothing: a misspelled key, an expectation that this kind
+ * of step can never evaluate (json on a method step, contains next to rpc_error), a value of the wrong type, a regular expression that
+ * does not compile. A check that cannot fail is worse than no check, so none of these is let through.
+ */
 function validateScenario(scenario, where = "scenario") {
   const fail = (message) => { throw new Error(`${where}: ${message}`); };
   if (!scenario || typeof scenario !== "object") fail("not an object");
@@ -329,26 +398,58 @@ function validateScenario(scenario, where = "scenario") {
     if (typeof step.name !== "string" || step.name === "") fail(`${at}: "name" is required`);
     if (seen.has(step.name)) fail(`${at}: the name "${step.name}" is used twice`);
     seen.add(step.name);
-    for (const key of Object.keys(step)) if (!STEP_KEYS.has(key)) fail(`${at} (${step.name}): unknown key "${key}"`);
-    if ((step.method === undefined) === (step.tool === undefined)) fail(`${at} (${step.name}): exactly one of "method" and "tool" is required`);
-    if (step.writes !== undefined && typeof step.writes !== "boolean") fail(`${at} (${step.name}): "writes" must be true or false`);
+    const label = `${at} (${step.name})`;
+    for (const key of Object.keys(step)) if (!STEP_KEYS.has(key)) fail(`${label}: unknown key "${key}"`);
+    if ((step.method === undefined) === (step.tool === undefined)) fail(`${label}: exactly one of "method" and "tool" is required`);
+    if (step.method !== undefined && typeof step.method !== "string") fail(`${label}: "method" must be a string`);
+    if (step.tool !== undefined && typeof step.tool !== "string") fail(`${label}: "tool" must be a string`);
+    if (step.tool !== undefined && step.params !== undefined) fail(`${label}: "params" belongs to a method step; a tool step takes "arguments"`);
+    if (step.method !== undefined && step.arguments !== undefined) fail(`${label}: "arguments" belongs to a tool step; a method step takes "params"`);
+    if (step.writes !== undefined && typeof step.writes !== "boolean") fail(`${label}: "writes" must be true or false`);
+    if (step.save !== undefined && (!isPlainObject(step.save) || !Object.values(step.save).every((v) => typeof v === "string"))) fail(`${label}: "save" must map names to dotted paths`);
+    if (step.expect !== undefined && !isPlainObject(step.expect)) fail(`${label}: "expect" must be an object`);
     const expect = step.expect || {};
-    for (const key of Object.keys(expect)) if (!EXPECT_KEYS.has(key)) fail(`${at} (${step.name}): unknown expectation "${key}"`);
+    for (const key of Object.keys(expect)) if (!EXPECT_KEYS.has(key)) fail(`${label}: unknown expectation "${key}"`);
+    if (expect.rpc_error !== undefined && !Number.isInteger(expect.rpc_error)) fail(`${label}: "rpc_error" must be an integer code`);
+    if (expect.message_contains !== undefined && typeof expect.message_contains !== "string") fail(`${label}: "message_contains" must be a string`);
+    if (expect.tool_error !== undefined && typeof expect.tool_error !== "boolean") fail(`${label}: "tool_error" must be true or false`);
+    if (expect.contains !== undefined && typeof expect.contains !== "string") fail(`${label}: "contains" must be a string`);
+    if (expect.tools_include !== undefined && (!Array.isArray(expect.tools_include) || !expect.tools_include.every((n) => typeof n === "string"))) fail(`${label}: "tools_include" must be a list of tool names`);
     for (const group of ["json", "result"]) {
+      if (expect[group] !== undefined && !isPlainObject(expect[group])) fail(`${label}: "${group}" must map dotted paths to values`);
       for (const [path_, wanted] of Object.entries(expect[group] || {})) {
-        if (wanted && typeof wanted === "object" && !Array.isArray(wanted) && Object.keys(wanted).some((k) => k.startsWith("$")) && !Object.keys(wanted).every((k) => MATCHERS.has(k))) {
-          fail(`${at} (${step.name}): unknown matcher in ${group}.${path_}`);
+        if (isPlainObject(wanted) && Object.keys(wanted).some((k) => k.startsWith("$"))) {
+          if (!Object.keys(wanted).every((k) => MATCHERS.has(k))) fail(`${label}: unknown matcher in ${group}.${path_}`);
+          if (wanted.$matches !== undefined) {
+            try { new RegExp(wanted.$matches); } catch (error) { fail(`${label}: ${group}.${path_}: $matches is not a regular expression (${error.message})`); }
+          }
         }
       }
     }
+    // what each kind of step can evaluate
+    if (expect.rpc_error !== undefined) {
+      for (const key of ["tool_error", "contains", "json", "result", "tools_include"]) if (expect[key] !== undefined) fail(`${label}: "${key}" cannot go with "rpc_error" (an error answer has no result to check)`);
+      if (step.save !== undefined) fail(`${label}: "save" cannot go with "rpc_error" (an error answer has nothing to save)`);
+    } else if (expect.message_contains !== undefined) fail(`${label}: "message_contains" needs "rpc_error"`);
+    if (!isToolStep(step)) {
+      for (const key of ["tool_error", "contains", "json"]) if (expect[key] !== undefined) fail(`${label}: "${key}" applies to a tool step; a method step checks "result"`);
+    }
+    if (expect.tools_include !== undefined && step.method !== "tools/list") fail(`${label}: "tools_include" applies to the method "tools/list"`);
   });
   return scenario;
 }
 
+/** A name without a path separator or ".json" is a shipped scenario; anything else is a file path (never both: a file called "basic" cannot hide the shipped one). */
 function loadScenario(nameOrPath) {
-  const file = fs.existsSync(nameOrPath) ? nameOrPath : path.join(SCENARIO_DIR, nameOrPath.endsWith(".json") ? nameOrPath : `${nameOrPath}.json`);
-  if (!fs.existsSync(file)) throw new Error(`no scenario "${nameOrPath}" (looked for ${file})`);
-  return validateScenario(JSON.parse(fs.readFileSync(file, "utf8")), path.basename(file));
+  const asPath = /[\\/]/.test(nameOrPath) || nameOrPath.endsWith(".json");
+  const file = asPath ? path.resolve(nameOrPath) : path.join(SCENARIO_DIR, `${nameOrPath}.json`);
+  let text;
+  try { text = fs.readFileSync(file, "utf8"); } catch (error) {
+    throw new Error(error.code === "ENOENT" ? `no scenario "${nameOrPath}" (looked for ${file})` : `${file}: ${error.message}`);
+  }
+  let parsed;
+  try { parsed = JSON.parse(text); } catch (error) { throw new Error(`${file}: not valid JSON (${error.message})`); }
+  return validateScenario(parsed, path.basename(file));
 }
 
 function listScenarios() {
@@ -369,17 +470,27 @@ function typeOf(value) {
   return value === null ? "null" : Array.isArray(value) ? "array" : typeof value;
 }
 
+/** JSON equality that does not depend on the order of an object's keys. */
+function sameJson(a, b) {
+  if (a === b) return true;
+  if (typeof a !== "object" || typeof b !== "object" || a === null || b === null) return false;
+  if (Array.isArray(a) !== Array.isArray(b)) return false;
+  if (Array.isArray(a)) return a.length === b.length && a.every((x, i) => sameJson(x, b[i]));
+  const keys = Object.keys(a);
+  return keys.length === Object.keys(b).length && keys.every((k) => Object.prototype.hasOwnProperty.call(b, k) && sameJson(a[k], b[k]));
+}
+
 /** A literal compares by value (JSON equality); an object of $-keys is a matcher. Returns null when it matches, else the reason. */
 function matchValue(actual, wanted) {
   const isMatcher = wanted && typeof wanted === "object" && !Array.isArray(wanted) && Object.keys(wanted).length > 0 && Object.keys(wanted).every((k) => k.startsWith("$"));
-  if (!isMatcher) return JSON.stringify(actual) === JSON.stringify(wanted) ? null : `expected ${JSON.stringify(wanted)}, got ${JSON.stringify(actual)}`;
+  if (!isMatcher) return sameJson(actual, wanted) ? null : `expected ${JSON.stringify(wanted)}, got ${JSON.stringify(actual)}`;
   for (const [key, arg] of Object.entries(wanted)) {
     let ok;
     if (key === "$exists") ok = (actual !== undefined) === arg;
     else if (key === "$type") ok = typeOf(actual) === arg;
     else if (key === "$gte") ok = typeof actual === "number" && actual >= arg;
     else if (key === "$lte") ok = typeof actual === "number" && actual <= arg;
-    else if (key === "$includes") ok = Array.isArray(actual) ? actual.some((x) => JSON.stringify(x) === JSON.stringify(arg)) : typeof actual === "string" && actual.includes(arg);
+    else if (key === "$includes") ok = Array.isArray(actual) ? actual.some((x) => sameJson(x, arg)) : typeof actual === "string" && actual.includes(arg);
     else if (key === "$matches") ok = typeof actual === "string" && new RegExp(arg).test(actual);
     else return `unknown matcher ${key}`;
     if (!ok) return `expected ${key} ${JSON.stringify(arg)}, got ${JSON.stringify(actual)}`;
@@ -470,7 +581,8 @@ async function runScenario(client, scenario, { secrets = [], onStep, vars: initi
       problems.push(redact(error.message, secrets));
       summary = summary || "no answer";
     }
-    const entry = { name: step.name, ok: problems.length === 0, ms: Date.now() - started, summary, problems, response: message === undefined ? undefined : JSON.parse(redact(JSON.stringify(message), secrets)) };
+    // text that came from a server is scrubbed wherever it ends up: in a problem, in the summary, in the stored answer
+    const entry = { name: step.name, ok: problems.length === 0, ms: Date.now() - started, summary: redact(summary, secrets), problems: problems.map((p) => redact(p, secrets)), response: message === undefined ? undefined : redactDeep(message, secrets) };
     steps.push(entry);
     if (onStep) onStep(entry);
   }
@@ -552,7 +664,12 @@ async function driveStdio({ command, args, env, cwd, scenario, vars, skipWrites 
     if (ended.how !== "stdin closed") problems.push(`the server did not leave when stdin closed (it needed ${ended.how})`);
     else if (ended.code !== 0) problems.push(`the server left with code ${ended.code}, expected 0`);
     steps.push(driverStep("shutdown", problems, problems.length ? "not clean" : "exit 0 on stdin close"));
-    const stray = [...client.nonJsonLines.map((line) => `stdout line that is not JSON: ${line}`), ...client.unmatched.map((m) => `an answer nobody asked for: ${JSON.stringify(m).slice(0, 200)}`)];
+    const leftover = client.buffer.trim();
+    const stray = [
+      ...client.nonJsonLines.map((line) => `stdout line that is not JSON: ${line}`),
+      ...client.unmatched.map((m) => `an answer nobody asked for: ${JSON.stringify(m).slice(0, 200)}`),
+      ...(leftover ? [`stdout text without a line break at the end: ${redact(leftover, secrets).slice(0, 200)}`] : []),
+    ];
     steps.push(driverStep("stdout is protocol only", stray, stray.length ? `${stray.length} stray` : "clean"));
   }
   return { results: [{ scenario: scenario.name, ok: steps.every((s) => s.ok), steps }], serverInfo, stderr: client.proc.stderrText() };
@@ -591,8 +708,23 @@ function parseEnvPairs(pairs = [], flag = "--env") {
 
 class UsageError extends Error {}
 
+/** A whole number option (milliseconds, a count): refuses text, zero, negatives and anything a timer cannot take, with exit code 2 instead of a stack trace. */
+function parseInteger(name, text, { min = 1, max = 2147483647 } = {}) {
+  const bad = () => new UsageError(`--${name} must be a whole number from ${min} to ${max}`);
+  if (!/^\d+$/.test(String(text))) throw bad();
+  const n = Number(text);
+  if (!Number.isSafeInteger(n) || n < min || n > max) throw bad();
+  return n;
+}
+
+/** These drivers never switch the gateway's live calls on: a live call goes to a real provider, which is Stage 4 and the owner's decision (docs/DRIVERS.md, section 10). */
+function assertNoLive(env, source) {
+  if (String(env.GATEWAY_LIVE_APIS ?? "").trim() !== "") throw new UsageError(`${source}: GATEWAY_LIVE_APIS switches on calls to real providers, which these drivers do not make (live calls are Stage 4 and need the owner's decision)`);
+}
+
 /** Runs a driver's main(argv) and turns its answer into the exit code: 0 all passed, 1 a check failed, 2 the driver could not run. */
 async function runCli(name, usage, main) {
+  installCleanupHandlers();
   try {
     process.exitCode = await main(process.argv.slice(2));
   } catch (error) {
@@ -609,10 +741,10 @@ function newRunId() {
 
 module.exports = {
   REPO_ROOT, SCENARIO_DIR, DEFAULT_PROTOCOL_VERSION, WORKDIR_PREFIX, INHERITED_ENV, SECRET_NAME,
-  baseEnv, describeEnv, secretValues, redact,
-  makeWorkdir, removeWorkdir, dataEnv, entryPoint,
-  ManagedProcess, StdioClient, HttpClient, freePort,
+  baseEnv, describeEnv, secretValues, redact, redactDeep, sameJson,
+  makeWorkdir, removeWorkdir, keepWorkdir, dataEnv, entryPoint,
+  cleanupNow, ManagedProcess, StdioClient, HttpClient, freePort,
   validateScenario, loadScenario, listScenarios, getPath, matchValue, substitute, runScenario, formatReport,
   driverStep, handshakeStep, driveStdio,
-  parseArgs, parseEnvPairs, UsageError, runCli, newRunId,
+  parseArgs, parseEnvPairs, parseInteger, assertNoLive, UsageError, runCli, newRunId,
 };

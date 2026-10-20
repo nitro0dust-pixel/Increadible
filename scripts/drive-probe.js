@@ -17,9 +17,12 @@ const path = require("node:path");
 const lib = require("./drive-lib.js");
 
 const USAGE = "usage: drive-probe.js [--transport stdio|http|both] [--root DIR] [--json] [--list] [--timeout-ms N]";
-const SPEC = "https://modelcontextprotocol.io/specification/2025-11-25/basic/transports";
-const SPEC_NOTE = "the page was summarised when this driver was written (2026-10-14) and is not re-read for every release: read it before relying on it";
-const spec = (text) => `${text} Source: ${SPEC} (${SPEC_NOTE}).`;
+const SPEC_REVISION = "2025-11-25";
+const TRANSPORTS = `https://modelcontextprotocol.io/specification/${SPEC_REVISION}/basic/transports`;
+const LIFECYCLE = `https://modelcontextprotocol.io/specification/${SPEC_REVISION}/basic/lifecycle#version-negotiation`;
+const SPEC_NOTE = "the source of the page was read on 2026-10-14 and is not re-read for every release: read it before relying on it";
+/** What the specification asks, with the revision and the page it is from. Newer revisions exist; this driver measures against this one. */
+const spec = (text, url = TRANSPORTS) => `${text} Source (revision ${SPEC_REVISION}): ${url} (${SPEC_NOTE}).`;
 const JSON_HEADERS = { "Content-Type": "application/json" };
 const PING = JSON.stringify({ jsonrpc: "2.0", id: 1, method: "ping" });
 
@@ -35,17 +38,19 @@ const errorOf = (m) => (m && m.error ? { code: m.error.code, id: m.id } : { notA
 /** Each run(ctx, problems) pushes what is wrong and returns a short account of what it saw. ctx.stdio() / ctx.http() start a server once and share it. */
 const CHECKS = [
   // ---- stdio
-  { id: "stdio.version-is-echoed", transport: "stdio", kind: "contract", title: "initialize answers the version the client names (2025-06-18) and 2024-11-05 when none is named",
+  { id: "stdio.version-is-echoed", transport: "stdio", kind: "contract", title: "initialize answers the version the client names (2025-06-18), and 2024-11-05 when none or a non-date is named",
     async run(ctx, problems) {
       const c = await ctx.stdio();
       const named = await c.request("initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "probe", version: "1" } });
       const none = await c.request("initialize");
+      const word = await c.request("initialize", { protocolVersion: "latest", capabilities: {}, clientInfo: { name: "probe", version: "1" } });
       eq(problems, "version when named", named.result && named.result.protocolVersion, "2025-06-18");
       eq(problems, "version when not named", none.result && none.result.protocolVersion, "2024-11-05");
-      return `${named.result && named.result.protocolVersion} / ${none.result && none.result.protocolVersion}`;
+      eq(problems, "version when a non-date is named", word.result && word.result.protocolVersion, "2024-11-05");
+      return `${named.result && named.result.protocolVersion} / ${none.result && none.result.protocolVersion} / ${word.result && word.result.protocolVersion}`;
     } },
-  { id: "stdio.unknown-version-is-echoed", transport: "stdio", kind: "known", title: "initialize echoes a version it cannot speak (1999-01-01)",
-    note: spec("The lifecycle rules ask a server that does not support the requested version to answer with one it does support. This server answers whatever it was asked."),
+  { id: "stdio.date-shaped-version-is-echoed", transport: "stdio", kind: "known", title: "initialize echoes any date-shaped version, also one it cannot speak (1999-01-01)",
+    note: spec("Version negotiation asks a server that does not support the requested version to answer with another version it does support (the latest it supports, ideally). This server declares no set of supported versions and answers any YYYY-MM-DD it was asked, so it never negotiates.", LIFECYCLE),
     async run(ctx, problems) {
       const c = await ctx.stdio();
       const r = await c.request("initialize", { protocolVersion: "1999-01-01", capabilities: {}, clientInfo: { name: "probe", version: "1" } });
@@ -117,8 +122,8 @@ const CHECKS = [
       if (tools.length === 0) problems.push("tools/list is empty");
       return `${tools.length} tools`;
     } },
-  { id: "stdio.big-line-is-answered", transport: "stdio", kind: "known", title: "a 5,000,000-byte request line is answered (HTTP refuses more than 1,000,000 bytes)",
-    note: "Not a specification rule: the HTTP transport caps a body at 1,000,000 bytes (413), the stdio transport has no cap on a line. Recorded so a change is noticed.",
+  { id: "stdio.big-line-is-answered", transport: "stdio", kind: "observed", title: "a 5,000,000-byte request line is answered (HTTP refuses more than 1,000,000 bytes)",
+    note: "No specification rule is involved: the HTTP transport caps a body at 1,000,000 bytes (413), the stdio transport has no cap on a line. Recorded so a change is noticed.",
     async run(ctx, problems) {
       const c = await ctx.stdio();
       const r = await c.request("ping", { padding: "a".repeat(5_000_000) }, 15000);
@@ -229,15 +234,21 @@ const CHECKS = [
       eq(problems, "status", r.status, 404);
       return "404";
     } },
-  { id: "http.origin-and-host-are-not-validated", transport: "http", kind: "known", title: "a foreign Origin and a foreign Host header are accepted (with the token)",
-    note: spec("The rules ask a server to validate the Origin header against DNS-rebinding attacks. This server does not; the bearer token is what protects /mcp, and a browser page cannot add it. Decision pending with the owner."),
+  { id: "http.origin-is-not-validated", transport: "http", kind: "known", title: "a foreign Origin header is accepted (with the token)",
+    note: spec("The rules ask a server to validate the Origin header against DNS-rebinding attacks (and to answer 403 for an invalid one). This server does not; the bearer token protects /mcp and a web page cannot add it. Without a token (a loopback server started with ALLOW_UNAUTHENTICATED) a web page can reach it: see http.content-type-is-not-checked. Decision pending with the owner."),
     async run(ctx, problems) {
       const { client } = await ctx.http();
       const origin = await client.request("POST", "/mcp", { headers: { ...JSON_HEADERS, Origin: "http://evil.example" }, body: PING });
-      const host = await client.request("POST", "/mcp", { headers: { ...JSON_HEADERS, Host: "evil.example" }, body: PING });
       eq(problems, "foreign Origin", origin.status, 200);
+      return "200";
+    } },
+  { id: "http.host-is-not-validated", transport: "http", kind: "observed", title: "a foreign Host header is accepted (with the token)",
+    note: "The specification speaks of Origin only; Host is recorded because a DNS-rebinding defence usually checks it too.",
+    async run(ctx, problems) {
+      const { client } = await ctx.http();
+      const host = await client.request("POST", "/mcp", { headers: { ...JSON_HEADERS, Host: "evil.example" }, body: PING });
       eq(problems, "foreign Host", host.status, 200);
-      return "200, 200";
+      return "200";
     } },
   { id: "http.protocol-version-header-is-ignored", transport: "http", kind: "known", title: "an invalid MCP-Protocol-Version header (1999-01-01) is accepted",
     note: spec("The rules ask a server to answer 400 to an invalid or unsupported MCP-Protocol-Version header. This server ignores the header."),
@@ -248,6 +259,7 @@ const CHECKS = [
       return "200";
     } },
   { id: "http.content-type-is-not-checked", transport: "http", kind: "observed", title: "a JSON body sent as text/plain is accepted",
+    note: "text/plain is a type a web page may send cross-origin without a preflight request, so together with http.origin-is-not-validated this matters for a server run without a token.",
     async run(ctx, problems) {
       const { client } = await ctx.http();
       const r = await client.request("POST", "/mcp", { headers: { "Content-Type": "text/plain" }, body: PING });
@@ -334,11 +346,15 @@ async function main(argv) {
     for (const c of selected) console.log(`${c.id.padEnd(44)} ${c.kind.padEnd(9)} ${c.title}`);
     return 0;
   }
+  const timeoutMs = opts["timeout-ms"] !== undefined ? lib.parseInteger("timeout-ms", opts["timeout-ms"]) : 20000;
   const root = path.resolve(opts.root || lib.REPO_ROOT);
+  // a missing build is one message and exit code 2, not one failed check per check
+  if (selected.some((c) => c.transport === "stdio")) lib.entryPoint(root, "main.js");
+  if (selected.some((c) => c.transport === "http")) lib.entryPoint(root, "index.js");
   const version = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8")).version;
-  const steps = await runChecks(selected, root, opts["timeout-ms"] ? Number(opts["timeout-ms"]) : 20000);
+  const steps = await runChecks(selected, root, timeoutMs);
   const results = [{ scenario: `protocol probe (${transport})`, ok: steps.every((s) => s.ok), steps }];
-  const notes = [`node: ${process.version}`, `server: ${root} (package version ${version})`, "legend: PASS contract met · KNOWN recorded deviation from the MCP spec, behaviour unchanged · INFO observed, no spec claim"];
+  const notes = [`node: ${process.version}`, `server: ${root} (package version ${version})`, `legend: PASS contract met · KNOWN recorded deviation from the MCP specification (revision ${SPEC_REVISION}), behaviour unchanged · INFO observed, no specification claim`];
   if (opts.json) console.log(JSON.stringify({ driver: "probe", ok: results[0].ok, target: root, notes, results }, null, 2));
   else console.log(lib.formatReport({ driver: "probe", target: root, results, notes }));
   return results[0].ok ? 0 : 1;

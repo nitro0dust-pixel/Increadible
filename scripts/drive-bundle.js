@@ -1,12 +1,13 @@
 #!/usr/bin/env node
 /**
- * Drives the Claude Desktop package (.mcpb) the way Claude Desktop installs and starts it: checks the zip, unpacks it into a folder with a
- * space in its path, reads the manifest, resolves ${__dirname}, ${/} and ${user_config.*} with the manifest's own defaults plus the settings
- * given, starts the server with exactly the manifest's command, arguments and environment, runs a scenario over stdio, ends it, and checks
- * that the data landed in the chosen folder and that no lock file was left behind.
+ * Drives the Claude Desktop package (.mcpb) the way Claude Desktop installs and starts it: checks the zip, unpacks it into a fresh folder
+ * with a space in its path, reads the manifest, resolves ${__dirname}, ${/} and ${user_config.*} with the manifest's own defaults plus the
+ * settings given, starts the server with exactly the manifest's command, arguments and environment, runs a scenario over stdio, ends it,
+ * and checks that the data landed in the chosen folder and that no lock file was left behind.
  *   node scripts/drive-bundle.js [--bundle FILE | --build] [--scenario basic] [--setting KEY=VALUE]... [--data-dir DIR] [--node PATH] [--json] [--keep]
  * Without --bundle it takes dist/mcpb/<name>-<version>.mcpb; --build makes it first (needs `npm ci`). Exit code: 0 every check passed,
- * 1 a check failed, 2 the driver could not run. What this does NOT show: that Claude Desktop itself accepts the file (docs/INSTALL-CLAUDE-DESKTOP.md).
+ * 1 a check failed, 2 the driver could not run. The package's code is RUN: open only a package you built or trust. What this does NOT show:
+ * that Claude Desktop itself accepts the file (docs/INSTALL-CLAUDE-DESKTOP.md).
  */
 "use strict";
 const crypto = require("node:crypto");
@@ -45,6 +46,15 @@ function resolveUserConfig(manifest, settings) {
   return out;
 }
 
+/** The settings as they are shown in the report: the value only where neither the manifest ("sensitive") nor the name says it is a secret, and not the contact. */
+function describeSettings(manifest, userConfig) {
+  const declared = manifest.user_config || {};
+  return Object.entries(userConfig).map(([key, value]) => {
+    const hidden = (declared[key] && declared[key].sensitive === true) || lib.SECRET_NAME.test(key) || key === "contact";
+    return hidden ? `${key}=${value === "" ? '""' : "(set)"}` : `${key}=${JSON.stringify(value)}`;
+  });
+}
+
 function unpack(entries, home) {
   for (const entry of entries) {
     const target = path.join(home, ...entry.name.split("/"));
@@ -52,6 +62,26 @@ function unpack(entries, home) {
     fs.mkdirSync(path.dirname(target), { recursive: true });
     fs.writeFileSync(target, entry.data);
   }
+}
+
+/**
+ * After a clean exit: the data is in the folder the setting named, and the single-writer lock is gone. When the scenario writes and uses
+ * ${run_id}, the data file must contain this run's id; when it writes without it, the file must exist and not be empty.
+ */
+function dataChecks(dataFile, scenario, runId) {
+  const wrote = scenario.steps.some((s) => s.writes === true);
+  const usesRunId = JSON.stringify(scenario.steps).includes("${run_id}");
+  const problems = [];
+  if (wrote) {
+    if (!fs.existsSync(dataFile)) problems.push(`${dataFile} was not created`);
+    else if (fs.statSync(dataFile).size === 0) problems.push(`${dataFile} is empty`);
+    else if (usesRunId && !fs.readFileSync(dataFile, "utf8").includes(runId)) problems.push(`${dataFile} does not contain this run (${runId})`);
+  }
+  const lock = `${dataFile}.lock`;
+  return [
+    lib.driverStep("data landed in the chosen folder", problems, problems.length ? "missing" : wrote ? "ab-data.jsonl written" : "nothing to write"),
+    lib.driverStep("no lock file left behind", fs.existsSync(lock) ? [`${lock} still exists after a clean exit`] : [], fs.existsSync(lock) ? "left" : "removed"),
+  ];
 }
 
 function findBundle(opts) {
@@ -69,6 +99,8 @@ async function main(argv) {
   if (opts._.length) throw new lib.UsageError(`unexpected argument "${opts._[0]}"`);
   if (opts.bundle && opts.build) throw new lib.UsageError("--bundle and --build exclude each other");
   const scenario = lib.loadScenario(opts.scenario || "basic");
+  const settings = lib.parseEnvPairs(opts.setting, "--setting");
+  lib.assertNoLive({ GATEWAY_LIVE_APIS: settings.live_apis ?? "" }, "--setting live_apis");
   const bundleFile = findBundle(opts);
   const bytes = fs.readFileSync(bundleFile);
 
@@ -78,53 +110,39 @@ async function main(argv) {
   const notes = [`node: ${process.version}`, `bundle: ${bundleFile} (${bytes.length} bytes, sha256 ${crypto.createHash("sha256").update(bytes).digest("hex").slice(0, 16)}...)`];
   let results;
   let serverInfo;
-  let workdir;
+  // the install always goes into a folder of the driver's own, never into the folder the user chose for the data
+  const workdir = lib.makeWorkdir();
   try {
+    if (opts.keep) lib.keepWorkdir(workdir);
     if (inspected.problems.length) {
       results = [{ scenario: scenario.name, ok: false, steps }];
     } else {
-      workdir = opts["data-dir"] ? undefined : lib.makeWorkdir();
-      const base = workdir || path.resolve(opts["data-dir"]);
-      const home = path.join(base, "Claude Extensions", "increadible"); // a space in the path, as on macOS and Windows
-      const dataDir = opts["data-dir"] ? path.resolve(opts["data-dir"]) : path.join(base, "data");
+      const home = path.join(workdir, "Claude Extensions", "increadible"); // a space in the path, as on macOS and Windows
+      const dataDir = opts["data-dir"] ? path.resolve(opts["data-dir"]) : path.join(workdir, "data");
       fs.mkdirSync(dataDir, { recursive: true });
       unpack(inspected.entries, home);
       const manifest = JSON.parse(fs.readFileSync(path.join(home, "manifest.json"), "utf8"));
-      const settings = lib.parseEnvPairs(opts.setting, "--setting");
       if (manifest.user_config && manifest.user_config.data_directory && settings.data_directory === undefined) settings.data_directory = dataDir;
       const userConfig = resolveUserConfig(manifest, settings);
       const config = manifest.server.mcp_config;
       const manifestEnv = Object.fromEntries(Object.entries(config.env || {}).map(([k, v]) => [k, substitute(v, home, userConfig)]));
+      lib.assertNoLive(manifestEnv, "the manifest's environment");
       const env = lib.baseEnv(manifestEnv);
       const command = config.command === "node" ? opts.node || process.execPath : config.command;
       const args = (config.args || []).map((a) => substitute(a, home, userConfig));
-      const shown = Object.entries(userConfig).map(([k, v]) => (k === "contact" || /token|key|secret/i.test(k) ? `${k}=${v === "" ? '""' : "(set)"}` : `${k}=${JSON.stringify(v)}`));
-      notes.push(`unpacked to: ${home}`, `manifest: ${manifest.name} ${manifest.version} (manifest_version ${manifest.manifest_version})`, `settings: ${shown.join(", ")}`, `command: ${path.basename(command)} ${args.map((a) => path.relative(home, a) || a).join(" ")}`, `server environment: ${lib.describeEnv(env).join(", ")}`);
+      notes.push(`unpacked to: ${home}${opts.keep ? " (kept)" : " (removed afterwards)"}`, `manifest: ${manifest.name} ${manifest.version} (manifest_version ${manifest.manifest_version})`, `settings: ${describeSettings(manifest, userConfig).join(", ")}`, `command: ${path.basename(command)} ${args.map((a) => path.relative(home, a) || a).join(" ")}`, `server environment: ${lib.describeEnv(env).join(", ")}`);
 
       const runId = lib.newRunId();
       const run = await lib.driveStdio({ command, args, env, cwd: home, scenario, vars: { run_id: runId }, secrets: lib.secretValues(env), expectVersion: manifest.version });
       serverInfo = run.serverInfo;
       steps.push(...run.results[0].steps);
       if (!run.results[0].ok && run.stderr) notes.push(`server stderr (last lines): ${run.stderr.replace(/\n/g, " | ")}`);
-
-      // after a clean exit: the data is where the user's folder setting said, and the single-writer lock is gone
-      const dataFile = env.AB_DATA_FILE;
-      const wrote = scenario.steps.some((s) => s.writes === true);
-      if (dataFile) {
-        const problems = [];
-        if (wrote) {
-          if (!fs.existsSync(dataFile)) problems.push(`${dataFile} was not created`);
-          else if (!fs.readFileSync(dataFile, "utf8").includes(`drive-${runId}`)) problems.push(`${dataFile} does not contain the experiment of this run`);
-        }
-        steps.push(lib.driverStep("data landed in the chosen folder", problems, problems.length ? "missing" : wrote ? "ab-data.jsonl written" : "nothing to write"));
-        const lock = `${dataFile}.lock`;
-        steps.push(lib.driverStep("no lock file left behind", fs.existsSync(lock) ? [`${lock} still exists after a clean exit`] : [], fs.existsSync(lock) ? "left" : "removed"));
-      }
+      if (env.AB_DATA_FILE) steps.push(...dataChecks(env.AB_DATA_FILE, scenario, runId));
       results = [{ scenario: scenario.name, ok: steps.every((s) => s.ok), steps }];
     }
   } finally {
-    if (workdir && !opts.keep) lib.removeWorkdir(workdir);
-    else if (workdir) notes.push(`kept: ${workdir}`);
+    if (!opts.keep) lib.removeWorkdir(workdir);
+    else notes.push(`kept: ${workdir}`);
   }
   const ok = results[0].ok;
   if (opts.json) console.log(JSON.stringify({ driver: "bundle", ok, target: bundleFile, server: serverInfo, notes, results }, null, 2));
@@ -132,6 +150,6 @@ async function main(argv) {
   return ok ? 0 : 1;
 }
 
-module.exports = { main, USAGE, substitute, resolveUserConfig, unpack };
+module.exports = { main, USAGE, substitute, resolveUserConfig, describeSettings, dataChecks, unpack };
 
 if (require.main === module) lib.runCli("drive-bundle", USAGE, main);

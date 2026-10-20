@@ -20,7 +20,7 @@ const USAGE = [
   "       drive-http.js --url URL [--token-env NAME] [--allow-writes] [--scenario NAME|FILE] [--json] [--timeout-ms N] [--ready-timeout-ms N]",
 ].join("\n");
 
-/** One HTTP check as a report step. */
+/** One HTTP check as a report step; what it saw is the summary only when it held. */
 async function httpStep(name, fn) {
   const started = Date.now();
   const problems = [];
@@ -32,7 +32,24 @@ async function httpStep(name, fn) {
     problems.push(error.message);
     summary = "no answer";
   }
-  return lib.driverStep(name, problems, problems.length ? summary : summary, Date.now() - started);
+  return lib.driverStep(name, problems, problems.length ? (summary === "no answer" ? summary : "different") : summary, Date.now() - started);
+}
+
+/** The sum of increadible_tool_calls_total over all tools, from the text /metrics serves. */
+function toolCalls(text) {
+  let sum = 0;
+  for (const m of text.matchAll(/^increadible_tool_calls_total\{[^}]*\} (\d+(?:\.\d+)?)/gm)) sum += Number(m[1]);
+  return sum;
+}
+
+/** The URL of a running server: an origin only. A path prefix would be dropped silently and credentials would end up in a report. */
+function parseRemote(text) {
+  let url;
+  try { url = new URL(text); } catch { throw new lib.UsageError("--url is not a URL"); }
+  if (url.protocol !== "http:" && url.protocol !== "https:") throw new lib.UsageError(`--url must be http or https, got ${url.protocol}`);
+  if (url.username || url.password) throw new lib.UsageError("--url must not carry a user name or password: give the token with --token-env");
+  if (url.pathname !== "/" || url.search || url.hash) throw new lib.UsageError("--url must be the server's address only (scheme, host, port): the drivers use its /mcp, /ready, /health and /metrics themselves");
+  return url.origin;
 }
 
 async function main(argv) {
@@ -43,51 +60,59 @@ async function main(argv) {
   });
   if (opts.help) { console.log(USAGE); return 0; }
   if (opts._.length) throw new lib.UsageError(`unexpected argument "${opts._[0]}"`);
+
+  // everything that can be wrong with the command line is found before anything is started or created
   const scenario = lib.loadScenario(opts.scenario || "basic");
-  const timeoutMs = opts["timeout-ms"] ? Number(opts["timeout-ms"]) : 20000;
+  const timeoutMs = opts["timeout-ms"] !== undefined ? lib.parseInteger("timeout-ms", opts["timeout-ms"]) : 20000;
+  const readyMs = opts["ready-timeout-ms"] !== undefined ? lib.parseInteger("ready-timeout-ms", opts["ready-timeout-ms"]) : 15000;
   const remote = opts.url !== undefined;
   if (remote && (opts["data-dir"] || opts.env || opts.root || opts.keep)) throw new lib.UsageError("--data-dir, --env, --root and --keep belong to the self-contained mode; with --url the server is already running");
-  if (!remote && (opts["token-env"] || opts["allow-writes"])) throw new lib.UsageError("--token-env and --allow-writes belong to --url");
+  if (!remote && (opts["token-env"] || opts["allow-writes"] || opts["ready-timeout-ms"])) throw new lib.UsageError("--token-env, --allow-writes and --ready-timeout-ms belong to --url");
+  const extra = remote ? {} : lib.parseEnvPairs(opts.env);
+  lib.assertNoLive(extra, "--env");
 
-  let proc;
-  let dir;
-  let ownDir = false;
+  const notes = [`node: ${process.version}`];
   let baseUrl;
   let token;
-  let env = {};
+  let root;
+  let entry;
   let version;
-  const notes = [`node: ${process.version}`];
   if (remote) {
-    const url = new URL(opts.url);
-    if (url.protocol !== "http:" && url.protocol !== "https:") throw new lib.UsageError(`--url must be http or https, got ${url.protocol}`);
-    baseUrl = url.origin;
+    baseUrl = parseRemote(opts.url);
     if (opts["token-env"]) {
       token = process.env[opts["token-env"]];
       if (!token) throw new lib.UsageError(`--token-env ${opts["token-env"]} names a variable that is not set or is empty`);
     }
     notes.push(`server: already running; token ${token ? `from ${opts["token-env"]}` : "none"}`, `writes: ${opts["allow-writes"] ? "allowed" : "skipped"}`);
   } else {
-    const root = path.resolve(opts.root || lib.REPO_ROOT);
-    const entry = lib.entryPoint(root, "index.js");
+    root = path.resolve(opts.root || lib.REPO_ROOT);
+    entry = lib.entryPoint(root, "index.js");
     version = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8")).version;
-    ownDir = !opts["data-dir"];
-    dir = ownDir ? lib.makeWorkdir() : path.resolve(opts["data-dir"]);
-    if (!ownDir) fs.mkdirSync(dir, { recursive: true });
-    const port = await lib.freePort();
-    token = crypto.randomBytes(18).toString("hex");
-    baseUrl = `http://127.0.0.1:${port}`;
-    env = lib.baseEnv({ ...lib.dataEnv(dir), ...lib.parseEnvPairs(opts.env), PORT: String(port), HOST: "127.0.0.1", AUTH_TOKEN: token });
-    const secrets = lib.secretValues(env);
-    proc = new lib.ManagedProcess({ args: [entry], env, cwd: root, secrets });
-    notes.push(`server: started by the driver: ${entry}`, `data directory: ${dir}${ownDir ? (opts.keep ? " (kept)" : " (removed afterwards)") : ""}`, `server environment: ${lib.describeEnv(env).join(", ")}`);
   }
-  const secrets = lib.secretValues(env, token ? [token] : []);
-  const client = new lib.HttpClient({ baseUrl, token, timeoutMs, secrets });
+
+  const own = !remote && !opts["data-dir"];
+  const dir = remote ? undefined : own ? lib.makeWorkdir() : path.resolve(opts["data-dir"]);
+  let proc;
   const steps = [];
   let serverInfo;
+  let secrets = [];
   try {
-    steps.push(await httpStep("ready", async (problems) => {
-      await client.waitReady(opts["ready-timeout-ms"] ? Number(opts["ready-timeout-ms"]) : 15000, () => !proc || proc.exit === null);
+    let env = {};
+    if (!remote) {
+      if (!own) fs.mkdirSync(dir, { recursive: true });
+      else if (opts.keep) lib.keepWorkdir(dir);
+      const port = await lib.freePort();
+      token = crypto.randomBytes(18).toString("hex");
+      baseUrl = `http://127.0.0.1:${port}`;
+      env = lib.baseEnv({ ...lib.dataEnv(dir), ...extra, PORT: String(port), HOST: "127.0.0.1", AUTH_TOKEN: token });
+      secrets = lib.secretValues(env, [token]);
+      proc = new lib.ManagedProcess({ args: [entry], env, cwd: root, secrets });
+      notes.push(`server: started by the driver: ${entry}`, `data directory: ${dir}${own ? (opts.keep ? " (kept)" : " (removed afterwards)") : ""}`, `server environment: ${lib.describeEnv(env).join(", ")}`);
+    } else if (token) secrets = [token];
+    const client = new lib.HttpClient({ baseUrl, token, timeoutMs, secrets });
+
+    steps.push(await httpStep("ready", async () => {
+      await client.waitReady(readyMs, () => !proc || proc.exit === null);
       return "GET /ready 200";
     }));
     if (steps[0].ok) {
@@ -105,9 +130,8 @@ async function main(argv) {
         }));
       }
       const started = Date.now();
-      let init;
       try {
-        init = await client.initialize();
+        const init = await client.initialize();
         serverInfo = init.serverInfo;
         steps.push(lib.handshakeStep(init, version, Date.now() - started));
       } catch (error) {
@@ -115,12 +139,17 @@ async function main(argv) {
       }
       if (steps[steps.length - 1].ok) {
         const skipWrites = remote && !opts["allow-writes"];
-        steps.push(...(await lib.runScenario(client, scenario, { secrets, vars: { run_id: lib.newRunId() }, skipWrites })).steps);
-        if (token) {
+        let before; // the tool-call counter before the scenario: the check is that THIS run's calls moved it
+        if (token) { try { before = toolCalls((await client.request("GET", "/metrics")).text); } catch { before = undefined; } }
+        const ran = await lib.runScenario(client, scenario, { secrets, vars: { run_id: lib.newRunId() }, skipWrites });
+        steps.push(...ran.steps);
+        const toolSteps = scenario.steps.filter((s) => (s.tool !== undefined || s.method === "tools/call") && !(skipWrites && s.writes === true)).length;
+        if (token && toolSteps > 0) {
           steps.push(await httpStep("metrics: the calls were counted", async (problems) => {
             const res = await client.request("GET", "/metrics");
             if (res.status !== 200) problems.push(`GET /metrics answered ${res.status}`);
-            else if (!/^increadible_tool_calls_total\{[^}]*\} [1-9]/m.test(res.text)) problems.push("no increadible_tool_calls_total sample above zero");
+            else if (before === undefined) problems.push("could not read /metrics before the scenario to compare with");
+            else if (!(toolCalls(res.text) > before)) problems.push(`increadible_tool_calls_total did not grow during the scenario (before ${before}, after ${toolCalls(res.text)})`);
             return "GET /metrics 200";
           }));
         }
@@ -134,11 +163,11 @@ async function main(argv) {
       else if (ended.code !== 0) problems.push(`the server left with code ${ended.code} after SIGTERM, expected 0`);
       steps.push(lib.driverStep("shutdown", problems, problems.length ? "not clean" : "exit 0 on SIGTERM"));
     }
-    if (ownDir && !opts.keep) lib.removeWorkdir(dir);
+    if (own && !opts.keep) lib.removeWorkdir(dir);
   }
   const results = [{ scenario: scenario.name, ok: steps.every((s) => s.ok), steps }];
   const ok = results[0].ok;
-  if (opts.json) console.log(JSON.stringify({ driver: "http", ok, target: baseUrl, server: serverInfo, notes, results }, null, 2));
+  if (opts.json) console.log(JSON.stringify({ driver: "http", ok, target: baseUrl, server: serverInfo, notes, results, serverStderr: proc ? proc.stderrText() : undefined }, null, 2));
   else {
     console.log(lib.formatReport({ driver: "http", target: baseUrl, results, notes }));
     if (!ok && proc && proc.stderr) console.log(`\nserver stderr (last lines):\n${proc.stderrText()}`);
@@ -146,6 +175,6 @@ async function main(argv) {
   return ok ? 0 : 1;
 }
 
-module.exports = { main, USAGE };
+module.exports = { main, USAGE, parseRemote, toolCalls };
 
 if (require.main === module) lib.runCli("drive-http", USAGE, main);

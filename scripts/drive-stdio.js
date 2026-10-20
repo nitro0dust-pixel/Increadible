@@ -19,6 +19,10 @@ async function main(argv) {
   if (opts.list) { console.log(lib.listScenarios().join("\n")); return 0; }
   if (opts._.length) throw new lib.UsageError(`unexpected argument "${opts._[0]}"`);
 
+  // everything that can be wrong with the command line is found before anything is started or created
+  const timeoutMs = opts["timeout-ms"] !== undefined ? lib.parseInteger("timeout-ms", opts["timeout-ms"]) : 20000;
+  const extra = lib.parseEnvPairs(opts.env);
+  lib.assertNoLive(extra, "--env");
   const root = path.resolve(opts.root || lib.REPO_ROOT);
   const entry = lib.entryPoint(root, "main.js");
   const scenario = lib.loadScenario(opts.scenario || "basic");
@@ -26,19 +30,18 @@ async function main(argv) {
 
   const own = !opts["data-dir"];
   const dir = own ? lib.makeWorkdir() : path.resolve(opts["data-dir"]);
-  if (!own) fs.mkdirSync(dir, { recursive: true });
-  const extra = lib.parseEnvPairs(opts.env);
-  const env = lib.baseEnv({ ...lib.dataEnv(dir), ...extra });
-  const secrets = lib.secretValues(env);
   try {
+    if (!own) fs.mkdirSync(dir, { recursive: true });
+    else if (opts.keep) lib.keepWorkdir(dir);
+    const env = lib.baseEnv({ ...lib.dataEnv(dir), ...extra });
+    const secrets = lib.secretValues(env);
     const run = await lib.driveStdio({
-      args: [entry], env, cwd: root, scenario, secrets, expectVersion: version,
+      args: [entry], env, cwd: root, scenario, secrets, expectVersion: version, requestTimeoutMs: timeoutMs,
       vars: { run_id: lib.newRunId() },
-      requestTimeoutMs: opts["timeout-ms"] ? Number(opts["timeout-ms"]) : 20000,
     });
     const notes = [`node: ${process.version}`, `data directory: ${dir}${own ? (opts.keep ? " (kept)" : " (removed afterwards)") : ""}`, `server environment: ${lib.describeEnv(env).join(", ")}`];
     const ok = run.results.every((r) => r.ok);
-    if (opts.json) console.log(JSON.stringify({ driver: "stdio", ok, target: entry, server: run.serverInfo, notes, results: run.results }, null, 2));
+    if (opts.json) console.log(JSON.stringify({ driver: "stdio", ok, target: entry, server: run.serverInfo, notes, results: run.results, serverStderr: run.stderr }, null, 2));
     else {
       console.log(lib.formatReport({ driver: "stdio", target: entry, results: run.results, notes }));
       if (!ok && run.stderr) console.log(`\nserver stderr (last lines):\n${run.stderr}`);

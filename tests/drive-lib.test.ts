@@ -494,3 +494,145 @@ describe("the HTTP client", () => {
     }
   });
 });
+
+describe("the review's findings, at the library level", () => {
+  it("compares literal objects without regard to the order of their keys, at any depth, but not arrays (T-15)", () => {
+    expect(lib.matchValue({ b: 1, a: { y: 2, x: 1 } }, { a: { x: 1, y: 2 }, b: 1 })).toBeNull();
+    expect(lib.matchValue({ a: 1 }, { a: 1, b: 2 })).not.toBeNull();
+    expect(lib.matchValue({ a: 1, b: 2 }, { a: 1 })).not.toBeNull();
+    expect(lib.matchValue([1, 2], [2, 1])).not.toBeNull();
+    expect(lib.matchValue({ a: [{ k: 1, j: 2 }] }, { a: [{ j: 2, k: 1 }] })).toBeNull();
+    expect(lib.matchValue(null, {})).not.toBeNull();
+    expect(lib.sameJson(["a", { b: [1] }], ["a", { b: [1] }])).toBe(true);
+  });
+
+  it("redacts a value by walking it, so a secret that needs escaping in JSON cannot corrupt the answer (T-09)", () => {
+    const secret = 'quo"te\\back-5150';
+    const answer = { result: { content: [{ type: "text", text: `echoed ${secret} twice ${secret}` }] }, [`key-${secret}`]: 1, n: 7, ok: true, nothing: null };
+    const clean = lib.redactDeep(answer, [secret]);
+    expect(clean.result.content[0].text).toBe("echoed <hidden> twice <hidden>");
+    expect(Object.keys(clean)).toContain("key-<hidden>");
+    expect([clean.n, clean.ok, clean.nothing]).toEqual([7, true, null]);
+    expect(JSON.stringify(clean)).not.toContain("5150");
+  });
+
+  it("replaces control characters other than tab, line feed and carriage return, so a server cannot steer the terminal (SEC-07)", () => {
+    expect(lib.redact("a\u001b[31mred\u001b[0m\tb\r\nc\u0007\u0000d\u007f", [])).toBe("a?[31mred?[0m\tb\r\nc??d?");
+    expect(lib.redact("x", [])).toBe("x");
+  });
+
+  it("takes only whole numbers a timer can use, and says which option was wrong (T-03)", () => {
+    for (const bad of ["abc", "NaN", "-5", "0", "1.5", "99999999999999", "", " 5", "5 ", "1e3", "0x10"]) expect(() => lib.parseInteger("timeout-ms", bad)).toThrow(lib.UsageError);
+    expect(() => lib.parseInteger("timeout-ms", "x")).toThrow("--timeout-ms must be a whole number from 1 to 2147483647");
+    expect(lib.parseInteger("n", "250")).toBe(250);
+    expect(lib.parseInteger("n", "2147483647")).toBe(2147483647);
+    expect(() => lib.parseInteger("n", "2147483648")).toThrow(/whole number/);
+    expect(lib.parseInteger("n", "0", { min: 0 })).toBe(0);
+  });
+
+  it("refuses to switch live calls on, however the value is spelled, and lets everything else through (T-01)", () => {
+    expect(() => lib.assertNoLive({ GATEWAY_LIVE_APIS: "hackernews" }, "--env")).toThrow(/--env: GATEWAY_LIVE_APIS switches on calls to real providers/);
+    expect(() => lib.assertNoLive({ GATEWAY_LIVE_APIS: " all " }, "--env")).toThrow(lib.UsageError);
+    for (const fine of [{}, { GATEWAY_LIVE_APIS: "" }, { GATEWAY_LIVE_APIS: "  " }, { GATEWAY_CONTACT: "a@b.test" }]) expect(() => lib.assertNoLive(fine, "--env")).not.toThrow();
+  });
+
+  describe("the registry of what a run has open (T-02)", () => {
+    it("removes work directories and ends servers when told to, and not a directory that was kept", async () => {
+      const gone = lib.makeWorkdir();
+      const kept = lib.makeWorkdir();
+      lib.keepWorkdir(kept);
+      const sleeper = new lib.ManagedProcess({ args: ["-e", "setInterval(() => {}, 1000)"], env: lib.baseEnv({}) });
+      await new Promise((r) => setTimeout(r, 100));
+      lib.cleanupNow();
+      await Promise.race([sleeper.exited, new Promise((_, reject) => setTimeout(() => reject(new Error("the process was not ended")), 3000))]);
+      expect(sleeper.exit).toMatchObject({ signal: "SIGTERM" });
+      expect(fs.existsSync(gone)).toBe(false);
+      expect(fs.existsSync(kept)).toBe(true);
+      lib.removeWorkdir(kept);
+    });
+  });
+});
+
+describe("the HTTP client's limits (T-11, T-12, SEC-05)", () => {
+  let server: http.Server;
+  let base = "";
+  beforeAll(async () => {
+    server = http.createServer((req, res) => {
+      req.resume();
+      if (req.url === "/big") { res.write("x".repeat(3000)); res.end("y".repeat(3000)); return; }
+      if (req.url === "/drip") { res.write("{"); const t = setInterval(() => res.write(" "), 40); res.on("close", () => clearInterval(t)); return; }
+      if (req.url === "/cut") { res.setHeader("Content-Length", "100"); res.write("short"); setTimeout(() => res.destroy(), 30); return; }
+      res.end("{}");
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
+    base = `http://127.0.0.1:${(server.address() as any).port}`;
+  });
+  afterAll(() => new Promise<void>((resolve) => { server.closeAllConnections?.(); server.close(() => resolve()); }));
+
+  it("refuses an answer larger than the limit instead of holding all of it", async () => {
+    const c = new lib.HttpClient({ baseUrl: base, maxBytes: 4096 });
+    await expect(c.request("GET", "/big")).rejects.toThrow("is larger than 4096 bytes");
+    expect((await c.request("GET", "/ok")).status).toBe(200);
+  });
+
+  it("holds the whole exchange to its deadline, also when the server keeps sending (not only when it falls silent)", async () => {
+    const c = new lib.HttpClient({ baseUrl: base, timeoutMs: 250 });
+    const started = Date.now();
+    await expect(c.request("GET", "/drip")).rejects.toThrow("no answer to GET /drip within 250 ms");
+    expect(Date.now() - started).toBeLessThan(2000);
+  });
+
+  it("reports an answer that was cut off, naming the request", async () => {
+    const c = new lib.HttpClient({ baseUrl: base });
+    await expect(c.request("GET", "/cut")).rejects.toThrow(/before the answer to GET \/cut was complete|socket hang up|aborted/);
+  });
+
+  it("keeps each readiness attempt within the time that is left, so a small ready timeout is honoured", async () => {
+    const hanging = http.createServer(() => undefined);
+    await new Promise<void>((resolve) => hanging.listen(0, "127.0.0.1", () => resolve()));
+    try {
+      const c = new lib.HttpClient({ baseUrl: `http://127.0.0.1:${(hanging.address() as any).port}`, timeoutMs: 20000 });
+      const started = Date.now();
+      await expect(c.waitReady(400)).rejects.toThrow(/did not answer 200 within 400 ms/);
+      expect(Date.now() - started).toBeLessThan(3000);
+    } finally {
+      hanging.closeAllConnections?.();
+      hanging.close();
+    }
+  });
+});
+
+describe("the stdio client and its stdout (T-10, SEC-08)", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "drive-fake3-"));
+  afterAll(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const write = (name: string, code: string) => { const f = path.join(dir, name); fs.writeFileSync(f, code); return f; };
+
+  it("keeps a multi-byte character whole when the pipe delivers it in pieces", async () => {
+    // the server writes the answer one byte at a time, so every multi-byte character is split across reads
+    const file = write("split.js", `
+      process.stdin.setEncoding("utf8"); let buf = "";
+      process.stdin.on("data", (d) => { buf += d; let i; while ((i = buf.indexOf("\\n")) >= 0) { const m = JSON.parse(buf.slice(0, i)); buf = buf.slice(i + 1);
+        const bytes = Buffer.from(JSON.stringify({ jsonrpc: "2.0", id: m.id, result: { text: "é€😀 ünï" } }) + "\\n");
+        let k = 0; const t = setInterval(() => { process.stdout.write(bytes.subarray(k, k + 1)); k += 1; if (k >= bytes.length) clearInterval(t); }, 1); } });
+      process.stdin.on("end", () => process.exit(0));`);
+    const c = new lib.StdioClient({ args: [file], env: lib.baseEnv({}), requestTimeoutMs: 5000 });
+    try {
+      expect((await c.request("ping")).result.text).toBe("é€😀 ünï");
+      expect(c.nonJsonLines).toEqual([]);
+    } finally {
+      await c.stop(500);
+    }
+  });
+
+  it("fails the stdout check for text without a final line break (it was never a line, so it was never looked at)", async () => {
+    const file = write("tail.js", `
+      process.stdin.setEncoding("utf8"); let buf = "";
+      process.stdin.on("data", (d) => { buf += d; let i; while ((i = buf.indexOf("\\n")) >= 0) { const m = JSON.parse(buf.slice(0, i)); buf = buf.slice(i + 1); if (m.id === undefined) continue;
+        process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: m.id, result: m.method === "initialize" ? { protocolVersion: "x", capabilities: { tools: {} }, serverInfo: { name: "increadible", version: "1.2.3" } } : {} }) + "\\n"); } });
+      process.stdin.on("end", () => { process.stdout.write("goodbye without a newline"); process.exit(0); });`);
+    const run = await lib.driveStdio({ args: [file], env: lib.baseEnv({}), scenario: { name: "s", steps: [{ name: "ping", method: "ping" }] }, expectVersion: "1.2.3", requestTimeoutMs: 1000 });
+    const stray = run.results[0].steps.find((s: any) => s.name === "stdout is protocol only");
+    expect(stray.ok).toBe(false);
+    expect(stray.problems[0]).toBe("stdout text without a line break at the end: goodbye without a newline");
+  });
+});
