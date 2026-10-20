@@ -52,10 +52,16 @@ chat). A green CI run is not enough: version 1.0.0 passed CI, installed, and nev
    new chat. Record the SHA-256 of the installed file.
 6. **Tag** (owner, from a clone with push rights):
    ```sh
+   git remote -v                     # origin must be github.com/nitro0dust-pixel/Increadible
    git fetch origin main
+   git rev-parse C                   # must print C in full; an error means this clone does not have the commit
    git tag -a vX.Y.Z C -m "vX.Y.Z: <one line>"
-   git push origin vX.Y.Z
+   git push origin vX.Y.Z            # must end with "* [new tag]  vX.Y.Z -> vX.Y.Z"
+   git ls-remote --tags origin vX.Y.Z  # must print a line: the tag is on GitHub
    ```
+   A tag made but not pushed, or pushed from a clone whose `origin` is another repository, is not a release: for `v1.0.5` the owner
+   reported the tag pushed twice (first on 2026-10-14) and both times GitHub had no such tag (`git ls-remote` and the GitHub API,
+   404). The three checks above show which step went wrong.
 7. **Check the tag:** `git ls-remote --tags origin vX.Y.Z` and `git rev-parse vX.Y.Z^{commit}` must give `C` (for `v1.0.2` this was
    checked through the GitHub API: tag object `f6f62c46`, commit `64cdefb`).
 8. **Record it:** the CHANGELOG header, the release row in `ROADMAP.md` ("Open decisions"), a row in `docs/BUILD-HISTORY.md`, the
@@ -75,7 +81,7 @@ owner's annotated tag (object `aeba41b2`, 2026-10-14 03:56 UTC, unsigned), its c
 `73c5f4d`), and the records. **Not verified before the tag:** the setting Contact for providers reaching the server. Both
 `get_api_stats` answers in Claude Desktop said `user_agent_has_contact: false`; the same built server, started the way the manifest
 starts it, says `true` with an email address in `GATEWAY_CONTACT` and `false` with a plain name, so the setting was either not saved
-or not an email address or URL. The owner tagged with that check open. `v1.0.5` is at step 1 (the version bump, PR #68, 2026-10-14), so that the start-up line of PR #67 (`User-Agent contact: set` or `not set`) reaches the owner's Claude Desktop and settles that open check. The owner installed the final 1.0.3 file (`1fd5ac75...`); the first test build (`c9eef367...`, same server code) was also downloaded, which is why the file name alone cannot tell them apart.
+or not an email address or URL. The owner tagged with that check open. `v1.0.5` (so that the start-up line of PR #67, `User-Agent contact: set` or `not set`, reaches the owner's Claude Desktop and settles that open check) went through steps 1 to 4: version bump (PR #68), merge (`61ff561`, 2026-10-14, its tree equal to the CI-verified head `b0f0df8`), the package SHA-256 `20cb5740...` from CI (`main` run 38521876183) and from a local build of `61ff561` (equal), and the package itself unpacked and started here: `increadible 1.0.5: ready on stdio`, `User-Agent contact: not set (...)` without a contact and `set` with one. The file was sent to the owner. **Steps 5 and 6 wait for the owner:** the check in Claude Desktop is not reported yet, and the tag is not on GitHub (checked 2026-10-14 and 2026-10-16). The owner installed the final 1.0.3 file (`1fd5ac75...`); the first test build (`c9eef367...`, same server code) was also downloaded, which is why the file name alone cannot tell them apart.
 
 ## 4. A version number names one file only once it is released
 
