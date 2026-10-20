@@ -67,6 +67,7 @@ async function main(argv) {
   const timeoutMs = opts["timeout-ms"] !== undefined ? lib.parseInteger("timeout-ms", opts["timeout-ms"]) : 20000;
   const readyMs = opts["ready-timeout-ms"] !== undefined ? lib.parseInteger("ready-timeout-ms", opts["ready-timeout-ms"]) : 15000;
   const remote = opts.url !== undefined;
+  if (remote && scenario.scope === "own-server") throw new lib.UsageError(`the scenario "${scenario.name}" changes what the server holds beyond its own test data (its scope is "own-server"): it runs only against a server the driver starts itself, never with --url`);
   if (remote && (opts["data-dir"] || opts.env || opts.root || opts.keep)) throw new lib.UsageError("--data-dir, --env, --root and --keep belong to the self-contained mode; with --url the server is already running");
   if (!remote && (opts["token-env"] || opts["allow-writes"])) throw new lib.UsageError("--token-env and --allow-writes belong to --url");
   const extra = remote ? {} : lib.parseEnvPairs(opts.env);
@@ -146,7 +147,7 @@ async function main(argv) {
         if (token) { try { before = toolCalls((await client.request("GET", "/metrics")).text); } catch { before = undefined; } }
         const ran = await lib.runScenario(client, scenario, { secrets, vars: { run_id: lib.newRunId() }, skipWrites });
         steps.push(...ran.steps);
-        const toolSteps = scenario.steps.filter((s) => (s.tool !== undefined || s.method === "tools/call") && !(skipWrites && s.writes === true)).length;
+        const toolSteps = scenario.steps.filter((s) => (s.tool !== undefined || s.method === "tools/call") && !(skipWrites && lib.isWrite(s))).length;
         if (token && toolSteps > 0) {
           steps.push(await httpStep("metrics: the calls were counted", async (problems) => {
             const res = await client.request("GET", "/metrics");

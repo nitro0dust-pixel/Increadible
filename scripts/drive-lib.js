@@ -416,11 +416,19 @@ function freePort() {
 
 // ---------------------------------------------------------------- scenarios
 
-const SCENARIO_KEYS = new Set(["name", "description", "steps"]);
+const SCENARIO_KEYS = new Set(["name", "description", "scope", "steps"]);
+/** "any": safe against any server it can reach. "own-server": changes what the server holds beyond its own test data (routing rules), so only a server the driver started itself. */
+const SCOPES = new Set(["any", "own-server"]);
+/** What a step that changes something changes: true and "ab-data" the A/B data file, "rules" the routing rules file. */
+const WRITE_KINDS = new Set([true, "ab-data", "rules"]);
+/** A step that changes the server's data (any kind). Such steps are skipped against a server that is already running, unless writes are allowed. */
+const isWrite = (step) => step.writes !== undefined && step.writes !== false;
+/** The most calls one looped step may make: a scenario file must not be able to hammer a server it was pointed at. */
+const MAX_EACH = 1000;
 const TYPE_NAMES = new Set(["string", "number", "boolean", "array", "object", "null"]);
-const STEP_KEYS = new Set(["name", "method", "params", "tool", "arguments", "expect", "save", "writes"]);
+const STEP_KEYS = new Set(["name", "method", "params", "tool", "arguments", "expect", "save", "writes", "each"]);
 const EXPECT_KEYS = new Set(["rpc_error", "message_contains", "tool_error", "contains", "json", "result", "tools_include"]);
-const MATCHERS = new Set(["$type", "$gte", "$lte", "$includes", "$matches", "$exists"]);
+const MATCHERS = new Set(["$type", "$gte", "$lte", "$near", "$includes", "$matches", "$exists"]);
 const isToolStep = (step) => step.tool !== undefined || step.method === "tools/call";
 const isPlainObject = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
 
@@ -434,6 +442,7 @@ function validateScenario(scenario, where = "scenario") {
   if (!scenario || typeof scenario !== "object" || Array.isArray(scenario)) fail("not an object");
   for (const key of Object.keys(scenario)) if (!SCENARIO_KEYS.has(key)) fail(`unknown key "${key}" (a scenario has: ${[...SCENARIO_KEYS].join(", ")})`);
   if (typeof scenario.name !== "string" || scenario.name === "") fail('"name" is required');
+  if (scenario.scope !== undefined && !SCOPES.has(scenario.scope)) fail(`"scope" must be one of: ${[...SCOPES].join(", ")}`);
   if (!Array.isArray(scenario.steps) || scenario.steps.length === 0) fail('"steps" must be a non-empty array');
   const seen = new Set();
   scenario.steps.forEach((step, index) => {
@@ -449,7 +458,12 @@ function validateScenario(scenario, where = "scenario") {
     if (step.tool !== undefined && typeof step.tool !== "string") fail(`${label}: "tool" must be a string`);
     if (step.tool !== undefined && step.params !== undefined) fail(`${label}: "params" belongs to a method step; a tool step takes "arguments"`);
     if (step.method !== undefined && step.arguments !== undefined) fail(`${label}: "arguments" belongs to a tool step; a method step takes "params"`);
-    if (step.writes !== undefined && typeof step.writes !== "boolean") fail(`${label}: "writes" must be true or false`);
+    if (step.writes !== undefined && step.writes !== false && !WRITE_KINDS.has(step.writes)) fail(`${label}: "writes" must be true, false, "ab-data" or "rules"`);
+    if (step.each !== undefined) {
+      if (!Array.isArray(step.each) || step.each.length === 0) fail(`${label}: "each" must be a non-empty list of values`);
+      if (step.each.length > MAX_EACH) fail(`${label}: "each" has ${step.each.length} values; at most ${MAX_EACH} calls per step`);
+      if (step.save !== undefined) fail(`${label}: "save" cannot go with "each" (a loop has no single answer to save)`);
+    }
     if (step.save !== undefined && (!isPlainObject(step.save) || !Object.values(step.save).every((v) => typeof v === "string"))) fail(`${label}: "save" must map names to dotted paths`);
     if (step.expect !== undefined && !isPlainObject(step.expect)) fail(`${label}: "expect" must be an object`);
     const expect = step.expect || {};
@@ -467,6 +481,7 @@ function validateScenario(scenario, where = "scenario") {
         if (!Object.keys(wanted).every((k) => MATCHERS.has(k))) fail(`${where}: unknown matcher (or a matcher mixed with plain keys)`);
         if (wanted.$type !== undefined && !TYPE_NAMES.has(wanted.$type)) fail(`${where}: $type must be one of ${[...TYPE_NAMES].join(", ")}`);
         for (const key of ["$gte", "$lte"]) if (wanted[key] !== undefined && !Number.isFinite(wanted[key])) fail(`${where}: ${key} must be a number`);
+        if (wanted.$near !== undefined && !(Array.isArray(wanted.$near) && wanted.$near.length === 2 && wanted.$near.every((n) => Number.isFinite(n)) && wanted.$near[1] >= 0)) fail(`${where}: $near must be [value, tolerance] with a tolerance of 0 or more`);
         if (wanted.$exists !== undefined && typeof wanted.$exists !== "boolean") fail(`${where}: $exists must be true or false`);
         if (wanted.$includes !== undefined && wanted.$includes === "") fail(`${where}: $includes must not be an empty string (it is found in every text)`);
         if (wanted.$matches !== undefined) {
@@ -539,6 +554,7 @@ function matchValue(actual, wanted) {
     else if (key === "$type") ok = typeOf(actual) === arg;
     else if (key === "$gte") ok = typeof actual === "number" && actual >= arg;
     else if (key === "$lte") ok = typeof actual === "number" && actual <= arg;
+    else if (key === "$near") ok = typeof actual === "number" && Math.abs(actual - arg[0]) <= arg[1];
     else if (key === "$includes") ok = Array.isArray(actual) ? actual.some((x) => sameJson(x, arg)) : typeof actual === "string" && actual.includes(arg);
     else if (key === "$matches") ok = typeof actual === "string" && new RegExp(arg).test(actual);
     else return `unknown matcher ${key}`;
@@ -576,79 +592,110 @@ function toolText(result) {
   return first && typeof first.text === "string" ? first.text : undefined;
 }
 
+/** One execution of one step: sends the request and checks the answer. Never throws: whatever is wrong is in `problems`. A `save` writes into `vars`. */
+async function runOne(client, step, vars, secrets) {
+  const problems = [];
+  let message;
+  let summary = "";
+  try {
+    const method = step.tool !== undefined ? "tools/call" : step.method;
+    const params = step.tool !== undefined ? { name: step.tool, arguments: substitute(step.arguments ?? {}, vars) } : substitute(step.params ?? {}, vars);
+    message = await client.rpc(method, params);
+    const expect = substitute(step.expect || {}, vars); // the expectations may name a variable too (the run id, a saved value)
+    let base; // what json/save look at: the parsed text of a tool answer, or the result itself
+    const show = (text, n) => redact(String(text), secrets).slice(0, n); // hidden BEFORE it is cut, or the cut can leave half a secret
+    const wrong = malformed(message);
+    if (wrong) {
+      problems.push(`${wrong}: ${show(JSON.stringify(message), 160)}`);
+      summary = "malformed";
+    } else if (expect.rpc_error !== undefined) {
+      if (!message.error) problems.push(`expected JSON-RPC error ${expect.rpc_error}, got a result`);
+      else {
+        summary = `error ${message.error.code}`;
+        if (message.error.code !== expect.rpc_error) problems.push(`expected JSON-RPC error ${expect.rpc_error}, got ${message.error.code} (${message.error.message})`);
+        if (expect.message_contains !== undefined && !String(message.error.message).includes(expect.message_contains)) problems.push(`error message does not contain "${expect.message_contains}": ${message.error.message}`);
+      }
+    } else if (message.error) {
+      problems.push(`unexpected JSON-RPC error ${message.error.code}: ${message.error.message}`);
+      summary = `error ${message.error.code}`;
+    } else {
+      const result = message.result;
+      base = result;
+      if (step.tool !== undefined || method === "tools/call") {
+        const isError = result.isError === true;
+        const wantError = expect.tool_error === true;
+        summary = isError ? "tool error" : "ok";
+        if (!Array.isArray(result.content)) problems.push(`the tool answer has no content list: ${show(JSON.stringify(result), 160)}`);
+        if (isError !== wantError) problems.push(wantError ? "expected a tool error (isError true), got a success" : `unexpected tool error: ${show(toolText(result), 200)}`);
+        const text = toolText(result);
+        if (expect.contains !== undefined && !(text || "").includes(expect.contains)) problems.push(`tool text does not contain "${expect.contains}": ${show(text, 200)}`);
+        if (expect.json !== undefined || (step.save && !isError)) {
+          try { base = JSON.parse(text); } catch { problems.push(`tool text is not JSON: ${show(text, 120)}`); base = undefined; }
+        }
+        if (isError && expect.json === undefined) base = undefined;
+        if (expect.json && base !== undefined) {
+          for (const [p, wanted] of Object.entries(expect.json)) { const why = matchValue(getPath(base, p), wanted); if (why) problems.push(`json.${p}: ${why}`); }
+        }
+      } else summary = "ok";
+      for (const [p, wanted] of Object.entries(expect.result || {})) { const why = matchValue(getPath(result, p), wanted); if (why) problems.push(`result.${p}: ${why}`); }
+      if (expect.tools_include) {
+        const names = ((result && result.tools) || []).map((t) => t.name);
+        const missing = expect.tools_include.filter((n) => !names.includes(n));
+        if (missing.length) problems.push(`tools/list lacks: ${missing.join(", ")}`);
+      }
+      if (step.save && base !== undefined) {
+        for (const [name, p] of Object.entries(step.save)) {
+          const value = getPath(base, p);
+          if (value === undefined) problems.push(`save ${name}: nothing at ${p}`); else vars[name] = value;
+        }
+      } else if (step.save) problems.push("save: there is nothing to save from this answer");
+    }
+  } catch (error) {
+    problems.push(redact(error.message, secrets));
+    summary = summary || "no answer";
+  }
+  if (message === undefined && !problems.length) problems.push("the client returned no answer");
+  return { message, problems, summary };
+}
+
+const EACH_PROBLEMS_SHOWN = 5;
+
+/**
+ * A step with "each": the same request once per value, ${each} naming the value and ${index} its place (from 0). One row in the report: how many
+ * calls failed and the first few problems, each with the number of its call. A server that does not answer a call ends the loop: twenty
+ * seconds of waiting for each of a thousand calls would be a long way to learn the same thing.
+ */
+async function runEach(client, step, vars, secrets) {
+  const total = step.each.length;
+  const problems = [];
+  let failed = 0;
+  let last;
+  for (let i = 0; i < total; i++) {
+    const one = await runOne(client, step, { ...vars, each: step.each[i], index: i }, secrets);
+    last = one;
+    if (one.problems.length) {
+      failed++;
+      if (failed <= EACH_PROBLEMS_SHOWN) problems.push(`call ${i + 1} of ${total} (${redact(JSON.stringify(step.each[i]), secrets).slice(0, 60)}): ${one.problems.join("; ")}`);
+    }
+    if (one.summary === "no answer") { problems.push(`stopped after call ${i + 1} of ${total}: the server gave no answer`); break; }
+  }
+  if (failed > EACH_PROBLEMS_SHOWN) problems.push(`... and ${failed - EACH_PROBLEMS_SHOWN} more calls had problems`);
+  return { message: last.message, problems, summary: failed ? `${failed} of ${total} calls failed` : `ok (${total} calls)` };
+}
+
 /** Runs the steps of a scenario against a client (anything with rpc(method, params)). Never throws for a failed step; the step records the problems. */
 async function runScenario(client, scenario, { secrets = [], onStep, vars: initialVars = {}, skipWrites = false } = {}) {
   const vars = { ...initialVars };
   const steps = [];
   for (const step of scenario.steps) {
     const started = Date.now();
-    if (skipWrites && step.writes === true) {
+    if (skipWrites && isWrite(step)) {
       const skipped = { name: step.name, ok: true, skipped: true, ms: 0, summary: "skipped", problems: [], response: undefined };
       steps.push(skipped);
       if (onStep) onStep(skipped);
       continue;
     }
-    const problems = [];
-    let message;
-    let summary = "";
-    try {
-      const method = step.tool !== undefined ? "tools/call" : step.method;
-      const params = step.tool !== undefined ? { name: step.tool, arguments: substitute(step.arguments ?? {}, vars) } : substitute(step.params ?? {}, vars);
-      message = await client.rpc(method, params);
-      const expect = substitute(step.expect || {}, vars); // the expectations may name a variable too (the run id, a saved value)
-      let base; // what json/save look at: the parsed text of a tool answer, or the result itself
-      const show = (text, n) => redact(String(text), secrets).slice(0, n); // hidden BEFORE it is cut, or the cut can leave half a secret
-      const wrong = malformed(message);
-      if (wrong) {
-        problems.push(`${wrong}: ${show(JSON.stringify(message), 160)}`);
-        summary = "malformed";
-      } else if (expect.rpc_error !== undefined) {
-        if (!message.error) problems.push(`expected JSON-RPC error ${expect.rpc_error}, got a result`);
-        else {
-          summary = `error ${message.error.code}`;
-          if (message.error.code !== expect.rpc_error) problems.push(`expected JSON-RPC error ${expect.rpc_error}, got ${message.error.code} (${message.error.message})`);
-          if (expect.message_contains !== undefined && !String(message.error.message).includes(expect.message_contains)) problems.push(`error message does not contain "${expect.message_contains}": ${message.error.message}`);
-        }
-      } else if (message.error) {
-        problems.push(`unexpected JSON-RPC error ${message.error.code}: ${message.error.message}`);
-        summary = `error ${message.error.code}`;
-      } else {
-        const result = message.result;
-        base = result;
-        if (step.tool !== undefined || method === "tools/call") {
-          const isError = result.isError === true;
-          const wantError = expect.tool_error === true;
-          summary = isError ? "tool error" : "ok";
-          if (!Array.isArray(result.content)) problems.push(`the tool answer has no content list: ${show(JSON.stringify(result), 160)}`);
-          if (isError !== wantError) problems.push(wantError ? "expected a tool error (isError true), got a success" : `unexpected tool error: ${show(toolText(result), 200)}`);
-          const text = toolText(result);
-          if (expect.contains !== undefined && !(text || "").includes(expect.contains)) problems.push(`tool text does not contain "${expect.contains}": ${show(text, 200)}`);
-          if (expect.json !== undefined || (step.save && !isError)) {
-            try { base = JSON.parse(text); } catch { problems.push(`tool text is not JSON: ${show(text, 120)}`); base = undefined; }
-          }
-          if (isError && expect.json === undefined) base = undefined;
-          if (expect.json && base !== undefined) {
-            for (const [p, wanted] of Object.entries(expect.json)) { const why = matchValue(getPath(base, p), wanted); if (why) problems.push(`json.${p}: ${why}`); }
-          }
-        } else summary = "ok";
-        for (const [p, wanted] of Object.entries(expect.result || {})) { const why = matchValue(getPath(result, p), wanted); if (why) problems.push(`result.${p}: ${why}`); }
-        if (expect.tools_include) {
-          const names = ((result && result.tools) || []).map((t) => t.name);
-          const missing = expect.tools_include.filter((n) => !names.includes(n));
-          if (missing.length) problems.push(`tools/list lacks: ${missing.join(", ")}`);
-        }
-        if (step.save && base !== undefined) {
-          for (const [name, p] of Object.entries(step.save)) {
-            const value = getPath(base, p);
-            if (value === undefined) problems.push(`save ${name}: nothing at ${p}`); else vars[name] = value;
-          }
-        } else if (step.save) problems.push("save: there is nothing to save from this answer");
-      }
-    } catch (error) {
-      problems.push(redact(error.message, secrets));
-      summary = summary || "no answer";
-    }
-    if (message === undefined && !problems.length) problems.push("the client returned no answer");
+    const { message, problems, summary } = step.each === undefined ? await runOne(client, step, vars, secrets) : await runEach(client, step, vars, secrets);
     // text that came from a server is scrubbed wherever it ends up: in a problem, in the summary, in the stored answer
     const entry = { name: step.name, ok: problems.length === 0, ms: Date.now() - started, summary: redact(summary, secrets), problems: problems.map((p) => redact(p, secrets)), response: message === undefined ? undefined : redactDeep(message, secrets) };
     steps.push(entry);
@@ -811,7 +858,7 @@ function newRunId() {
 }
 
 module.exports = {
-  REPO_ROOT, SCENARIO_DIR, DEFAULT_PROTOCOL_VERSION, WORKDIR_PREFIX, INHERITED_ENV, SECRET_NAME,
+  REPO_ROOT, SCENARIO_DIR, DEFAULT_PROTOCOL_VERSION, WORKDIR_PREFIX, INHERITED_ENV, SECRET_NAME, MAX_EACH, isWrite,
   baseEnv, describeEnv, secretValues, scrub, redact, redactDeep, sameJson,
   makeWorkdir, removeWorkdir, tryRemoveWorkdir, keepWorkdir, dataEnv, entryPoint,
   cleanupNow, ManagedProcess, StdioClient, HttpClient, freePort,

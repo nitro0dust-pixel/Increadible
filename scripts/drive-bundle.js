@@ -65,22 +65,30 @@ function unpack(entries, home) {
 }
 
 /**
- * After a clean exit: the data is in the folder the setting named, and the single-writer lock is gone. When the scenario writes and uses
- * ${run_id}, the data file must contain this run's id; when it writes without it, the file must exist and not be empty.
+ * After a clean exit: the data is in the folder the setting named, and the single-writer lock is gone. When the scenario writes A/B data (`writes`
+ * true or "ab-data") and a writing step uses ${run_id}, the data file must contain this run's id; when it writes without it, the file must exist
+ * and not be empty. When it replaces the routing rules (`writes` "rules"), the rules file next to the data file must exist and not be empty.
  */
-function dataChecks(dataFile, scenario, runId) {
-  const wrote = scenario.steps.some((s) => s.writes === true);
-  // the data file can only be held to this run's id when a step that writes uses it (the id may appear in other steps, say a gateway call)
-  const usesRunId = scenario.steps.some((s) => s.writes === true && JSON.stringify(s).includes("${run_id}"));
+function dataChecks(dataFile, scenario, runId, rulesFile = path.join(path.dirname(dataFile), "rules.yaml")) {
+  const kindOf = (s) => (s.writes === true ? "ab-data" : s.writes);
+  const wroteAb = scenario.steps.some((s) => kindOf(s) === "ab-data");
+  const wroteRules = scenario.steps.some((s) => kindOf(s) === "rules");
+  // the data file can only be held to this run's id when a step that writes it uses the id (the id may appear in other steps, say a gateway call)
+  const usesRunId = scenario.steps.some((s) => kindOf(s) === "ab-data" && JSON.stringify(s).includes("${run_id}"));
   const problems = [];
-  if (wrote) {
+  if (wroteAb) {
     if (!fs.existsSync(dataFile)) problems.push(`${dataFile} was not created`);
     else if (fs.statSync(dataFile).size === 0) problems.push(`${dataFile} is empty`);
     else if (usesRunId && !fs.readFileSync(dataFile, "utf8").includes(runId)) problems.push(`${dataFile} does not contain this run (${runId})`);
   }
+  if (wroteRules) {
+    if (!fs.existsSync(rulesFile)) problems.push(`${rulesFile} was not created`);
+    else if (fs.statSync(rulesFile).size === 0) problems.push(`${rulesFile} is empty`);
+  }
+  const wrote = wroteAb || wroteRules;
   const lock = `${dataFile}.lock`;
   return [
-    lib.driverStep("data landed in the chosen folder", problems, problems.length ? "missing" : wrote ? "ab-data.jsonl written" : "nothing to write"),
+    lib.driverStep("data landed in the chosen folder", problems, problems.length ? "missing" : wrote ? [wroteAb && "ab-data.jsonl", wroteRules && "rules.yaml"].filter(Boolean).join(" and ") + " written" : "nothing to write"),
     lib.driverStep("no lock file left behind", fs.existsSync(lock) ? [`${lock} still exists after a clean exit`] : [], fs.existsSync(lock) ? "left" : "removed"),
   ];
 }
@@ -138,7 +146,7 @@ async function main(argv) {
       serverInfo = run.serverInfo;
       steps.push(...run.results[0].steps);
       if (!run.results[0].ok && run.stderr) notes.push(`server stderr (last lines): ${run.stderr.replace(/\n/g, " | ")}`);
-      if (env.AB_DATA_FILE) steps.push(...dataChecks(env.AB_DATA_FILE, scenario, runId));
+      if (env.AB_DATA_FILE) steps.push(...dataChecks(env.AB_DATA_FILE, scenario, runId, env.RULES_FILE));
       results = [{ scenario: scenario.name, ok: steps.every((s) => s.ok), steps }];
     }
   } finally {

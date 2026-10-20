@@ -1,0 +1,549 @@
+{
+  "name": "routing-rules",
+  "description": "The routing rules: the three built-in rules, then a rule set of our own (priority order, ties, a disabled rule, lists, a rule id that is also an Object property), rule sets that are refused and change nothing, and no rules at all. Every expected provider is worked out from the rules written in the scenario. It replaces the server's routing rules, and the server saves them to its rules file, so it runs only against a server the driver starts itself.",
+  "scope": "own-server",
+  "steps": [
+    {
+      "name": "built-in: a low-complexity question goes to the cheap model",
+      "tool": "apply_routing_rules",
+      "arguments": {
+        "task_type": "qa",
+        "task_complexity": "low"
+      },
+      "expect": {
+        "json": {
+          "provider": "claude-haiku",
+          "rule_id": "simple-tasks",
+          "fallback.0": "claude-sonnet",
+          "reason": "Haiku optimal for low-complexity tasks"
+        }
+      }
+    },
+    {
+      "name": "built-in: a low-complexity summary does too (a list of task types)",
+      "tool": "apply_routing_rules",
+      "arguments": {
+        "task_type": "summary",
+        "task_complexity": "low"
+      },
+      "expect": {
+        "json": {
+          "provider": "claude-haiku",
+          "rule_id": "simple-tasks"
+        }
+      }
+    },
+    {
+      "name": "built-in: the same question at high complexity falls through to the default",
+      "tool": "apply_routing_rules",
+      "arguments": {
+        "task_type": "qa",
+        "task_complexity": "high"
+      },
+      "expect": {
+        "json": {
+          "provider": "claude-sonnet",
+          "rule_id": "default",
+          "reason": "Balanced default",
+          "fallback.length": 0
+        }
+      }
+    },
+    {
+      "name": "built-in: a critical security task goes to the strongest model",
+      "tool": "apply_routing_rules",
+      "arguments": {
+        "task_type": "security",
+        "priority": "critical"
+      },
+      "expect": {
+        "json": {
+          "provider": "claude-opus",
+          "rule_id": "critical-tasks",
+          "fallback.0": "gpt-4"
+        }
+      }
+    },
+    {
+      "name": "built-in: a critical audit does too",
+      "tool": "apply_routing_rules",
+      "arguments": {
+        "task_type": "audit",
+        "priority": "critical"
+      },
+      "expect": {
+        "json": {
+          "provider": "claude-opus",
+          "rule_id": "critical-tasks"
+        }
+      }
+    },
+    {
+      "name": "built-in: security work that is not critical gets the default",
+      "tool": "apply_routing_rules",
+      "arguments": {
+        "task_type": "security",
+        "priority": "normal"
+      },
+      "expect": {
+        "json": {
+          "provider": "claude-sonnet",
+          "rule_id": "default"
+        }
+      }
+    },
+    {
+      "name": "built-in: an unknown task type gets the default",
+      "tool": "apply_routing_rules",
+      "arguments": {
+        "task_type": "poetry",
+        "task_complexity": "low"
+      },
+      "expect": {
+        "json": {
+          "provider": "claude-sonnet",
+          "rule_id": "default"
+        }
+      }
+    },
+    {
+      "name": "built-in: a request without the property a rule asks for does not match it",
+      "tool": "apply_routing_rules",
+      "arguments": {
+        "task_type": "qa"
+      },
+      "expect": {
+        "json": {
+          "provider": "claude-sonnet",
+          "rule_id": "default"
+        }
+      }
+    },
+    {
+      "name": "built-in: the statistics count what was routed",
+      "tool": "get_rule_stats",
+      "expect": {
+        "json": {
+          "total_requests": 8,
+          "rules_applied.simple-tasks": 2,
+          "rules_applied.critical-tasks": 2,
+          "rules_applied.default": 4,
+          "rules_count": 3,
+          "enabled_rules": 3,
+          "provider_breakdown.claude-haiku": "25.0%",
+          "provider_breakdown.claude-opus": "25.0%",
+          "provider_breakdown.claude-sonnet": "50.0%"
+        }
+      }
+    },
+    {
+      "name": "replace the rules with a set of our own",
+      "tool": "update_rules",
+      "writes": "rules",
+      "arguments": {
+        "rules": [
+          {
+            "id": "first",
+            "enabled": true,
+            "priority": 1,
+            "match": {
+              "task_type": "x"
+            },
+            "provider": "p-first",
+            "fallback": [
+              "f0"
+            ],
+            "reason": "first rule"
+          },
+          {
+            "id": "off",
+            "enabled": false,
+            "priority": 0,
+            "match": {},
+            "provider": "p-off"
+          },
+          {
+            "id": "listed",
+            "enabled": true,
+            "priority": 2,
+            "match": {
+              "task_type": [
+                "y",
+                "z"
+              ]
+            },
+            "provider": "p-listed",
+            "fallback": [
+              "f1",
+              "f2"
+            ],
+            "reason": "listed types"
+          },
+          {
+            "id": "constructor",
+            "enabled": true,
+            "priority": 3,
+            "match": {
+              "task_type": "proto"
+            },
+            "provider": "p-ctor"
+          },
+          {
+            "id": "tie-a",
+            "enabled": true,
+            "priority": 5,
+            "match": {},
+            "provider": "p-a"
+          },
+          {
+            "id": "tie-b",
+            "enabled": true,
+            "priority": 5,
+            "match": {},
+            "provider": "p-b"
+          }
+        ]
+      },
+      "expect": {
+        "json": {
+          "status": "success",
+          "message": "Updated 6 rules"
+        }
+      }
+    },
+    {
+      "name": "own rules: the lowest number among the enabled rules wins (a disabled rule with an even lower number and an empty match is skipped)",
+      "tool": "apply_routing_rules",
+      "arguments": {
+        "task_type": "x"
+      },
+      "expect": {
+        "json": {
+          "provider": "p-first",
+          "rule_id": "first",
+          "reason": "first rule",
+          "fallback.0": "f0"
+        }
+      }
+    },
+    {
+      "name": "own rules: a list matches any of its values (y)",
+      "tool": "apply_routing_rules",
+      "arguments": {
+        "task_type": "y"
+      },
+      "expect": {
+        "json": {
+          "provider": "p-listed",
+          "rule_id": "listed",
+          "fallback.1": "f2"
+        }
+      }
+    },
+    {
+      "name": "own rules: a list matches any of its values (z)",
+      "tool": "apply_routing_rules",
+      "arguments": {
+        "task_type": "z"
+      },
+      "expect": {
+        "json": {
+          "provider": "p-listed"
+        }
+      }
+    },
+    {
+      "name": "own rules: a rule id that is a name every object has still counts as a rule id",
+      "tool": "apply_routing_rules",
+      "arguments": {
+        "task_type": "proto"
+      },
+      "expect": {
+        "json": {
+          "provider": "p-ctor",
+          "rule_id": "constructor",
+          "reason": {
+            "$exists": false
+          },
+          "fallback.length": 0
+        }
+      }
+    },
+    {
+      "name": "own rules: of two rules with the same number the first in the list wins",
+      "tool": "apply_routing_rules",
+      "arguments": {
+        "task_type": "other"
+      },
+      "expect": {
+        "json": {
+          "provider": "p-a",
+          "rule_id": "tie-a"
+        }
+      }
+    },
+    {
+      "name": "send the tied rules the other way round",
+      "tool": "update_rules",
+      "writes": "rules",
+      "arguments": {
+        "rules": [
+          {
+            "id": "first",
+            "enabled": true,
+            "priority": 1,
+            "match": {
+              "task_type": "x"
+            },
+            "provider": "p-first",
+            "fallback": [
+              "f0"
+            ],
+            "reason": "first rule"
+          },
+          {
+            "id": "off",
+            "enabled": false,
+            "priority": 0,
+            "match": {},
+            "provider": "p-off"
+          },
+          {
+            "id": "listed",
+            "enabled": true,
+            "priority": 2,
+            "match": {
+              "task_type": [
+                "y",
+                "z"
+              ]
+            },
+            "provider": "p-listed",
+            "fallback": [
+              "f1",
+              "f2"
+            ],
+            "reason": "listed types"
+          },
+          {
+            "id": "constructor",
+            "enabled": true,
+            "priority": 3,
+            "match": {
+              "task_type": "proto"
+            },
+            "provider": "p-ctor"
+          },
+          {
+            "id": "tie-b",
+            "enabled": true,
+            "priority": 5,
+            "match": {},
+            "provider": "p-b"
+          },
+          {
+            "id": "tie-a",
+            "enabled": true,
+            "priority": 5,
+            "match": {},
+            "provider": "p-a"
+          }
+        ]
+      },
+      "expect": {
+        "json": {
+          "status": "success"
+        }
+      }
+    },
+    {
+      "name": "own rules: now the other one wins the tie",
+      "tool": "apply_routing_rules",
+      "arguments": {
+        "task_type": "other"
+      },
+      "expect": {
+        "json": {
+          "provider": "p-b",
+          "rule_id": "tie-b"
+        }
+      }
+    },
+    {
+      "name": "refused: two rules with one id",
+      "tool": "update_rules",
+      "arguments": {
+        "rules": [
+          {
+            "id": "same",
+            "enabled": true,
+            "priority": 1,
+            "match": {},
+            "provider": "p1"
+          },
+          {
+            "id": "same",
+            "enabled": true,
+            "priority": 2,
+            "match": {},
+            "provider": "p2"
+          }
+        ]
+      },
+      "expect": {
+        "tool_error": true,
+        "contains": "duplicate rule id: same"
+      }
+    },
+    {
+      "name": "refused: a rule without a provider",
+      "tool": "update_rules",
+      "arguments": {
+        "rules": [
+          {
+            "id": "a",
+            "enabled": true,
+            "priority": 1,
+            "match": {}
+          }
+        ]
+      },
+      "expect": {
+        "tool_error": true,
+        "contains": "each rule needs"
+      }
+    },
+    {
+      "name": "refused: a priority that is text",
+      "tool": "update_rules",
+      "arguments": {
+        "rules": [
+          {
+            "id": "a",
+            "enabled": true,
+            "priority": "1",
+            "match": {},
+            "provider": "p"
+          }
+        ]
+      },
+      "expect": {
+        "tool_error": true,
+        "contains": "each rule needs"
+      }
+    },
+    {
+      "name": "refused: a match that is a list",
+      "tool": "update_rules",
+      "arguments": {
+        "rules": [
+          {
+            "id": "a",
+            "enabled": true,
+            "priority": 1,
+            "match": [
+              "task_type"
+            ],
+            "provider": "p"
+          }
+        ]
+      },
+      "expect": {
+        "tool_error": true,
+        "contains": "match must be an object"
+      }
+    },
+    {
+      "name": "refused: a fallback that is not a list of names",
+      "tool": "update_rules",
+      "arguments": {
+        "rules": [
+          {
+            "id": "a",
+            "enabled": true,
+            "priority": 1,
+            "match": {},
+            "provider": "p",
+            "fallback": "x"
+          }
+        ]
+      },
+      "expect": {
+        "tool_error": true,
+        "contains": "fallback must be a list"
+      }
+    },
+    {
+      "name": "refused: an empty id",
+      "tool": "update_rules",
+      "arguments": {
+        "rules": [
+          {
+            "id": "",
+            "enabled": true,
+            "priority": 1,
+            "match": {},
+            "provider": "p"
+          }
+        ]
+      },
+      "expect": {
+        "tool_error": true,
+        "contains": "must not be empty"
+      }
+    },
+    {
+      "name": "after the refusals the rules are as they were",
+      "tool": "apply_routing_rules",
+      "arguments": {
+        "task_type": "other"
+      },
+      "expect": {
+        "json": {
+          "provider": "p-b",
+          "rule_id": "tie-b"
+        }
+      }
+    },
+    {
+      "name": "an empty list of rules is accepted",
+      "tool": "update_rules",
+      "writes": "rules",
+      "arguments": {
+        "rules": []
+      },
+      "expect": {
+        "json": {
+          "status": "success",
+          "message": "Updated 0 rules"
+        }
+      }
+    },
+    {
+      "name": "with no rules every request gets the default model",
+      "tool": "apply_routing_rules",
+      "arguments": {
+        "task_type": "x"
+      },
+      "expect": {
+        "json": {
+          "provider": "claude-sonnet",
+          "rule_id": "default",
+          "reason": "No matching rule, using default",
+          "fallback.length": 0
+        }
+      }
+    },
+    {
+      "name": "the statistics count every request, and no rule is left",
+      "tool": "get_rule_stats",
+      "expect": {
+        "json": {
+          "total_requests": 16,
+          "rules_count": 0,
+          "enabled_rules": 0
+        }
+      }
+    }
+  ]
+}

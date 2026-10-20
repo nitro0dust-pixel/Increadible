@@ -1,0 +1,418 @@
+{
+  "name": "ab-statistics",
+  "description": "Known measurements in, known statistics out. Variant A gets 10 + (i mod 7) and variant B 14 + (i mod 5) for i = 0..59, so mean(A) = 12.9, mean(B) = 16, s(A) = 2.0059, s(B) = 1.4261 and Cohen's d = -1.78, worked out by hand (the test of this scenario repeats the arithmetic from the values below). The p-value is checked as a bound only: the server turns t into an approximate z. It adds 240 measurements to the server's A/B data, which is never compacted, so it runs only against a server the driver starts itself.",
+  "scope": "own-server",
+  "steps": [
+    {
+      "name": "create the experiment",
+      "tool": "create_experiment",
+      "writes": true,
+      "arguments": {
+        "id": "stats-${run_id}",
+        "name": "known data",
+        "hypothesis": "known data gives known statistics",
+        "variants": [
+          {
+            "id": "A",
+            "name": "a",
+            "config": {}
+          },
+          {
+            "id": "B",
+            "name": "b",
+            "config": {}
+          }
+        ],
+        "metrics": [
+          {
+            "id": "quality",
+            "name": "quality",
+            "type": "continuous",
+            "aggregation": "mean"
+          }
+        ]
+      },
+      "expect": {
+        "json": {
+          "status": "success",
+          "experiment_id": "stats-${run_id}"
+        }
+      }
+    },
+    {
+      "name": "record 60 measurements for A",
+      "tool": "record_metric",
+      "writes": true,
+      "each": [10, 11, 12, 13, 14, 15, 16, 10, 11, 12, 13, 14, 15, 16, 10, 11, 12, 13, 14, 15, 16, 10, 11, 12, 13, 14, 15, 16, 10, 11, 12, 13, 14, 15, 16, 10, 11, 12, 13, 14, 15, 16, 10, 11, 12, 13, 14, 15, 16, 10, 11, 12, 13, 14, 15, 16, 10, 11, 12, 13],
+      "arguments": {
+        "experiment_id": "stats-${run_id}",
+        "variant_id": "A",
+        "metrics": {
+          "quality": "${each}"
+        }
+      },
+      "expect": {
+        "json": {
+          "status": "recorded"
+        }
+      }
+    },
+    {
+      "name": "results are incomplete at 60 of 100 samples",
+      "tool": "get_experiment_results",
+      "arguments": {
+        "experiment_id": "stats-${run_id}"
+      },
+      "expect": {
+        "json": {
+          "status": "incomplete",
+          "statistical_analysis.current_samples": 60,
+          "statistical_analysis.message": "Need 40 more samples"
+        }
+      }
+    },
+    {
+      "name": "no winner is recommended yet",
+      "tool": "recommend_winner",
+      "arguments": {
+        "experiment_id": "stats-${run_id}"
+      },
+      "expect": {
+        "json": {
+          "recommendation": "Insufficient data for recommendation"
+        }
+      }
+    },
+    {
+      "name": "record 60 measurements for B",
+      "tool": "record_metric",
+      "writes": true,
+      "each": [14, 15, 16, 17, 18, 14, 15, 16, 17, 18, 14, 15, 16, 17, 18, 14, 15, 16, 17, 18, 14, 15, 16, 17, 18, 14, 15, 16, 17, 18, 14, 15, 16, 17, 18, 14, 15, 16, 17, 18, 14, 15, 16, 17, 18, 14, 15, 16, 17, 18, 14, 15, 16, 17, 18, 14, 15, 16, 17, 18],
+      "arguments": {
+        "experiment_id": "stats-${run_id}",
+        "variant_id": "B",
+        "metrics": {
+          "quality": "${each}"
+        }
+      },
+      "expect": {
+        "json": {
+          "status": "recorded"
+        }
+      }
+    },
+    {
+      "name": "results: means, spreads, intervals, effect size and p-value of the known data",
+      "tool": "get_experiment_results",
+      "arguments": {
+        "experiment_id": "stats-${run_id}"
+      },
+      "expect": {
+        "json": {
+          "status": "complete",
+          "variant_results.A.metrics.quality.sample_size": 60,
+          "variant_results.A.metrics.quality.mean": {
+            "$near": [12.9, 0.0001]
+          },
+          "variant_results.A.metrics.quality.std_dev": {
+            "$near": [2.0059, 0.0001]
+          },
+          "variant_results.A.metrics.quality.ci_95.0": {
+            "$gte": 12.369,
+            "$lte": 12.393
+          },
+          "variant_results.A.metrics.quality.ci_95.1": {
+            "$gte": 13.407,
+            "$lte": 13.431
+          },
+          "variant_results.B.metrics.quality.sample_size": 60,
+          "variant_results.B.metrics.quality.mean": {
+            "$near": [16, 0.0001]
+          },
+          "variant_results.B.metrics.quality.std_dev": {
+            "$near": [1.4261, 0.0001]
+          },
+          "variant_results.B.metrics.quality.ci_95.0": {
+            "$gte": 15.622,
+            "$lte": 15.64
+          },
+          "variant_results.B.metrics.quality.ci_95.1": {
+            "$gte": 16.36,
+            "$lte": 16.378
+          },
+          "statistical_analysis.significance_level": 0.05,
+          "statistical_analysis.p_values.quality": {
+            "$lte": 0.000001
+          },
+          "statistical_analysis.effect_sizes.quality": {
+            "$near": [-1.78, 0.005]
+          },
+          "winner": "B",
+          "confidence": {
+            "$gte": 0.95
+          }
+        }
+      }
+    },
+    {
+      "name": "the winner is B",
+      "tool": "recommend_winner",
+      "arguments": {
+        "experiment_id": "stats-${run_id}"
+      },
+      "expect": {
+        "json": {
+          "recommendation": "B"
+        }
+      }
+    },
+    {
+      "name": "create a second experiment",
+      "tool": "create_experiment",
+      "writes": true,
+      "arguments": {
+        "id": "same-${run_id}",
+        "name": "known data",
+        "hypothesis": "the same data in both variants shows no difference",
+        "variants": [
+          {
+            "id": "A",
+            "name": "a",
+            "config": {}
+          },
+          {
+            "id": "B",
+            "name": "b",
+            "config": {}
+          }
+        ],
+        "metrics": [
+          {
+            "id": "quality",
+            "name": "quality",
+            "type": "continuous",
+            "aggregation": "mean"
+          }
+        ]
+      },
+      "expect": {
+        "json": {
+          "status": "success",
+          "experiment_id": "same-${run_id}"
+        }
+      }
+    },
+    {
+      "name": "the same 60 measurements for A",
+      "tool": "record_metric",
+      "writes": true,
+      "each": [10, 11, 12, 13, 14, 15, 16, 10, 11, 12, 13, 14, 15, 16, 10, 11, 12, 13, 14, 15, 16, 10, 11, 12, 13, 14, 15, 16, 10, 11, 12, 13, 14, 15, 16, 10, 11, 12, 13, 14, 15, 16, 10, 11, 12, 13, 14, 15, 16, 10, 11, 12, 13, 14, 15, 16, 10, 11, 12, 13],
+      "arguments": {
+        "experiment_id": "same-${run_id}",
+        "variant_id": "A",
+        "metrics": {
+          "quality": "${each}"
+        }
+      },
+      "expect": {
+        "json": {
+          "status": "recorded"
+        }
+      }
+    },
+    {
+      "name": "the same 60 measurements for B",
+      "tool": "record_metric",
+      "writes": true,
+      "each": [10, 11, 12, 13, 14, 15, 16, 10, 11, 12, 13, 14, 15, 16, 10, 11, 12, 13, 14, 15, 16, 10, 11, 12, 13, 14, 15, 16, 10, 11, 12, 13, 14, 15, 16, 10, 11, 12, 13, 14, 15, 16, 10, 11, 12, 13, 14, 15, 16, 10, 11, 12, 13, 14, 15, 16, 10, 11, 12, 13],
+      "arguments": {
+        "experiment_id": "same-${run_id}",
+        "variant_id": "B",
+        "metrics": {
+          "quality": "${each}"
+        }
+      },
+      "expect": {
+        "json": {
+          "status": "recorded"
+        }
+      }
+    },
+    {
+      "name": "results: no difference, p = 1, no winner",
+      "tool": "get_experiment_results",
+      "arguments": {
+        "experiment_id": "same-${run_id}"
+      },
+      "expect": {
+        "json": {
+          "status": "complete",
+          "variant_results.A.metrics.quality.mean": {
+            "$near": [12.9, 0.0001]
+          },
+          "variant_results.B.metrics.quality.mean": {
+            "$near": [12.9, 0.0001]
+          },
+          "statistical_analysis.p_values.quality": {
+            "$near": [1, 0.000001]
+          },
+          "statistical_analysis.effect_sizes.quality": {
+            "$near": [0, 0.000001]
+          },
+          "confidence": 0,
+          "winner": {
+            "$exists": false
+          }
+        }
+      }
+    },
+    {
+      "name": "no clear winner",
+      "tool": "recommend_winner",
+      "arguments": {
+        "experiment_id": "same-${run_id}"
+      },
+      "expect": {
+        "json": {
+          "recommendation": "No clear winner"
+        }
+      }
+    },
+    {
+      "name": "a user keeps their variant",
+      "tool": "assign_variant",
+      "writes": true,
+      "arguments": {
+        "experiment_id": "stats-${run_id}",
+        "user_id": "driver-user"
+      },
+      "save": {
+        "first_variant": "variant_id"
+      },
+      "expect": {
+        "json": {
+          "variant_id": {
+            "$matches": "^(A|B)$"
+          },
+          "experiment_id": "stats-${run_id}"
+        }
+      }
+    },
+    {
+      "name": "the same user gets the same variant again",
+      "tool": "assign_variant",
+      "writes": true,
+      "arguments": {
+        "experiment_id": "stats-${run_id}",
+        "user_id": "driver-user"
+      },
+      "expect": {
+        "json": {
+          "variant_id": "${first_variant}"
+        }
+      }
+    },
+    {
+      "name": "error: a variant that is not in the experiment",
+      "tool": "record_metric",
+      "arguments": {
+        "experiment_id": "stats-${run_id}",
+        "variant_id": "Z",
+        "metrics": {
+          "quality": 1
+        }
+      },
+      "expect": {
+        "tool_error": true,
+        "contains": "is not part of experiment"
+      }
+    },
+    {
+      "name": "error: a metric the experiment does not have",
+      "tool": "record_metric",
+      "arguments": {
+        "experiment_id": "stats-${run_id}",
+        "variant_id": "A",
+        "metrics": {
+          "nope": 1
+        }
+      },
+      "expect": {
+        "tool_error": true,
+        "contains": "Unknown metric"
+      }
+    },
+    {
+      "name": "error: a value that is not a number",
+      "tool": "record_metric",
+      "arguments": {
+        "experiment_id": "stats-${run_id}",
+        "variant_id": "A",
+        "metrics": {
+          "quality": "x"
+        }
+      },
+      "expect": {
+        "tool_error": true,
+        "contains": "must be a finite number"
+      }
+    },
+    {
+      "name": "error: an experiment that does not exist",
+      "tool": "get_experiment_results",
+      "arguments": {
+        "experiment_id": "no-such-${run_id}"
+      },
+      "expect": {
+        "tool_error": true,
+        "contains": "Experiment not found"
+      }
+    },
+    {
+      "name": "error: an id that is already taken",
+      "tool": "create_experiment",
+      "arguments": {
+        "id": "stats-${run_id}",
+        "name": "known data",
+        "hypothesis": "again",
+        "variants": [
+          {
+            "id": "A",
+            "name": "a",
+            "config": {}
+          },
+          {
+            "id": "B",
+            "name": "b",
+            "config": {}
+          }
+        ],
+        "metrics": [
+          {
+            "id": "quality",
+            "name": "quality",
+            "type": "continuous",
+            "aggregation": "mean"
+          }
+        ]
+      },
+      "expect": {
+        "tool_error": true,
+        "contains": "already exists"
+      }
+    },
+    {
+      "name": "the refused calls changed nothing: still 60 and 60 samples",
+      "tool": "get_experiment_results",
+      "arguments": {
+        "experiment_id": "stats-${run_id}"
+      },
+      "expect": {
+        "json": {
+          "variant_results.A.metrics.quality.sample_size": 60,
+          "variant_results.B.metrics.quality.sample_size": 60
+        }
+      }
+    }
+  ]
+}
