@@ -36,14 +36,14 @@ manifest sets (`AB_FSYNC=true` by default, `AB_LAZY_OPEN=true`).
 
 Every driver takes `--help` and prints its usage. Exit code: **0** every check passed, **1** a check failed, **2** the driver could not run (a
 missing build, an unknown option, a number that is not a number, a scenario file with a typo): it prints a message, never a stack trace, and
-it has started and created nothing yet. A driver you interrupt (Ctrl-C or `kill`) ends the servers it started and removes its work
-directory before it leaves, with exit code 130 (SIGINT) or 143 (SIGTERM); `kill -9` cannot be answered, and leaves what it found:
+it has started and created nothing yet. A driver you interrupt (Ctrl-C, `kill`, or a closed terminal) ends the servers it started and removes its work
+directory before it leaves, with exit code 130 (SIGINT), 143 (SIGTERM) or 129 (SIGHUP); a server that ignores SIGTERM is killed a moment later. `kill -9` cannot be answered, and leaves what it found:
 the work directory (`increadible-drive-*` in the temporary folder) and, for the http driver, its server.
 
 ## 3. Execution steps
 
 The commands are the same in bash and in PowerShell; where they differ the two forms are given. Add `--json` to any of them for a
-machine-readable report (the same checks with the full answers, and the server's stderr). Through npm the banner `> increadible@... drive:...`
+machine-readable report (the same checks with the full answers; the stdio and http reports also carry the server's stderr, the probe and bundle reports do not). Through npm the banner `> increadible@... drive:...`
 is printed first, so for a machine to read it use `npm --silent run drive:stdio -- --json` or `node scripts/drive-stdio.js --json`.
 
 ### 3.1 stdio
@@ -90,7 +90,7 @@ Remove-Item Env:MY_TOKEN
 
 `--url` takes the server's address only (scheme, host, port): a path, a query or a user name and password in it is refused (exit code 2), because the
 driver uses the server's own `/mcp`, `/ready`, `/health` and `/metrics`. The token is read from the variable you name and nowhere else (not from the command
-line, where other users of the machine could see it). Without `--token-env` the auth and metrics steps are left out, and a server that wants a token fails at the handshake.
+line, where other users of the machine could see it). Without `--token-env` the auth and metrics steps are left out, and a server that wants a token fails at the handshake. A token sent over plain `http` to an address that is not this machine gets a warning line in the report. `--ready-timeout-ms N` (how long to wait for `/ready`, default 15000) works in both modes.
 
 **The steps that write A/B data are skipped** (the report says `SKIP`) because the A/B log is append-only and never compacted: a test
 experiment on a deployment stays there. Pass `--allow-writes` only for a server whose data you do not mind. The steps that remain still touch the
@@ -124,7 +124,7 @@ with exactly the manifest's command, arguments and environment; the scenario run
 (and, when the scenario names its experiments with `${run_id}`, that it holds this run) in the data folder, and that no `.lock` file is left. Expected: `PASS 22/22`.
 `--build` makes the package first. The driver uses the Node that runs it (`--node PATH` to choose another); Claude Desktop uses its own, so
 the Node version in Claude Desktop is **not** tested here. **The package's code is run**: open only a package you built or trust. "Well-formed" means checksums and
-file names are sound, not that the package is safe, and the zip is read into memory whole.
+file names are sound, not that the package is safe, and the zip is inflated into memory whole (a package that expands to a huge size can exhaust it).
 
 ## 4. Reading a report
 
@@ -202,14 +202,18 @@ Matchers: a plain value (compared as JSON; objects without regard to the order o
 `$includes`, `$matches` (a regular expression, which must compile) or `$exists`. `${run_id}` (unique per run) and every saved name are replaced in `arguments`,
 `params` and `expect`. A file with a misspelled key (`argumnets`, `tool_eror`), a duplicate step name, an unknown matcher, a wrong type, or an expectation its kind of step can never
 evaluate (`json` on a method step, `message_contains` without `rpc_error`) is refused with the step named, before anything is started, because a check that
-silently checks nothing is worse than no check.
+silently checks nothing is worse than no check. For the same reason an expectation that holds for anything is refused too: an empty `contains`, `message_contains`, `tools_include`, `json` or `result`, an empty
+`$includes` or `$matches`, a `$type` that is not a type name, a `$gte`/`$lte` that is not a number, an unknown key at the top of the file.
+
+Whatever a step expects, the answer to it must be a well-formed JSON-RPC answer: `"jsonrpc": "2.0"`, exactly one of `result` (an object) and `error` (an object with an integer `code`) and, for
+a tool step, a `content` list; otherwise the step fails with `malformed`. Over HTTP the answer must also carry the id of the request.
 
 ## 7. Safety
 
 | Question | Answer |
 |---|---|
 | What does a run leave behind? | Nothing, unless you pass `--keep` or `--data-dir` (the bundle driver's `--data-dir` receives the server's data and nothing else; the package is unpacked into a folder of the driver's own). Its work directory is created with the prefix `increadible-drive-` and only such a directory is ever removed. Interrupted with Ctrl-C or `kill`, it cleans up (section 2); after `kill -9` it cannot. |
-| Which secrets can it show? | Those it knows. The values of the server's variables whose name contains TOKEN, SECRET, PASSWORD, KEY or CREDENTIAL, the random token of the http driver and a token from `--token-env` are replaced by `<hidden>` in everything the driver prints that came from a server (the answers, the problems, the server's stderr), when they are four characters or longer; a secret it was never told about, or a shorter one, cannot be hidden. Control characters other than tab and line breaks in such text are replaced by `?`, so a server cannot steer your terminal. The bundle driver shows a setting as `(set)` when the manifest marks it `sensitive`, when its name looks like a secret, and for `contact`. A test passes secrets in and looks for them in the output. |
+| Which secrets can it show? | Those it knows. The values of the server's variables whose name contains TOKEN, SECRET, PASSWORD, KEY or CREDENTIAL, the random token of the http driver and a token from `--token-env` are replaced by `<hidden>` in everything the driver prints that came from a server (the answers, the problems, the summaries, the server's stderr), when they are four characters or longer, also when the server echoes them as JSON escapes them and before any text is cut short; a secret it was never told about, or a shorter one, cannot be hidden. Control characters other than tab and line breaks, including the C1 range some terminals obey, in such text are replaced by `?`, so a server cannot steer your terminal. The bundle driver shows a setting as `(set)` when the manifest marks it `sensitive`, when its name looks like a secret, and for `contact`. A test passes secrets in and looks for them in the output. |
 | What does the server inherit from your shell? | Only `PATH`, `HOME`, `USERPROFILE`, `SystemRoot`, `SYSTEMROOT`, `TEMP`, `TMP`, `TMPDIR`, `LANG` and `LC_ALL`, plus what you give with `--env`. Your tokens do not reach it. |
 | Does it open a port? | The http and the probe driver, on `127.0.0.1` and a free port, for the length of the run. |
 | Does it write to a deployment? | Not data, by default (section 3.3); the steps that run still change the target's in-memory statistics and counters. |

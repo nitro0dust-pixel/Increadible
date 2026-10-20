@@ -76,6 +76,7 @@ const privateTmp = () => fs.mkdtempSync(path.join(tmp, "private-tmp-"));
 const FAKE_HTTP = `
   const http = require("http"); const fs = require("fs"); const os = require("os"); const path = require("path");
   fs.writeFileSync(path.join(process.env.TMPDIR || os.tmpdir(), "fake-http.pid"), String(process.pid));
+  if (process.env.FAKE_STUBBORN) { process.on("SIGTERM", () => {}); process.on("SIGINT", () => {}); }
   http.createServer((req, res) => {
     let body = ""; req.on("data", (d) => (body += d));
     req.on("end", () => {
@@ -536,6 +537,33 @@ describe("the review's findings", () => {
       expect(pending(tmpdir)).toEqual([]);
     }, 60_000);
 
+    it("stdio: SIGHUP (the terminal closed) cleans up too, exit code 129 (CR-06, R-05)", async () => {
+      const tmpdir = privateTmp();
+      const fake = fakeRoot("interrupt-hup", { "main.js": FAKE_STDIO });
+      const run = driveAsync("drive-stdio.js", ["--root", fake, "--scenario", slow, "--env", "FAKE_DELAY=250"], { TMPDIR: tmpdir });
+      await waitFor("the server's pid file", () => fs.existsSync(path.join(tmpdir, "fake-stdio.pid")));
+      const pid = Number(fs.readFileSync(path.join(tmpdir, "fake-stdio.pid"), "utf8"));
+      await new Promise((r) => setTimeout(r, 700));
+      run.child.kill("SIGHUP");
+      expect((await run.exit).code).toBe(129);
+      await waitFor("the server to be gone", () => !alive(pid), 5000);
+      expect(pending(tmpdir)).toEqual([]);
+    }, 60_000);
+
+    it("http: a server that ignores SIGTERM and SIGINT is ended all the same (R-06)", async () => {
+      const tmpdir = privateTmp();
+      const fake = fakeRoot("interrupt-stubborn", { "index.js": FAKE_HTTP });
+      const run = driveAsync("drive-http.js", ["--root", fake, "--scenario", slow, "--env", "FAKE_DELAY=250", "--env", "FAKE_STUBBORN=1"], { TMPDIR: tmpdir });
+      await waitFor("the server's pid file", () => fs.existsSync(path.join(tmpdir, "fake-http.pid")));
+      const pid = Number(fs.readFileSync(path.join(tmpdir, "fake-http.pid"), "utf8"));
+      await new Promise((r) => setTimeout(r, 700));
+      expect(alive(pid)).toBe(true);
+      run.child.kill("SIGTERM");
+      expect((await run.exit).code).toBe(143);
+      await waitFor("the stubborn server to be gone", () => !alive(pid), 5000);
+      expect(pending(tmpdir)).toEqual([]);
+    }, 60_000);
+
     it("keeps the work directory when --keep was given, even when interrupted", async () => {
       const tmpdir = privateTmp();
       const fake = fakeRoot("interrupt-keep", { "main.js": FAKE_STDIO });
@@ -603,6 +631,21 @@ describe("the review's findings", () => {
 
     it("allows an empty value (the manifest's own default) and other GATEWAY_ settings", () => {
       expect(drive("drive-stdio.js", ["--root", server, "--env", "GATEWAY_LIVE_APIS=", "--env", "GATEWAY_CONTACT=someone@example.test", "--json"]).status).toBe(0);
+    });
+  });
+
+  describe("small mismatches between options and documents (CR-09)", () => {
+    it("takes --ready-timeout-ms in the self-contained mode as well", () => {
+      expect(drive("drive-http.js", ["--root", server, "--ready-timeout-ms", "30000", "--scenario", ping]).status).toBe(0);
+      expect(drive("drive-http.js", ["--root", server, "--ready-timeout-ms", "abc"]).status).toBe(2);
+    });
+
+    it("the bundle driver creates nothing in the folder it was given when a setting is wrong", () => {
+      const parent = fs.mkdtempSync(path.join(tmp, "ordering-"));
+      const data = path.join(parent, "not-created-yet");
+      const ran = drive("drive-bundle.js", ["--bundle", path.join(tmp, "bundle2", `${pkg.name}-${pkg.version}.mcpb`), "--data-dir", data, "--setting", "nope=1"]);
+      expect(ran.status).toBe(2);
+      expect(fs.existsSync(data)).toBe(false);
     });
   });
 
@@ -687,6 +730,12 @@ describe("the review's findings", () => {
         const other = bundleDriver.dataChecks(file("other.jsonl", '{"id":"x-OTHER"}\n'), writes, "RUN1");
         expect(verdict(other)["data landed in the chosen folder"]).toBe(false);
         expect(other[0].problems[0]).toMatch(/does not contain this run \(RUN1\)/);
+      });
+
+      it("holds the file to this run's id only when a step that WRITES uses it (R-08: the id may appear in a read step, such as a gateway call)", () => {
+        const mixed = { name: "s", steps: [{ name: "call", tool: "c", arguments: { driver_run: "${run_id}" } }, { name: "w", tool: "t", writes: true, arguments: { id: "fixed-id" } }] };
+        const steps = bundleDriver.dataChecks(file("mixed.jsonl", '{"id":"fixed-id"}\n'), mixed, "RUN1");
+        expect(steps[0].ok).toBe(true);
       });
 
       it("passes with this run in the file, with any content when the scenario does not use the run id, and with nothing to write", () => {

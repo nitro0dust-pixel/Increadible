@@ -48,7 +48,7 @@ async function main(argv) {
     }
     return ok ? 0 : 1;
   } finally {
-    if (own && !opts.keep) lib.removeWorkdir(dir);
+    if (own && !opts.keep) lib.tryRemoveWorkdir(dir);
   }
 }
 

@@ -70,7 +70,8 @@ function unpack(entries, home) {
  */
 function dataChecks(dataFile, scenario, runId) {
   const wrote = scenario.steps.some((s) => s.writes === true);
-  const usesRunId = JSON.stringify(scenario.steps).includes("${run_id}");
+  // the data file can only be held to this run's id when a step that writes uses it (the id may appear in other steps, say a gateway call)
+  const usesRunId = scenario.steps.some((s) => s.writes === true && JSON.stringify(s).includes("${run_id}"));
   const problems = [];
   if (wrote) {
     if (!fs.existsSync(dataFile)) problems.push(`${dataFile} was not created`);
@@ -119,11 +120,11 @@ async function main(argv) {
     } else {
       const home = path.join(workdir, "Claude Extensions", "increadible"); // a space in the path, as on macOS and Windows
       const dataDir = opts["data-dir"] ? path.resolve(opts["data-dir"]) : path.join(workdir, "data");
-      fs.mkdirSync(dataDir, { recursive: true });
       unpack(inspected.entries, home);
       const manifest = JSON.parse(fs.readFileSync(path.join(home, "manifest.json"), "utf8"));
       if (manifest.user_config && manifest.user_config.data_directory && settings.data_directory === undefined) settings.data_directory = dataDir;
       const userConfig = resolveUserConfig(manifest, settings);
+      fs.mkdirSync(dataDir, { recursive: true }); // after the settings are known to be valid: a usage error creates nothing in the user's folder
       const config = manifest.server.mcp_config;
       const manifestEnv = Object.fromEntries(Object.entries(config.env || {}).map(([k, v]) => [k, substitute(v, home, userConfig)]));
       lib.assertNoLive(manifestEnv, "the manifest's environment");
@@ -141,7 +142,7 @@ async function main(argv) {
       results = [{ scenario: scenario.name, ok: steps.every((s) => s.ok), steps }];
     }
   } finally {
-    if (!opts.keep) lib.removeWorkdir(workdir);
+    if (!opts.keep) lib.tryRemoveWorkdir(workdir);
     else notes.push(`kept: ${workdir}`);
   }
   const ok = results[0].ok;

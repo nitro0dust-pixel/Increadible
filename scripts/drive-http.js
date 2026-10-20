@@ -17,7 +17,8 @@ const lib = require("./drive-lib.js");
 
 const USAGE = [
   "usage: drive-http.js [--scenario NAME|FILE] [--root DIR] [--data-dir DIR] [--env NAME=VALUE]... [--json] [--keep] [--timeout-ms N]",
-  "       drive-http.js --url URL [--token-env NAME] [--allow-writes] [--scenario NAME|FILE] [--json] [--timeout-ms N] [--ready-timeout-ms N]",
+  "       drive-http.js --url URL [--token-env NAME] [--allow-writes] [--scenario NAME|FILE] [--json] [--timeout-ms N]",
+  "       (--ready-timeout-ms N, how long to wait for /ready, takes both modes; the default is 15000)",
 ].join("\n");
 
 /** One HTTP check as a report step; what it saw is the summary only when it held. */
@@ -67,7 +68,7 @@ async function main(argv) {
   const readyMs = opts["ready-timeout-ms"] !== undefined ? lib.parseInteger("ready-timeout-ms", opts["ready-timeout-ms"]) : 15000;
   const remote = opts.url !== undefined;
   if (remote && (opts["data-dir"] || opts.env || opts.root || opts.keep)) throw new lib.UsageError("--data-dir, --env, --root and --keep belong to the self-contained mode; with --url the server is already running");
-  if (!remote && (opts["token-env"] || opts["allow-writes"] || opts["ready-timeout-ms"])) throw new lib.UsageError("--token-env, --allow-writes and --ready-timeout-ms belong to --url");
+  if (!remote && (opts["token-env"] || opts["allow-writes"])) throw new lib.UsageError("--token-env and --allow-writes belong to --url");
   const extra = remote ? {} : lib.parseEnvPairs(opts.env);
   lib.assertNoLive(extra, "--env");
 
@@ -84,6 +85,8 @@ async function main(argv) {
       if (!token) throw new lib.UsageError(`--token-env ${opts["token-env"]} names a variable that is not set or is empty`);
     }
     notes.push(`server: already running; token ${token ? `from ${opts["token-env"]}` : "none"}`, `writes: ${opts["allow-writes"] ? "allowed" : "skipped"}`);
+    const host = new URL(baseUrl).hostname;
+    if (token && baseUrl.startsWith("http:") && !["127.0.0.1", "localhost", "[::1]"].includes(host)) notes.push("warning: the token is sent over plain http to an address that is not this machine");
   } else {
     root = path.resolve(opts.root || lib.REPO_ROOT);
     entry = lib.entryPoint(root, "index.js");
@@ -163,7 +166,7 @@ async function main(argv) {
       else if (ended.code !== 0) problems.push(`the server left with code ${ended.code} after SIGTERM, expected 0`);
       steps.push(lib.driverStep("shutdown", problems, problems.length ? "not clean" : "exit 0 on SIGTERM"));
     }
-    if (own && !opts.keep) lib.removeWorkdir(dir);
+    if (own && !opts.keep) lib.tryRemoveWorkdir(dir);
   }
   const results = [{ scenario: scenario.name, ok: steps.every((s) => s.ok), steps }];
   const ok = results[0].ok;

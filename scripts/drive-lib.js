@@ -49,12 +49,30 @@ function secretValues(env, extra = []) {
 }
 
 /** Control characters other than tab, line feed and carriage return: what an escape sequence is made of. */
-const CONTROL = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g;
+const CONTROL = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f]/g;
 
+/** Control characters (also the C1 range some terminals obey) replaced by "?". Applied to everything a server sent before it is printed. */
+function scrub(text) {
+  return String(text).replace(CONTROL, "?");
+}
+
+/** Each secret as it is, and as it reads inside a JSON string (a server may echo it escaped), longest first so a longer secret is not left half visible. */
+function secretForms(secrets) {
+  const forms = new Set();
+  for (const secret of secrets || []) {
+    if (!secret) continue;
+    forms.add(secret);
+    const escaped = JSON.stringify(secret).slice(1, -1);
+    if (escaped !== secret) forms.add(escaped);
+  }
+  return [...forms].sort((a, b) => b.length - a.length);
+}
+
+/** Hides the secrets it is told about and scrubs control characters. Redact BEFORE cutting a text short: a cut can split a secret so that it no longer matches. */
 function redact(text, secrets) {
   let out = String(text);
-  for (const secret of secrets || []) out = out.split(secret).join("<hidden>");
-  return out.replace(CONTROL, "?");
+  for (const secret of secretForms(secrets)) out = out.split(secret).join("<hidden>");
+  return scrub(out);
 }
 
 /** redact() over every string (and key) of a value, so a secret that needs escaping in JSON cannot corrupt the structure. */
@@ -71,7 +89,13 @@ const live = { processes: new Set(), dirs: new Set() };
 
 /** Last resort, synchronous: end every server this run started and remove every work directory it made. Runs when the driver exits for any reason. */
 function cleanupNow() {
-  for (const proc of live.processes) { try { proc.child.kill("SIGTERM"); } catch { /* already gone */ } }
+  const procs = [...live.processes];
+  for (const proc of procs) { try { proc.child.kill("SIGTERM"); } catch { /* already gone */ } }
+  if (procs.length) {
+    // nothing can be awaited in an exit handler: give SIGTERM a moment, then make sure (a server that ignores SIGTERM must not be left running)
+    try { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 300); } catch { /* no wait available */ }
+    for (const proc of procs) { try { proc.child.kill("SIGKILL"); } catch { /* already gone */ } }
+  }
   live.processes.clear();
   for (const dir of live.dirs) { try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* best effort */ } }
   live.dirs.clear();
@@ -85,6 +109,7 @@ function installCleanupHandlers() {
   process.on("exit", cleanupNow);
   process.on("SIGINT", () => process.exit(130));
   process.on("SIGTERM", () => process.exit(143));
+  process.on("SIGHUP", () => process.exit(129)); // the terminal was closed or the ssh connection dropped
 }
 
 // ---------------------------------------------------------------- work directory
@@ -100,6 +125,11 @@ function removeWorkdir(dir) {
   if (!dir || !path.basename(dir).startsWith(WORKDIR_PREFIX)) throw new Error(`refusing to remove a directory this driver did not create: ${dir}`);
   live.dirs.delete(dir);
   fs.rmSync(dir, { recursive: true, force: true });
+}
+
+/** removeWorkdir for a finally block: a failure to remove (a file still open on Windows) is a warning on stderr, never a reason to lose the verdict. */
+function tryRemoveWorkdir(dir) {
+  try { removeWorkdir(dir); } catch (error) { console.error(`warning: could not remove ${dir}: ${error.message}`); }
 }
 
 /** The user asked to keep this directory (--keep): an interrupted run must not remove it either. */
@@ -127,11 +157,11 @@ function entryPoint(root, name) {
 // ---------------------------------------------------------------- a managed child process
 
 const OUTPUT_LIMIT = 256 * 1024;
+const MAX_LINE = 64 * 1024 * 1024;
 
 class ManagedProcess {
   constructor({ command = process.execPath, args = [], env, cwd, secrets = [] }) {
     this.secrets = secrets;
-    this.stdout = "";
     this.stderr = "";
     this.exit = null; // { code, signal } once the process has ended
     this.child = spawn(command, args, { env, cwd, stdio: ["pipe", "pipe", "pipe"], windowsHide: true });
@@ -145,7 +175,7 @@ class ManagedProcess {
     this.child.stderr.setEncoding("utf8");
     this.child.stdout.setEncoding("utf8");
     this.child.stderr.on("data", (chunk) => { this.stderr = (this.stderr + chunk).slice(-OUTPUT_LIMIT); });
-    this.child.stdout.on("data", (chunk) => { if (this.onStdout) this.onStdout(chunk); else this.stdout = (this.stdout + chunk).slice(-OUTPUT_LIMIT); });
+    this.child.stdout.on("data", (chunk) => { if (this.onStdout) this.onStdout(chunk); });
   }
 
   get pid() { return this.child.pid; }
@@ -170,7 +200,7 @@ class ManagedProcess {
   }
 
   stderrText(maxBytes = 4000) {
-    return redact(this.stderr.slice(-maxBytes), this.secrets);
+    return redact(this.stderr, this.secrets).slice(-maxBytes);
   }
 }
 
@@ -201,6 +231,11 @@ class StdioClient {
 
   _onStdout(chunk) {
     this.buffer += chunk;
+    if (this.buffer.length > MAX_LINE && this.buffer.indexOf("\n") < 0) { // a line that never ends is not kept in memory
+      this.nonJsonLines.push(`a line longer than ${MAX_LINE} characters without a line break (first part: ${redact(this.buffer.slice(0, 80), this.secrets)})`);
+      this.buffer = "";
+      return;
+    }
     let at;
     while ((at = this.buffer.indexOf("\n")) >= 0) {
       const line = this.buffer.slice(0, at).replace(/\r$/, "");
@@ -266,7 +301,8 @@ class StdioClient {
   /** The two-step start every client makes. Returns the initialize result. */
   async initialize(clientInfo = { name: "increadible-drive", version: "1" }) {
     const answer = await this.request("initialize", { protocolVersion: this.protocolVersion, capabilities: {}, clientInfo });
-    if (answer.error) throw new Error(`initialize failed: ${answer.error.code} ${answer.error.message}`);
+    if (answer.error) throw new Error(`initialize failed: ${scrub(answer.error.code)} ${scrub(answer.error.message)}`);
+    if (!isPlainObject(answer.result)) throw new Error("initialize was answered without a result object");
     this.notify("notifications/initialized");
     return answer.result;
   }
@@ -314,10 +350,11 @@ class HttpClient {
         res.on("end", () => {
           if (overflow) { fail(overflow); return; }
           clearTimeout(timer);
-          const text = redact(Buffer.concat(chunks).toString("utf8"), this.secrets);
+          const raw = Buffer.concat(chunks).toString("utf8");
           let json;
-          try { json = JSON.parse(text); } catch { /* not JSON: text is what there is */ }
-          resolve({ status: res.statusCode, headers: res.headers, text, json });
+          // parsed BEFORE the secrets are hidden (a secret that needs escaping in JSON would break the text), then hidden value by value
+          try { json = redactDeep(JSON.parse(raw), this.secrets); } catch { /* not JSON: text is what there is */ }
+          resolve({ status: res.statusCode, headers: res.headers, text: redact(raw, this.secrets), json });
         });
         res.on("error", fail);
         res.on("close", () => { if (!res.complete) fail(new Error(`the connection closed before the answer to ${method} ${url.pathname} was complete`)); });
@@ -333,7 +370,10 @@ class HttpClient {
   async rpc(method, params) {
     const id = ++this.nextId;
     const res = await this.request("POST", "/mcp", { headers: { "Content-Type": "application/json", Accept: "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id, method, params: params ?? {} }) });
-    if (res.json && res.json.jsonrpc === "2.0") return res.json;
+    if (res.json && res.json.jsonrpc === "2.0") {
+      if (res.json.id !== id) throw new Error(`the answer carries the id ${JSON.stringify(res.json.id)}, not ${id}: ${res.text.slice(0, 160)}`);
+      return res.json;
+    }
     throw new Error(`HTTP ${res.status} without a JSON-RPC body: ${res.text.slice(0, 160)}`);
   }
 
@@ -343,7 +383,8 @@ class HttpClient {
 
   async initialize(clientInfo = { name: "increadible-drive", version: "1" }) {
     const answer = await this.rpc("initialize", { protocolVersion: this.protocolVersion, capabilities: {}, clientInfo });
-    if (answer.error) throw new Error(`initialize failed: ${answer.error.code} ${answer.error.message}`);
+    if (answer.error) throw new Error(`initialize failed: ${scrub(answer.error.code)} ${scrub(answer.error.message)}`);
+    if (!isPlainObject(answer.result)) throw new Error("initialize was answered without a result object");
     await this.notify("notifications/initialized");
     return answer.result;
   }
@@ -375,6 +416,8 @@ function freePort() {
 
 // ---------------------------------------------------------------- scenarios
 
+const SCENARIO_KEYS = new Set(["name", "description", "steps"]);
+const TYPE_NAMES = new Set(["string", "number", "boolean", "array", "object", "null"]);
 const STEP_KEYS = new Set(["name", "method", "params", "tool", "arguments", "expect", "save", "writes"]);
 const EXPECT_KEYS = new Set(["rpc_error", "message_contains", "tool_error", "contains", "json", "result", "tools_include"]);
 const MATCHERS = new Set(["$type", "$gte", "$lte", "$includes", "$matches", "$exists"]);
@@ -388,7 +431,8 @@ const isPlainObject = (v) => v !== null && typeof v === "object" && !Array.isArr
  */
 function validateScenario(scenario, where = "scenario") {
   const fail = (message) => { throw new Error(`${where}: ${message}`); };
-  if (!scenario || typeof scenario !== "object") fail("not an object");
+  if (!scenario || typeof scenario !== "object" || Array.isArray(scenario)) fail("not an object");
+  for (const key of Object.keys(scenario)) if (!SCENARIO_KEYS.has(key)) fail(`unknown key "${key}" (a scenario has: ${[...SCENARIO_KEYS].join(", ")})`);
   if (typeof scenario.name !== "string" || scenario.name === "") fail('"name" is required');
   if (!Array.isArray(scenario.steps) || scenario.steps.length === 0) fail('"steps" must be a non-empty array');
   const seen = new Set();
@@ -411,18 +455,23 @@ function validateScenario(scenario, where = "scenario") {
     const expect = step.expect || {};
     for (const key of Object.keys(expect)) if (!EXPECT_KEYS.has(key)) fail(`${label}: unknown expectation "${key}"`);
     if (expect.rpc_error !== undefined && !Number.isInteger(expect.rpc_error)) fail(`${label}: "rpc_error" must be an integer code`);
-    if (expect.message_contains !== undefined && typeof expect.message_contains !== "string") fail(`${label}: "message_contains" must be a string`);
+    if (expect.message_contains !== undefined && (typeof expect.message_contains !== "string" || expect.message_contains === "")) fail(`${label}: "message_contains" must be a non-empty string (an empty one is found in every text)`);
     if (expect.tool_error !== undefined && typeof expect.tool_error !== "boolean") fail(`${label}: "tool_error" must be true or false`);
-    if (expect.contains !== undefined && typeof expect.contains !== "string") fail(`${label}: "contains" must be a string`);
-    if (expect.tools_include !== undefined && (!Array.isArray(expect.tools_include) || !expect.tools_include.every((n) => typeof n === "string"))) fail(`${label}: "tools_include" must be a list of tool names`);
+    if (expect.contains !== undefined && (typeof expect.contains !== "string" || expect.contains === "")) fail(`${label}: "contains" must be a non-empty string (an empty one is found in every text)`);
+    if (expect.tools_include !== undefined && (!Array.isArray(expect.tools_include) || expect.tools_include.length === 0 || !expect.tools_include.every((n) => typeof n === "string" && n !== ""))) fail(`${label}: "tools_include" must be a non-empty list of tool names`);
     for (const group of ["json", "result"]) {
-      if (expect[group] !== undefined && !isPlainObject(expect[group])) fail(`${label}: "${group}" must map dotted paths to values`);
+      if (expect[group] !== undefined && (!isPlainObject(expect[group]) || Object.keys(expect[group]).length === 0)) fail(`${label}: "${group}" must map at least one dotted path to a value`);
       for (const [path_, wanted] of Object.entries(expect[group] || {})) {
-        if (isPlainObject(wanted) && Object.keys(wanted).some((k) => k.startsWith("$"))) {
-          if (!Object.keys(wanted).every((k) => MATCHERS.has(k))) fail(`${label}: unknown matcher in ${group}.${path_}`);
-          if (wanted.$matches !== undefined) {
-            try { new RegExp(wanted.$matches); } catch (error) { fail(`${label}: ${group}.${path_}: $matches is not a regular expression (${error.message})`); }
-          }
+        if (!isPlainObject(wanted) || !Object.keys(wanted).some((k) => k.startsWith("$"))) continue; // a plain value: compared as it is
+        const where = `${label}: ${group}.${path_}`;
+        if (!Object.keys(wanted).every((k) => MATCHERS.has(k))) fail(`${where}: unknown matcher (or a matcher mixed with plain keys)`);
+        if (wanted.$type !== undefined && !TYPE_NAMES.has(wanted.$type)) fail(`${where}: $type must be one of ${[...TYPE_NAMES].join(", ")}`);
+        for (const key of ["$gte", "$lte"]) if (wanted[key] !== undefined && !Number.isFinite(wanted[key])) fail(`${where}: ${key} must be a number`);
+        if (wanted.$exists !== undefined && typeof wanted.$exists !== "boolean") fail(`${where}: $exists must be true or false`);
+        if (wanted.$includes !== undefined && wanted.$includes === "") fail(`${where}: $includes must not be an empty string (it is found in every text)`);
+        if (wanted.$matches !== undefined) {
+          if (typeof wanted.$matches !== "string" || wanted.$matches === "") fail(`${where}: $matches must be a non-empty regular expression`);
+          try { new RegExp(wanted.$matches); } catch (error) { fail(`${where}: $matches is not a regular expression (${error.message})`); }
         }
       }
     }
@@ -460,7 +509,7 @@ function listScenarios() {
 function getPath(value, dotted) {
   let current = value;
   for (const part of String(dotted).split(".")) {
-    if (current === null || typeof current !== "object") return undefined;
+    if (current === null || typeof current !== "object" || !Object.prototype.hasOwnProperty.call(current, part)) return undefined;
     current = current[part];
   }
   return current;
@@ -510,6 +559,18 @@ function substitute(value, vars) {
   return value;
 }
 
+/** What is wrong with a JSON-RPC answer as such, or null. Without this a step with no expectations passes on any answer at all. */
+function malformed(message) {
+  if (!isPlainObject(message)) return "the answer is not a JSON object";
+  if (message.jsonrpc !== "2.0") return 'the answer does not say "jsonrpc": "2.0"';
+  const hasResult = Object.prototype.hasOwnProperty.call(message, "result");
+  const hasError = Object.prototype.hasOwnProperty.call(message, "error");
+  if (hasResult === hasError) return hasResult ? "the answer has both a result and an error" : "the answer has neither a result nor an error";
+  if (hasResult && !isPlainObject(message.result)) return "the result is not an object";
+  if (hasError && (!isPlainObject(message.error) || !Number.isInteger(message.error.code))) return "the error is not an object with an integer code";
+  return null;
+}
+
 function toolText(result) {
   const first = result && Array.isArray(result.content) ? result.content[0] : undefined;
   return first && typeof first.text === "string" ? first.text : undefined;
@@ -536,7 +597,12 @@ async function runScenario(client, scenario, { secrets = [], onStep, vars: initi
       message = await client.rpc(method, params);
       const expect = substitute(step.expect || {}, vars); // the expectations may name a variable too (the run id, a saved value)
       let base; // what json/save look at: the parsed text of a tool answer, or the result itself
-      if (expect.rpc_error !== undefined) {
+      const show = (text, n) => redact(String(text), secrets).slice(0, n); // hidden BEFORE it is cut, or the cut can leave half a secret
+      const wrong = malformed(message);
+      if (wrong) {
+        problems.push(`${wrong}: ${show(JSON.stringify(message), 160)}`);
+        summary = "malformed";
+      } else if (expect.rpc_error !== undefined) {
         if (!message.error) problems.push(`expected JSON-RPC error ${expect.rpc_error}, got a result`);
         else {
           summary = `error ${message.error.code}`;
@@ -550,14 +616,15 @@ async function runScenario(client, scenario, { secrets = [], onStep, vars: initi
         const result = message.result;
         base = result;
         if (step.tool !== undefined || method === "tools/call") {
-          const isError = result && result.isError === true;
+          const isError = result.isError === true;
           const wantError = expect.tool_error === true;
           summary = isError ? "tool error" : "ok";
-          if (isError !== wantError) problems.push(wantError ? "expected a tool error (isError true), got a success" : `unexpected tool error: ${String(toolText(result)).slice(0, 200)}`);
+          if (!Array.isArray(result.content)) problems.push(`the tool answer has no content list: ${show(JSON.stringify(result), 160)}`);
+          if (isError !== wantError) problems.push(wantError ? "expected a tool error (isError true), got a success" : `unexpected tool error: ${show(toolText(result), 200)}`);
           const text = toolText(result);
-          if (expect.contains !== undefined && !(text || "").includes(expect.contains)) problems.push(`tool text does not contain "${expect.contains}": ${String(text).slice(0, 200)}`);
+          if (expect.contains !== undefined && !(text || "").includes(expect.contains)) problems.push(`tool text does not contain "${expect.contains}": ${show(text, 200)}`);
           if (expect.json !== undefined || (step.save && !isError)) {
-            try { base = JSON.parse(text); } catch { problems.push(`tool text is not JSON: ${String(text).slice(0, 120)}`); base = undefined; }
+            try { base = JSON.parse(text); } catch { problems.push(`tool text is not JSON: ${show(text, 120)}`); base = undefined; }
           }
           if (isError && expect.json === undefined) base = undefined;
           if (expect.json && base !== undefined) {
@@ -581,6 +648,7 @@ async function runScenario(client, scenario, { secrets = [], onStep, vars: initi
       problems.push(redact(error.message, secrets));
       summary = summary || "no answer";
     }
+    if (message === undefined && !problems.length) problems.push("the client returned no answer");
     // text that came from a server is scrubbed wherever it ends up: in a problem, in the summary, in the stored answer
     const entry = { name: step.name, ok: problems.length === 0, ms: Date.now() - started, summary: redact(summary, secrets), problems: problems.map((p) => redact(p, secrets)), response: message === undefined ? undefined : redactDeep(message, secrets) };
     steps.push(entry);
@@ -617,24 +685,26 @@ function formatReport({ driver, target, results, notes = [] }) {
   const known = results.reduce((n, r) => n + r.steps.filter((s) => s.ok && s.status === "KNOWN").length, 0);
   const tail = `${skipped ? ` (${skipped} skipped: they write data)` : ""}${known ? ` (${known} KNOWN: recorded deviations from the MCP spec, behaviour unchanged)` : ""}`;
   lines.push("", failed === 0 ? `PASS ${total}/${total}${tail}` : `FAIL ${failed} of ${total} steps${tail}`);
-  return lines.join("\n");
+  return scrub(lines.join("\n"));
 }
 
 // ---------------------------------------------------------------- a whole stdio run
 
 /** A step the driver itself adds around a scenario (handshake, shutdown, clean stdout). Same shape as a scenario step's result. */
 function driverStep(name, problems, summary, ms = 0, status, notes) {
-  return { name, ok: problems.length === 0, ms, summary, problems, response: undefined, ...(status ? { status } : {}), ...(notes ? { notes } : {}) };
+  // what a server said can end up in any of these (a version string, an answer): control characters never reach the terminal
+  return { name, ok: problems.length === 0, ms, summary: scrub(summary), problems: problems.map(scrub), response: undefined, ...(status ? { status } : {}), ...(notes ? { notes: notes.map(scrub) } : {}) };
 }
 
 function handshakeStep(init, expectVersion, ms) {
   const problems = [];
-  const info = init && init.serverInfo;
-  if (!info || info.name !== "increadible") problems.push(`serverInfo.name should be "increadible", got ${JSON.stringify(info && info.name)}`);
-  if (expectVersion !== undefined && (!info || info.version !== expectVersion)) problems.push(`serverInfo.version should be ${expectVersion}, got ${JSON.stringify(info && info.version)}`);
+  if (!isPlainObject(init)) return driverStep("handshake", ["initialize was answered without a result object"], "wrong", ms);
+  const info = init.serverInfo;
+  if (!isPlainObject(info) || info.name !== "increadible") problems.push(`serverInfo.name should be "increadible", got ${JSON.stringify(info && info.name)}`);
+  if (expectVersion !== undefined && (!isPlainObject(info) || info.version !== expectVersion)) problems.push(`serverInfo.version should be ${expectVersion}, got ${JSON.stringify(info && info.version)}`);
   if (typeof (init && init.protocolVersion) !== "string") problems.push("no protocolVersion in the initialize result");
   if (!init || !init.capabilities || typeof init.capabilities.tools !== "object") problems.push("capabilities.tools is missing");
-  return driverStep("handshake", problems, problems.length ? "wrong" : `${info.name} ${info.version}`, ms);
+  return driverStep("handshake", problems, problems.length ? "wrong" : `${String(info.name)} ${String(info.version)}`, ms);
 }
 
 /**
@@ -719,7 +789,8 @@ function parseInteger(name, text, { min = 1, max = 2147483647 } = {}) {
 
 /** These drivers never switch the gateway's live calls on: a live call goes to a real provider, which is Stage 4 and the owner's decision (docs/DRIVERS.md, section 10). */
 function assertNoLive(env, source) {
-  if (String(env.GATEWAY_LIVE_APIS ?? "").trim() !== "") throw new UsageError(`${source}: GATEWAY_LIVE_APIS switches on calls to real providers, which these drivers do not make (live calls are Stage 4 and need the owner's decision)`);
+  const live = Object.entries(env).find(([name]) => name.toUpperCase() === "GATEWAY_LIVE_APIS"); // Windows does not distinguish the case of a variable's name
+  if (live && String(live[1] ?? "").trim() !== "") throw new UsageError(`${source}: GATEWAY_LIVE_APIS switches on calls to real providers, which these drivers do not make (live calls are Stage 4 and need the owner's decision)`);
 }
 
 /** Runs a driver's main(argv) and turns its answer into the exit code: 0 all passed, 1 a check failed, 2 the driver could not run. */
@@ -741,8 +812,8 @@ function newRunId() {
 
 module.exports = {
   REPO_ROOT, SCENARIO_DIR, DEFAULT_PROTOCOL_VERSION, WORKDIR_PREFIX, INHERITED_ENV, SECRET_NAME,
-  baseEnv, describeEnv, secretValues, redact, redactDeep, sameJson,
-  makeWorkdir, removeWorkdir, keepWorkdir, dataEnv, entryPoint,
+  baseEnv, describeEnv, secretValues, scrub, redact, redactDeep, sameJson,
+  makeWorkdir, removeWorkdir, tryRemoveWorkdir, keepWorkdir, dataEnv, entryPoint,
   cleanupNow, ManagedProcess, StdioClient, HttpClient, freePort,
   validateScenario, loadScenario, listScenarios, getPath, matchValue, substitute, runScenario, formatReport,
   driverStep, handshakeStep, driveStdio,

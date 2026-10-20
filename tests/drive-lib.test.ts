@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll, afterEach } from "@jest/globals";
 import * as fs from "fs";
+import * as cp from "child_process";
 import * as http from "http";
 import * as os from "os";
 import * as path from "path";
@@ -34,7 +35,8 @@ describe("scenario files", () => {
       ["a misspelled step key", (s) => (s.steps[0].argumnets = {}), /unknown key "argumnets"/],
       ["a misspelled expectation", (s) => (s.steps[0].expect = { tool_eror: true }), /unknown expectation "tool_eror"/],
       ["writes that is not a boolean", (s) => (s.steps[0].writes = "yes"), /"writes" must be true or false/],
-      ["an unknown matcher", (s) => (s.steps[0].expect = { json: { a: { $gt: 1 } } }), /unknown matcher in json\.a/],
+      ["an unknown matcher", (s) => (s.steps[0].expect = { json: { a: { $gt: 1 } } }), /json\.a: unknown matcher/],
+      ["an unknown key at the top", (s) => (s.skipWrites = true), /unknown key "skipWrites"/],
     ];
     for (const [what, mutate, message] of cases) {
       const scenario = clone(minimal);
@@ -98,10 +100,11 @@ describe("matchValue, getPath and substitute", () => {
 
 describe("runScenario", () => {
   const text = (value: unknown, isError = false) => ({ result: { content: [{ type: "text", text: typeof value === "string" ? value : JSON.stringify(value) }], isError } });
+  const bare = (message: object) => ({ calls: [], rpc: async () => message }); // answers exactly this, whatever is asked
   /** A client that answers from a table: "tools/call:NAME" or the method. Records the calls it got. */
   const fake = (answers: Record<string, unknown>) => {
     const calls: Array<{ method: string; params: any }> = [];
-    return { calls, rpc: async (method: string, params: any) => { calls.push({ method, params }); const key = method === "tools/call" ? `tools/call:${params.name}` : method; if (!(key in answers)) throw new Error(`no answer scripted for ${key}`); return answers[key]; } };
+    return { calls, rpc: async (method: string, params: any) => { calls.push({ method, params }); const key = method === "tools/call" ? `tools/call:${params.name}` : method; if (!(key in answers)) throw new Error(`no answer scripted for ${key}`); return { jsonrpc: "2.0", id: 1, ...(answers[key] as object) }; } };
   };
   const run = (client: any, steps: any[], options: any = {}) => lib.runScenario(client, lib.validateScenario({ name: "t", steps }), options);
 
@@ -170,11 +173,39 @@ describe("runScenario", () => {
     expect(result.steps[0].problems[0]).toBe("no answer <hidden> for tools/call:missing");
   });
 
-  it("scrubs the summary column too: a server can put its own text there (an error code that is a string)", async () => {
-    const client = fake({ ping: { error: { code: "zz-secret-from-server-9", message: "m" } } });
-    const result = await run(client, [{ name: "s", method: "ping", expect: { rpc_error: -32601 } }], { secrets: ["zz-secret-from-server-9"] });
-    expect(result.steps[0].summary).toBe("error <hidden>");
-    expect(JSON.stringify(result)).not.toContain("zz-secret-from-server-9");
+  it("fails a step on an answer that is not a well-formed JSON-RPC answer, whatever the step expects (CR-01)", async () => {
+    const answers: Array<[string, object, RegExp]> = [
+      ["no jsonrpc member", { id: 1, result: {} }, /does not say "jsonrpc": "2.0"/],
+      ["neither result nor error", { jsonrpc: "2.0", id: 1 }, /neither a result nor an error/],
+      ["both", { jsonrpc: "2.0", id: 1, result: {}, error: { code: -1, message: "m" } }, /both a result and an error/],
+      ["a result that is a string", { jsonrpc: "2.0", id: 1, result: "garbage" }, /the result is not an object/],
+      ["a result that is null", { jsonrpc: "2.0", id: 1, result: null }, /the result is not an object/],
+      ["a result that is a list", { jsonrpc: "2.0", id: 1, result: [] }, /the result is not an object/],
+      ["an error without a code", { jsonrpc: "2.0", id: 1, error: { message: "m" } }, /error is not an object with an integer code/],
+      ["an error whose code is text", { jsonrpc: "2.0", id: 1, error: { code: "x", message: "m" } }, /error is not an object with an integer code/],
+      ["not an object", "garbage" as unknown as object, /the answer is not a JSON object/],
+    ];
+    for (const [what, message, problem] of answers) {
+      for (const step of [{ name: "s", method: "ping" }, { name: "s", method: "ping", expect: { rpc_error: -1 } }, { name: "s", tool: "t" }]) {
+        const result = await run(bare(message), [step]);
+        expect({ what, step: step.method ?? step.tool, ok: result.ok, problem: result.steps[0].problems[0] }).toEqual({ what, step: step.method ?? step.tool, ok: false, problem: expect.stringMatching(problem) });
+        expect(result.steps[0].summary).toBe("malformed");
+      }
+    }
+  });
+
+  it("fails a tool step whose result has no content list, even with no expectations (CR-01)", async () => {
+    const result = await run(bare({ jsonrpc: "2.0", id: 1, result: {} }), [{ name: "s", tool: "t" }]);
+    expect(result.ok).toBe(false);
+    expect(result.steps[0].problems.join(" ")).toContain("the tool answer has no content list");
+  });
+
+  it("hides a secret before it cuts the text short, so no fragment of it is printed (CR-03)", async () => {
+    const secret = "tok-0123456789abcdef0123456789abcdef";
+    const client = fake({ "tools/call:t": { result: { content: [{ type: "text", text: "x".repeat(190) + secret }], isError: true } } });
+    const result = await run(client, [{ name: "s", tool: "t" }], { secrets: [secret] });
+    expect(result.steps[0].problems[0]).not.toMatch(/tok-|0123456789abcdef/);
+    expect(result.steps[0].problems[0]).toContain("<hidden>");
   });
 
   it("does not parse a tool answer that is not JSON when only the text is checked, and reports it when JSON is needed", async () => {
@@ -551,13 +582,19 @@ describe("the review's findings, at the library level", () => {
       const kept = lib.makeWorkdir();
       lib.keepWorkdir(kept);
       const sleeper = new lib.ManagedProcess({ args: ["-e", "setInterval(() => {}, 1000)"], env: lib.baseEnv({}) });
-      await new Promise((r) => setTimeout(r, 100));
-      lib.cleanupNow();
-      await Promise.race([sleeper.exited, new Promise((_, reject) => setTimeout(() => reject(new Error("the process was not ended")), 3000))]);
-      expect(sleeper.exit).toMatchObject({ signal: "SIGTERM" });
-      expect(fs.existsSync(gone)).toBe(false);
-      expect(fs.existsSync(kept)).toBe(true);
-      lib.removeWorkdir(kept);
+      let failsafe: NodeJS.Timeout | undefined;
+      try {
+        await new Promise((r) => setTimeout(r, 100));
+        lib.cleanupNow();
+        await Promise.race([sleeper.exited, new Promise((_, reject) => { failsafe = setTimeout(() => reject(new Error("the process was not ended")), 3000); })]);
+        expect(sleeper.exit).toMatchObject({ signal: "SIGTERM" });
+        expect(fs.existsSync(gone)).toBe(false);
+        expect(fs.existsSync(kept)).toBe(true);
+      } finally {
+        clearTimeout(failsafe); // a regression must fail the test, not hang Jest on a timer and a child that never ends
+        sleeper.child.kill("SIGKILL");
+        lib.removeWorkdir(kept);
+      }
     });
   });
 });
@@ -665,11 +702,22 @@ describe("scenario validation, the rules about what a step can evaluate (T-04, D
       ["arguments on a method step", step({ arguments: {} }), /"arguments" belongs to a tool step/],
       ["a regular expression that does not compile", step({ method: undefined, tool: "t", expect: { json: { a: { $matches: "(" } } } }), /json\.a: \$matches is not a regular expression/],
       ["rpc_error that is not an integer", step({ expect: { rpc_error: "-32601" } }), /"rpc_error" must be an integer code/],
-      ["message_contains that is not a string", step({ expect: { rpc_error: -1, message_contains: 5 } }), /"message_contains" must be a string/],
+      ["message_contains that is not a string", step({ expect: { rpc_error: -1, message_contains: 5 } }), /"message_contains" must be a non-empty string/],
+      ["message_contains that is empty (found in every text)", step({ expect: { rpc_error: -1, message_contains: "" } }), /"message_contains" must be a non-empty string/],
+      ["contains that is empty", step({ method: undefined, tool: "t", expect: { contains: "" } }), /"contains" must be a non-empty string/],
+      ["tools_include that is empty (nothing can be missing)", step({ method: "tools/list", expect: { tools_include: [] } }), /"tools_include" must be a non-empty list/],
+      ["json that has no path", step({ method: undefined, tool: "t", expect: { json: {} } }), /"json" must map at least one dotted path/],
+      ["result that has no path", step({ expect: { result: {} } }), /"result" must map at least one dotted path/],
+      ["$type that is not a type", step({ expect: { result: { a: { $type: "str" } } } }), /\$type must be one of/],
+      ["$gte that is not a number", step({ expect: { result: { a: { $gte: null } } } }), /\$gte must be a number/],
+      ["$exists that is not a boolean", step({ expect: { result: { a: { $exists: "yes" } } } }), /\$exists must be true or false/],
+      ["$includes that is empty", step({ expect: { result: { a: { $includes: "" } } } }), /\$includes must not be an empty string/],
+      ["$matches that is empty", step({ expect: { result: { a: { $matches: "" } } } }), /\$matches must be a non-empty regular expression/],
+      ["a matcher mixed with a plain key", step({ expect: { result: { a: { $gte: 1, plain: 2 } } } }), /unknown matcher \(or a matcher mixed with plain keys\)/],
       ["tool_error that is not a boolean", step({ method: undefined, tool: "t", expect: { tool_error: "yes" } }), /"tool_error" must be true or false/],
-      ["contains that is not a string", step({ method: undefined, tool: "t", expect: { contains: 5 } }), /"contains" must be a string/],
-      ["tools_include that is not a list of names", step({ method: "tools/list", expect: { tools_include: "a" } }), /"tools_include" must be a list of tool names/],
-      ["json as a list", step({ method: undefined, tool: "t", expect: { json: [] } }), /"json" must map dotted paths to values/],
+      ["contains that is not a string", step({ method: undefined, tool: "t", expect: { contains: 5 } }), /"contains" must be a non-empty string/],
+      ["tools_include that is not a list of names", step({ method: "tools/list", expect: { tools_include: "a" } }), /"tools_include" must be a non-empty list of tool names/],
+      ["json as a list", step({ method: undefined, tool: "t", expect: { json: [] } }), /"json" must map at least one dotted path/],
       ["expect that is not an object", step({ expect: [] }), /"expect" must be an object/],
       ["save that is not a map of paths", step({ save: { a: 1 } }), /"save" must map names to dotted paths/],
       ["method that is not a string", step({ method: 5 }), /"method" must be a string/],
@@ -715,6 +763,148 @@ describe("scenario validation, the rules about what a step can evaluate (T-04, D
       expect(() => lib.loadScenario(dir + path.sep)).toThrow(dir);
       expect(() => lib.loadScenario(path.join(dir, "missing.json"))).toThrow(/no scenario .*missing\.json/);
       expect(() => lib.loadScenario("no-such-name")).toThrow(/no scenario "no-such-name" \(looked for .*drive-scenarios\/no-such-name\.json\)/);
+    });
+  });
+});
+
+describe("the second review's findings (CR-nn code reviewer, R-nn regression tester)", () => {
+  const probe = require("../scripts/drive-probe.js");
+
+  it("hides a longer secret whole when a shorter one is part of it, and a secret as JSON escapes it (R-04)", () => {
+    expect(lib.redact("value abcdefgh here", ["abcd", "abcdefgh"])).toBe("value <hidden> here");
+    const secret = 'qu"ote\\back-4242';
+    expect(lib.redact(`plain ${secret} and escaped ${JSON.stringify(secret).slice(1, -1)}`, [secret])).toBe("plain <hidden> and escaped <hidden>");
+  });
+
+  it("scrubs the C1 control characters some terminals obey as well (R-02)", () => {
+    expect(lib.scrub("a\u0085b\u009bc\u0080d\u009fe")).toBe("a?b?c?d?e");
+    expect(lib.scrub("tab\there\nnewline\r\nok")).toBe("tab\there\nnewline\r\nok");
+  });
+
+  it("scrubs what a server put into the handshake's summary, and fails a handshake whose answer is not an object (R-01)", () => {
+    const init = { protocolVersion: "x", capabilities: { tools: {} }, serverInfo: { name: "increadible", version: "1.2.3\u001b[31m" } };
+    const step = lib.handshakeStep(init, "1.2.3\u001b[31m", 0);
+    expect(step.ok).toBe(true);
+    expect(step.summary).toBe("increadible 1.2.3?[31m");
+    for (const bad of [undefined, null, "garbage", [], { serverInfo: "x" }]) {
+      const failed = lib.handshakeStep(bad, "1.2.3", 0);
+      expect({ bad, ok: failed.ok }).toEqual({ bad, ok: false });
+    }
+    expect(lib.driverStep("x", ["bad \u001b[2J thing"], "sum\u0007mary", 0, undefined, ["note\u009b"])).toMatchObject({ summary: "sum?mary", problems: ["bad ?[2J thing"], notes: ["note?"] });
+  });
+
+  it("reads own properties only, so a name from the prototype chain is not a value (CR-02)", () => {
+    expect(lib.getPath({}, "hasOwnProperty")).toBeUndefined();
+    expect(lib.getPath({ a: {} }, "a.constructor")).toBeUndefined();
+    expect(lib.getPath({ a: [10, 20] }, "a.1")).toBe(20);
+    expect(lib.matchValue(lib.getPath({}, "toString"), { $exists: true })).not.toBeNull();
+  });
+
+  it("compares the name of the live-calls variable without regard to case (R-12)", () => {
+    for (const name of ["GATEWAY_LIVE_APIS", "gateway_live_apis", "Gateway_Live_Apis"]) expect(() => lib.assertNoLive({ [name]: "hackernews" }, "--env")).toThrow(lib.UsageError);
+  });
+
+  it("removes a work directory for a finally block without ever throwing (R-07)", () => {
+    const spy = jest.spyOn(console, "error").mockImplementation(() => undefined);
+    try {
+      expect(() => lib.tryRemoveWorkdir(os.tmpdir())).not.toThrow(); // not a work directory: refused, as a warning
+      expect(spy).toHaveBeenCalledWith(expect.stringContaining("warning: could not remove"));
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("makes sure a server that ignores SIGTERM is ended too, when the driver is interrupted (R-06)", async () => {
+    const stubborn = new lib.ManagedProcess({ args: ["-e", 'process.on("SIGTERM", () => {}); setInterval(() => {}, 1000)'], env: lib.baseEnv({}) });
+    try {
+      await new Promise((r) => setTimeout(r, 200));
+      lib.cleanupNow();
+      await Promise.race([stubborn.exited, new Promise((_, reject) => setTimeout(() => reject(new Error("the stubborn process was not ended")), 4000).unref())]);
+      expect(stubborn.exit).toMatchObject({ signal: "SIGKILL" });
+    } finally {
+      stubborn.child.kill("SIGKILL");
+    }
+  });
+
+  describe("an HTTP answer", () => {
+    let server: http.Server;
+    let base = "";
+    const secret = 'to"ken\\4242-secret';
+    beforeAll(async () => {
+      server = http.createServer((req, res) => {
+        req.resume();
+        res.setHeader("Content-Type", "application/json");
+        if (req.url === "/wrong-id") { res.end(JSON.stringify({ jsonrpc: "2.0", id: 9999, result: {} })); return; }
+        if (req.url === "/echo") { res.end(JSON.stringify({ jsonrpc: "2.0", id: 1, result: { echoed: secret, c1: "x\u009by" } })); return; }
+        if (req.url === "/mcp") { res.end(JSON.stringify({ jsonrpc: "2.0", id: 1, result: { echoed: secret, c1: "x\u009by" } })); return; }
+        res.end("{}");
+      });
+      await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
+      base = `http://127.0.0.1:${(server.address() as any).port}`;
+    });
+    afterAll(() => new Promise<void>((resolve) => { server.closeAllConnections?.(); server.close(() => resolve()); }));
+
+    it("must carry the id of the request it answers (R-09)", async () => {
+      const c = new lib.HttpClient({ baseUrl: base });
+      const original = c.request.bind(c);
+      c.request = (method: string, p: string, o: any) => original(method, p === "/mcp" ? "/wrong-id" : p, o);
+      await expect(c.rpc("ping")).rejects.toThrow(/the answer carries the id 9999, not 1/);
+    });
+
+    it("is parsed before the secrets are hidden, so a secret that JSON escapes does not break the structure (R-03)", async () => {
+      const c = new lib.HttpClient({ baseUrl: base, secrets: [secret] });
+      const answer = await c.rpc("ping");
+      expect(answer.result.echoed).toBe("<hidden>");
+      expect(answer.result.c1).toBe("x?y"); // and the C1 character is scrubbed
+      const res = await c.request("GET", "/echo");
+      expect(res.text).not.toContain("4242");
+    });
+  });
+
+  describe("no timer is left running once the work is done (CR-04)", () => {
+    it("a client, a request, a stop and an overflow leave nothing that keeps the driver alive", () => {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), "drive-timers-"));
+      try {
+        const script = path.join(dir, "timers.js");
+        fs.writeFileSync(script, `
+          const http = require("http");
+          const lib = require(${JSON.stringify(path.join(root, "scripts", "drive-lib.js"))});
+          (async () => {
+            const server = http.createServer((req, res) => { req.resume(); if (req.url === "/big") { res.write("x".repeat(9000)); res.end("y".repeat(9000)); return; } res.end("{}"); });
+            await new Promise((r) => server.listen(0, "127.0.0.1", r));
+            const base = "http://127.0.0.1:" + server.address().port;
+            const c = new lib.HttpClient({ baseUrl: base, timeoutMs: 30000, maxBytes: 4096 });
+            await c.request("GET", "/ok");
+            await c.request("GET", "/big").catch(() => undefined);
+            const s = new lib.StdioClient({ args: ["-e", "process.stdin.on('data', (d) => { const m = JSON.parse(d.toString().trim()); process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: m.id, result: {} }) + '\\\\n'); }); process.stdin.on('end', () => process.exit(0));"], env: lib.baseEnv({}), requestTimeoutMs: 30000 });
+            await s.request("ping");
+            await s.stop(30000);
+            server.closeAllConnections(); await new Promise((r) => server.close(r));
+            setImmediate(() => { console.log(JSON.stringify(process.getActiveResourcesInfo().filter((x) => x === "Timeout"))); });
+          })();`);
+        const started = Date.now();
+        const ran = cp.spawnSync(process.execPath, [script], { encoding: "utf8", timeout: 20000 });
+        expect(ran.stderr).toBe("");
+        expect(ran.stdout.trim()).toBe("[]"); // no Timeout is pending: the process exits now, not when a 30-second guard expires
+        expect(Date.now() - started).toBeLessThan(10000);
+      } finally {
+        fs.rmSync(dir, { recursive: true, force: true });
+      }
+    });
+  });
+
+  describe("the probe's final stdout check (CR-08)", () => {
+    const check = probe.CHECKS.find((c: any) => c.id === "stdio.stdout-is-clean");
+    const run = async (late: object[], nonJson: string[] = []) => {
+      const problems: string[] = [];
+      await check.run({ stdio: async () => ({ takeUnmatched: async () => late, nonJsonLines: nonJson }) }, problems);
+      return problems;
+    };
+
+    it("fails on an answer that arrives after every check has taken what it expected, and on stray text", async () => {
+      expect((await run([{ jsonrpc: "2.0", id: 777, result: {} }])).join(" ")).toContain("answers nobody asked for");
+      expect((await run([], ["stray line"])).join(" ")).toContain("lines that are not JSON");
+      expect(await run([])).toEqual([]);
     });
   });
 });

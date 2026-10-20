@@ -133,7 +133,8 @@ const CHECKS = [
   { id: "stdio.stdout-is-clean", transport: "stdio", kind: "contract", title: "after all of the above stdout carried nothing but JSON-RPC answers",
     async run(ctx, problems) {
       const c = await ctx.stdio();
-      await c.takeUnmatched(1, 200);
+      const late = await c.takeUnmatched(1, 300); // every check took the answers it expected: anything that arrives now nobody asked for
+      eq(problems, "answers nobody asked for", late.map((m) => JSON.stringify(m).slice(0, 120)), []);
       eq(problems, "lines that are not JSON", c.nonJsonLines, []);
       return "clean";
     } },
@@ -310,7 +311,7 @@ function makeContext(root, timeoutMs, secretsOut) {
     async close() {
       for (const c of owned) await c.proc.stop({ stdinFirst: true, graceMs: 2000 });
       if (server && !server.stopped) await server.proc.stop({ graceMs: 3000 });
-      lib.removeWorkdir(dir);
+      lib.tryRemoveWorkdir(dir);
     },
   };
 }
