@@ -81,6 +81,15 @@ describe("a looped step (each)", () => {
     expect(out.steps[0].problems[0]).toContain("<hidden>");
   });
 
+  it("hides the secret before it cuts the value short, so a cut through the secret leaves no half of it (mutation run 4)", async () => {
+    const secret = "the-secret-value-1234";
+    const value = "x".repeat(50) + secret + "tail"; // the preview is cut at 60 characters: inside the secret
+    const e = client(() => ({ jsonrpc: "2.0", result: { isError: true, content: [{ type: "text", text: "{}" }] } }));
+    const out = await run(e, [{ name: "s", tool: "t", each: [value] }], { secrets: [secret] });
+    expect(JSON.stringify(out)).not.toContain("the-secret");
+    expect(out.steps[0].problems[0]).toContain("x<hidden>");
+  });
+
   it("is skipped as a whole when writes are skipped", async () => {
     const c = client(() => text({}));
     const out = await run(c, [{ name: "s", tool: "t", writes: true, each: [1, 2, 3] }], { skipWrites: true });
