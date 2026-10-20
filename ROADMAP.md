@@ -1,6 +1,6 @@
 # Roadmap and project status
 
-Last updated: 2026-10-20 (UTC), measured at `main` = `4b12a74` (PR #69 merged: the request drivers, stage 1 of 4; PR #72 merged as `020e6e3`: the records of #71; PR #71 merged as `5709817`: the records of #70 and the stale backlog lines corrected; PR #70 merged as `ddf29d1`: the records of #68 and the self-checking tag step; PR #68 merged as `61ff561`: version 1.0.5, not tagged) and the releases `v1.0.4`, `v1.0.3` and `v1.0.2`; no pull request is open; the request drivers (`docs/DRIVERS.md`) have stages 2 to 4 still to build.
+Last updated: 2026-10-20 (UTC), measured at `main` = `4b12a74` (PR #69 merged: the request drivers, stage 1 of 4; PR #72 merged as `020e6e3`: the records of #71; PR #71 merged as `5709817`: the records of #70 and the stale backlog lines corrected; PR #70 merged as `ddf29d1`: the records of #68 and the self-checking tag step; PR #68 merged as `61ff561`: version 1.0.5, not tagged) and the releases `v1.0.4`, `v1.0.3` and `v1.0.2`; [PR #75](https://github.com/nitro0dust-pixel/Increadible/pull/75) is open (the request drivers, stage 2 of 4, `docs/DRIVERS.md`) and waits for the owner's GO; stages 3 and 4 are still to build.
 
 **Bottom line:** the in-repo code (Features #7-#9 and the server around them) is built, tested, containerised, and the
 image published to GHCR passes its probe. **Nothing is deployed beyond rehearsals**: a private rehearsal runs on Railway (stages 1 and 2, verified 2026-10-10, `DEPLOYMENT.md`), and the staging

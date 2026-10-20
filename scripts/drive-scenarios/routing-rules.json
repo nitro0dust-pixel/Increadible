@@ -276,9 +276,9 @@
         "json": {
           "total_requests": 12,
           "rules_applied.constructor": 1,
-          "provider_breakdown.p-ctor": {
-            "$matches": "^[0-9]+\\.[0-9]%$"
-          },
+          "provider_breakdown.p-ctor": "8.3%",
+          "provider_breakdown.p-first": "8.3%",
+          "provider_breakdown.p-listed": "16.7%",
           "rules_count": 6,
           "enabled_rules": 5
         }

@@ -94,7 +94,11 @@ function dataChecks(dataFile, scenario, runId, rulesFile = path.join(path.dirnam
 }
 
 function findBundle(opts) {
-  if (opts.bundle) return path.resolve(opts.bundle);
+  if (opts.bundle) {
+    const given = path.resolve(opts.bundle);
+    if (!fs.existsSync(given)) throw new lib.UsageError(`--bundle ${given} does not exist: build one with "npm run mcpb", or leave --bundle out to use dist/mcpb`);
+    return given;
+  }
   const pkg = JSON.parse(fs.readFileSync(path.join(lib.REPO_ROOT, "package.json"), "utf8"));
   const file = path.join(lib.REPO_ROOT, "dist", "mcpb", `${pkg.name}-${pkg.version}.mcpb`);
   if (opts.build) return mcpb.build().target;
@@ -144,7 +148,7 @@ async function main(argv) {
 
       const runId = lib.newRunId();
       const run = await lib.driveStdio({ command, args, env, cwd: home, scenario, vars: { run_id: runId }, secrets: lib.secretValues(env), expectVersion: manifest.version });
-      serverInfo = run.serverInfo;
+      serverInfo = lib.redactDeep(run.serverInfo, lib.secretValues(env));
       steps.push(...run.results[0].steps);
       if (!run.results[0].ok && run.stderr) notes.push(`server stderr (last lines): ${run.stderr.replace(/\n/g, " | ")}`);
       if (env.AB_DATA_FILE) steps.push(...dataChecks(env.AB_DATA_FILE, scenario, runId, env.RULES_FILE));

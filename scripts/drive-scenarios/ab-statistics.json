@@ -557,6 +557,21 @@
       }
     },
     {
+      "name": "error: a number the experiment refuses (beyond the largest value it keeps)",
+      "tool": "record_metric",
+      "arguments": {
+        "experiment_id": "stats-${run_id}",
+        "variant_id": "A",
+        "metrics": {
+          "quality": 10000000000000000
+        }
+      },
+      "expect": {
+        "tool_error": true,
+        "contains": "must be between"
+      }
+    },
+    {
       "name": "error: an experiment that does not exist",
       "tool": "get_experiment_results",
       "arguments": {

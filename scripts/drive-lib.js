@@ -149,9 +149,12 @@ function dataEnv(dir) {
 }
 
 /** The files of the server's own data a work directory would hold: the rules, the experiments and the A/B measurements. */
-function dataFiles(dir) {
-  const env = dataEnv(dir);
-  return [env.RULES_FILE, env.EXPERIMENTS_FILE, env.AB_DATA_FILE];
+function dataFiles(dir, extra = {}, cwd = process.cwd()) {
+  const base = dir ? dataEnv(dir) : {};
+  return ["RULES_FILE", "EXPERIMENTS_FILE", "AB_DATA_FILE"].map((name) => {
+    const given = Object.entries(extra).find(([key]) => key.toUpperCase() === name); // --env wins over the folder, and Windows does not tell the case of a name
+    return given ? path.resolve(cwd, String(given[1])) : base[name];
+  }).filter(Boolean);
 }
 
 function entryPoint(root, name) {
@@ -454,6 +457,7 @@ function validateScenario(scenario, where = "scenario") {
   if (typeof scenario.name !== "string" || scenario.name === "") fail('"name" is required');
   if (scenario.scope !== undefined && !SCOPES.has(scenario.scope)) fail(`"scope" must be one of: ${[...SCOPES].join(", ")}`);
   if (!Array.isArray(scenario.steps) || scenario.steps.length === 0) fail('"steps" must be a non-empty array');
+  if (scenario.scope !== "own-server") scenario.steps.forEach((s, i) => { if (s && s.writes === "rules") fail(`step ${i + 1}: "writes": "rules" replaces the routing rules of whatever server it meets, so the scenario must say "scope": "own-server"`); });
   const seen = new Set();
   scenario.steps.forEach((step, index) => {
     const at = `step ${index + 1}`;
@@ -512,7 +516,7 @@ function validateScenario(scenario, where = "scenario") {
     }
     if (expect.tools_include !== undefined && step.method !== "tools/list") fail(`${label}: "tools_include" applies to the method "tools/list"`);
   });
-  const calls = scenario.steps.reduce((sum, s) => sum + (Array.isArray(s.each) ? s.each.length : 1), 0);
+  const calls = scenario.steps.reduce((sum, s) => sum + (Array.isArray(s.each) ? s.each.length : 1) * (s.same_again === true ? 2 : 1), 0);
   if (calls > MAX_CALLS) fail(`the steps make ${calls} requests in all; at most ${MAX_CALLS} per scenario`);
   return scenario;
 }
@@ -700,6 +704,10 @@ async function runOne(client, step, vars, secrets) {
 }
 
 const EACH_PROBLEMS_SHOWN = 5;
+/** A looped value as a short line for a problem: hidden secrets first, then cut; a value that cannot be written out (nested too deep) is not worth ending the driver for. */
+function preview(value, secrets) {
+  try { return redact(JSON.stringify(value), secrets).slice(0, 60); } catch { return "(a value too deep to show)"; }
+}
 /** How long one looped step may run: a target that answers every call just inside its deadline must not keep a driver for a thousand of them. */
 const EACH_BUDGET_MS = 120000;
 
@@ -712,21 +720,25 @@ async function runEach(client, step, vars, secrets, budgetMs = EACH_BUDGET_MS) {
   const total = step.each.length;
   const problems = [];
   let failed = 0;
+  let made = 0; // calls that were sent
+  let stopped = false;
   let last;
   const started = Date.now();
   for (let i = 0; i < total; i++) {
-    if (Date.now() - started > budgetMs) { problems.push(`stopped after ${i} of ${total} calls: the step used up its time budget (${Math.round(budgetMs / 1000)} s)`); break; }
+    if (Date.now() - started > budgetMs) { problems.push(`stopped after ${i} of ${total} calls: the step used up its time budget (${Math.round(budgetMs / 1000)} s)`); stopped = true; break; }
     const one = await runOne(client, step, { ...vars, each: step.each[i], index: i }, secrets);
     last = one;
+    if (one.summary !== "scenario error") made++;
     if (one.problems.length) {
       failed++;
-      if (failed <= EACH_PROBLEMS_SHOWN) problems.push(`call ${i + 1} of ${total} (${redact(JSON.stringify(step.each[i]), secrets).slice(0, 60)}): ${one.problems.join("; ")}`);
+      if (failed <= EACH_PROBLEMS_SHOWN) problems.push(`call ${i + 1} of ${total} (${preview(step.each[i], secrets)}): ${one.problems.join("; ")}`);
     }
-    if (one.summary === "no answer") { problems.push(`stopped after call ${i + 1} of ${total}: the server gave no answer`); break; }
-    if (one.summary === "scenario error") { problems.push(`stopped after call ${i + 1} of ${total}: the scenario is wrong, so no call was sent`); break; }
+    if (one.summary === "no answer") { problems.push(`stopped after call ${i + 1} of ${total}: the server gave no answer`); stopped = true; break; }
+    if (one.summary === "scenario error") { problems.push(`stopped after call ${i + 1} of ${total}: the scenario is wrong, so no call was sent`); stopped = true; break; }
   }
   if (failed > EACH_PROBLEMS_SHOWN) problems.push(`... and ${failed - EACH_PROBLEMS_SHOWN} more calls had problems`);
-  return { message: last.message, problems, summary: failed ? `${failed} of ${total} calls failed` : `ok (${total} calls)` };
+  const summary = stopped ? `stopped after ${made} of ${total} calls${made > 0 && failed ? ` (${failed} failed)` : ""}` : failed ? `${failed} of ${total} calls failed` : `ok (${total} calls)`;
+  return { message: last ? last.message : undefined, problems, summary };
 }
 
 /** Runs the steps of a scenario against a client (anything with rpc(method, params)). Never throws for a failed step; the step records the problems. */
@@ -789,8 +801,13 @@ function driverStep(name, problems, summary, ms = 0, status, notes) {
   return { name, ok: problems.length === 0, ms, summary: scrub(summary), problems: problems.map(scrub), response: undefined, ...(status ? { status } : {}), ...(notes ? { notes: notes.map(scrub) } : {}) };
 }
 
-function handshakeStep(init, expectVersion, ms) {
+function handshakeStep(init, expectVersion, ms, secrets = []) {
   const problems = [];
+  const hide = (step) => ({ ...step, summary: redact(step.summary, secrets), problems: step.problems.map((p) => redact(p, secrets)) });
+  return hide(handshakeChecks(init, expectVersion, ms, problems));
+}
+
+function handshakeChecks(init, expectVersion, ms, problems) {
   if (!isPlainObject(init)) return driverStep("handshake", ["initialize was answered without a result object"], "wrong", ms);
   const info = init.serverInfo;
   if (!isPlainObject(info) || info.name !== "increadible") problems.push(`serverInfo.name should be "increadible", got ${JSON.stringify(info && info.name)}`);
@@ -814,7 +831,7 @@ async function driveStdio({ command, args, env, cwd, scenario, vars, skipWrites 
     try {
       const init = await client.initialize();
       serverInfo = init.serverInfo;
-      const step = handshakeStep(init, expectVersion, Date.now() - started);
+      const step = handshakeStep(init, expectVersion, Date.now() - started, secrets);
       steps.push(step);
       handshakeOk = step.ok;
     } catch (error) {
@@ -889,12 +906,15 @@ function parseInteger(name, text, { min = 1, max = 2147483647 } = {}) {
 function assertFreshData(files, scenario) {
   if (scenario.scope !== "own-server" || !scenario.steps.some(isWrite)) return;
   const present = files.filter((f) => f && fs.existsSync(f));
-  if (present.length > 0) throw new UsageError(`the scenario "${scenario.name}" writes data and replaces the routing rules of the server it starts, and ${present.map((f) => path.basename(f)).join(" and ")} ${present.length > 1 ? "are" : "is"} already in the data folder: give an empty folder (or none, and the driver makes its own)`);
+  if (present.length > 0) {
+    const what = scenario.steps.some((s) => s.writes === "rules") ? "writes data and replaces the routing rules of the server it starts" : "writes data to the server it starts";
+    throw new UsageError(`the scenario "${scenario.name}" ${what}, and ${present.map((f) => path.basename(f)).join(" and ")} ${present.length > 1 ? "are" : "is"} already in the data folder: give an empty folder (or none, and the driver makes its own)`);
+  }
 }
 
 function assertNoLive(env, source) {
-  const live = Object.entries(env).find(([name]) => name.toUpperCase() === "GATEWAY_LIVE_APIS"); // Windows does not distinguish the case of a variable's name
-  if (live && String(live[1] ?? "").trim() !== "") throw new UsageError(`${source}: GATEWAY_LIVE_APIS switches on calls to real providers, which these drivers do not make (live calls are Stage 4 and need the owner's decision)`);
+  const live = Object.entries(env).find(([name, value]) => name.toUpperCase() === "GATEWAY_LIVE_APIS" && String(value ?? "").trim() !== ""); // Windows does not distinguish the case of a variable's name, so every spelling is looked at
+  if (live) throw new UsageError(`${source}: GATEWAY_LIVE_APIS switches on calls to real providers, which these drivers do not make (live calls are Stage 4 and need the owner's decision)`);
 }
 
 /** Runs a driver's main(argv) and turns its answer into the exit code: 0 all passed, 1 a check failed, 2 the driver could not run. */

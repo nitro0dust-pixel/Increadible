@@ -66,6 +66,32 @@
       }
     },
     {
+      "name": "discover: a search finds an API by its name alone",
+      "tool": "discover_apis",
+      "arguments": {
+        "query": "coin"
+      },
+      "expect": {
+        "json": {
+          "length": 1,
+          "0.id": "coingecko"
+        }
+      }
+    },
+    {
+      "name": "discover: a search finds an API by its description alone",
+      "tool": "discover_apis",
+      "arguments": {
+        "query": "encyclopedia"
+      },
+      "expect": {
+        "json": {
+          "length": 1,
+          "0.id": "wikipedia"
+        }
+      }
+    },
+    {
       "name": "discover: nothing matches",
       "tool": "discover_apis",
       "arguments": {
