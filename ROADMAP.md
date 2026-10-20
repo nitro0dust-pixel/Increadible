@@ -1,6 +1,6 @@
 # Roadmap and project status
 
-Last updated: 2026-10-16 (UTC), measured at `main` = `5709817` (PR #71 merged: the records of #70 and the stale backlog lines corrected; PR #70 merged as `ddf29d1`: the records of #68 and the self-checking tag step; PR #68 merged as `61ff561`: version 1.0.5, not tagged) and the releases `v1.0.4`, `v1.0.3` and `v1.0.2`; the open pull request #72 records #71.
+Last updated: 2026-10-17 (UTC), measured at `main` = `020e6e3`; the Railway service runs `020e6e3` (deployment `fdcf4c58`, `SUCCESS`, its startup log read; `DEPLOYMENT.md`, Railway, current state); measured at `main` = `5709817` before that (PR #71 merged: the records of #70 and the stale backlog lines corrected; PR #70 merged as `ddf29d1`: the records of #68 and the self-checking tag step; PR #68 merged as `61ff561`: version 1.0.5, not tagged) and the releases `v1.0.4`, `v1.0.3` and `v1.0.2`; the open pull request #72 records #71.
 
 **Bottom line:** the in-repo code (Features #7-#9 and the server around them) is built, tested, containerised, and the
 image published to GHCR passes its probe. **Nothing is deployed beyond rehearsals**: a private rehearsal runs on Railway (stages 1 and 2, verified 2026-10-10, `DEPLOYMENT.md`), and the staging

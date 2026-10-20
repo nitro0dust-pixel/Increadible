@@ -179,6 +179,8 @@ Beyond the tests, both kinds were decoded once (2026-10-10, in a scratch Go prog
 The owner chose Railway for the first hosted run and approved it in stages. **Stages 1 (private rehearsal) and 2 (the four keyless
 APIs live) are done**; stage 3 (a client connected end to end) needs the owner's approval.
 
+**Current state, 2026-10-17 (recorded after the change, not a sign-off):** the service is pinned to commit `020e6e3` (`main` after PR #72, not a tag: `v1.0.5` is not on GitHub yet), built from the `Dockerfile` (it had been on RAILPACK), with `GATEWAY_CONTACT` and `GATEWAY_USER_AGENT` set to the owner's contact address (the address is not written here). Deployment `fdcf4c58` is `SUCCESS` (created 00:09 UTC). Its startup log shows `User-Agent contact: set`, the four keyless APIs live, and `listening on http://0.0.0.0:3000`. The owner confirmed `/health` and `/ready` answer `{"status":"ok"}`. `/mcp` answers `Unauthorized` without the token, as designed. **Stage 3 is not verified:** no client has been connected through the token, and the Claude Desktop connection path is unconfirmed.
+
 | Setting | Value | Why |
 |---|---|---|
 | Project, service | `increadible-rehearsal`, service `increadible` (its own project, apart from the owner's others) | nothing else shares it |
