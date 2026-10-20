@@ -644,13 +644,6 @@ describe("the review's findings", () => {
       expect(drive("drive-http.js", ["--root", server, "--ready-timeout-ms", "abc"]).status).toBe(2);
     });
 
-    it("the bundle driver creates nothing in the folder it was given when a setting is wrong", () => {
-      const parent = fs.mkdtempSync(path.join(tmp, "ordering-"));
-      const data = path.join(parent, "not-created-yet");
-      const ran = drive("drive-bundle.js", ["--bundle", path.join(tmp, "bundle2", `${pkg.name}-${pkg.version}.mcpb`), "--data-dir", data, "--setting", "nope=1"]);
-      expect(ran.status).toBe(2);
-      expect(fs.existsSync(data)).toBe(false);
-    });
   });
 
   describe("a token over plain http (R-16)", () => {
@@ -702,6 +695,15 @@ describe("the review's findings", () => {
       fs.mkdirSync(path.dirname(bundle));
       mcpb.build(bundle);
     }, 240_000);
+
+    it("creates nothing in the folder it was given when a setting is wrong (it was in an earlier block, where this package did not exist yet and the test passed for the wrong reason: round 3)", () => {
+      const parent = fs.mkdtempSync(path.join(tmp, "ordering-"));
+      const data = path.join(parent, "not-created-yet");
+      const ran = drive("drive-bundle.js", ["--bundle", bundle, "--data-dir", data, "--setting", "nope=1"]);
+      expect(ran.status).toBe(2);
+      expect(ran.stderr).toContain("the manifest has no such setting"); // refused for the setting, not because the package was missing
+      expect(fs.existsSync(data)).toBe(false);
+    });
 
     it("never unpacks into the folder the user gave for the data, and a reused folder cannot hide a damaged package", () => {
       const data = fs.mkdtempSync(path.join(tmp, "reused-data-"));
