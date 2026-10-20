@@ -649,6 +649,17 @@ describe("the review's findings", () => {
     });
   });
 
+  describe("a token over plain http (R-16)", () => {
+    it("warns when the token would go to another machine over http, and not for this machine or https", () => {
+      const run = (url: string) => drive("drive-http.js", ["--url", url, "--token-env", "DRIVE_TOKEN", "--ready-timeout-ms", "300", "--timeout-ms", "300"], { DRIVE_TOKEN: "plain-http-token-1234" });
+      expect(run("http://203.0.113.9:9").stdout).toContain("warning: the token is sent over plain http to an address that is not this machine");
+      expect(run("http://127.0.0.1:9").stdout).not.toContain("warning: the token is sent");
+      expect(run("http://localhost:9").stdout).not.toContain("warning: the token is sent");
+      expect(run("https://203.0.113.9:9").stdout).not.toContain("warning: the token is sent");
+      expect(run("http://203.0.113.9:9").stdout).not.toContain("plain-http-token-1234");
+    }, 60_000);
+  });
+
   describe("--url takes an address and nothing else (T-17)", () => {
     it("refuses a path prefix and credentials, and does not print the password", () => {
       const prefix = drive("drive-http.js", ["--url", "http://127.0.0.1:1/some/prefix"]);
