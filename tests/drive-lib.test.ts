@@ -34,7 +34,7 @@ describe("scenario files", () => {
       ["both method and tool", (s) => (s.steps[0].tool = "x"), /exactly one of "method" and "tool"/],
       ["a misspelled step key", (s) => (s.steps[0].argumnets = {}), /unknown key "argumnets"/],
       ["a misspelled expectation", (s) => (s.steps[0].expect = { tool_eror: true }), /unknown expectation "tool_eror"/],
-      ["writes that is not a boolean", (s) => (s.steps[0].writes = "yes"), /"writes" must be true or false/],
+      ["writes that is not true, false, \"ab-data\" or \"rules\"", (s) => (s.steps[0].writes = "yes"), /"writes" must be true, false, "ab-data" or "rules"/],
       ["an unknown matcher", (s) => (s.steps[0].expect = { json: { a: { $gt: 1 } } }), /json\.a: unknown matcher/],
       ["an unknown key at the top", (s) => (s.skipWrites = true), /unknown key "skipWrites"/],
     ];
