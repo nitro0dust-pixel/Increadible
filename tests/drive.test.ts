@@ -270,6 +270,21 @@ describe("scripts/drive-http.js", () => {
       expect(text.stdout).toContain("PASS 17/17 (4 skipped: they write data)");
     });
 
+    it("skips a step that writes whatever it writes (true, \"ab-data\", \"rules\"), and then has no calls to count in /metrics (mutation run 4)", async () => {
+      const { url } = await start("remote-token-4714");
+      const scenario = writeScenario("rules-only.json", { name: "rules-only", steps: [
+        { name: "replace the rules", tool: "update_rules", writes: "rules", arguments: { rules: [] } },
+        { name: "a measurement", tool: "record_metric", writes: "ab-data", arguments: { experiment_id: "x", variant_id: "A", metrics: { quality: 1 } } },
+        { name: "a plain write", tool: "create_experiment", writes: true, arguments: { id: "x" } },
+      ] });
+      const ran = drive("drive-http.js", ["--url", url, "--token-env", "DRIVE_TOKEN", "--scenario", scenario, "--json"], { DRIVE_TOKEN: "remote-token-4714" });
+      expect(ran.status).toBe(0);
+      const steps = ran.json.results[0].steps;
+      expect(steps.filter((s: any) => s.skipped).map((s: any) => s.name)).toEqual(["replace the rules", "a measurement", "a plain write"]);
+      // no call was made, so there is nothing for the metrics step to count: it must not be added (and must not fail)
+      expect(steps.map((s: any) => s.name)).not.toContain("metrics: the calls were counted");
+    });
+
     it("writes only with --allow-writes", async () => {
       const { url, data } = await start("remote-token-4712");
       const ran = drive("drive-http.js", ["--url", url, "--token-env", "DRIVE_TOKEN", "--allow-writes", "--json"], { DRIVE_TOKEN: "remote-token-4712" });
