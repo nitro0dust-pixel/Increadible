@@ -629,6 +629,8 @@ describe("the HTTP client's limits (T-11, T-12, SEC-05)", () => {
   });
 
   it("reports an answer that was cut off, naming the request", async () => {
+    // Node (22 and 24) itself reports the cut as "aborted" before the client's own close handler runs, so that handler is a second guard that
+    // no input reaches (mutation round 3: removing it changes nothing a test can see); this test holds that a cut is an error either way.
     const c = new lib.HttpClient({ baseUrl: base });
     await expect(c.request("GET", "/cut")).rejects.toThrow(/before the answer to GET \/cut was complete|socket hang up|aborted/);
   });
