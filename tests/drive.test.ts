@@ -287,9 +287,13 @@ describe("scripts/drive-http.js", () => {
     });
 
     it("fails when nothing listens, after the ready timeout it was given", () => {
+      const started = Date.now();
       const ran = drive("drive-http.js", ["--url", "http://127.0.0.1:9", "--ready-timeout-ms", "400", "--json"]);
       expect(ran.status).toBe(1);
       expect(failing(ran)).toEqual(["ready"]);
+      // the given timeout is the one that applies (the default is 15 s): the report names it and the run is far shorter than the default
+      expect(ran.json.results[0].steps.find((s: any) => s.name === "ready").problems[0]).toContain("within 400 ms");
+      expect(Date.now() - started).toBeLessThan(10000);
     });
 
     it("refuses options that belong to the other mode, and a token variable that is not set", () => {
