@@ -170,6 +170,13 @@ describe("runScenario", () => {
     expect(result.steps[0].problems[0]).toBe("no answer <hidden> for tools/call:missing");
   });
 
+  it("scrubs the summary column too: a server can put its own text there (an error code that is a string)", async () => {
+    const client = fake({ ping: { error: { code: "zz-secret-from-server-9", message: "m" } } });
+    const result = await run(client, [{ name: "s", method: "ping", expect: { rpc_error: -32601 } }], { secrets: ["zz-secret-from-server-9"] });
+    expect(result.steps[0].summary).toBe("error <hidden>");
+    expect(JSON.stringify(result)).not.toContain("zz-secret-from-server-9");
+  });
+
   it("does not parse a tool answer that is not JSON when only the text is checked, and reports it when JSON is needed", async () => {
     const client = fake({ "tools/call:plain": text("just words") });
     expect((await run(client, [{ name: "s", tool: "plain", expect: { contains: "words" } }])).ok).toBe(true);
@@ -511,6 +518,8 @@ describe("the review's findings, at the library level", () => {
     const answer = { result: { content: [{ type: "text", text: `echoed ${secret} twice ${secret}` }] }, [`key-${secret}`]: 1, n: 7, ok: true, nothing: null };
     const clean = lib.redactDeep(answer, [secret]);
     expect(clean.result.content[0].text).toBe("echoed <hidden> twice <hidden>");
+    expect(Array.isArray(clean.result.content)).toBe(true); // arrays stay arrays (numeric keys on an object would still answer content[0])
+    expect(lib.redactDeep(["a-secret-1234", ["b-secret-1234"]], ["a-secret-1234", "b-secret-1234"])).toEqual(["<hidden>", ["<hidden>"]]);
     expect(Object.keys(clean)).toContain("key-<hidden>");
     expect([clean.n, clean.ok, clean.nothing]).toEqual([7, true, null]);
     expect(JSON.stringify(clean)).not.toContain("5150");
