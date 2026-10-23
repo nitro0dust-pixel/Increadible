@@ -126,6 +126,29 @@ describe("judging one finished driver", () => {
     expect(all.judge(job, { ...done("", null), timedOut: true, timeoutS: 30 }, {})).toMatchObject({ status: "TIMEOUT", note: "no verdict within 30 s" });
   });
 
+  it("counts every result of a report, not only the first, and a report of no step is not a pass", () => {
+    const job = { id: "stdio:basic", driver: "stdio", scenario: "basic", args: [] };
+    const report = (results: any[], over: object = {}) => ({ code: 0, ms: 1, timeoutS: 1, stderr: "", stdout: JSON.stringify({ ok: true, results, ...over }) });
+    const step = (name: string, ok: boolean) => ({ name, ok, problems: ok ? [] : ["no"] });
+    const second = all.judge(job, report([{ steps: [step("a", true)] }, { steps: [step("b", false)] }]), {});
+    expect({ status: second.status, failing: second.failing }).toEqual({ status: "FAIL", failing: ["b"] });
+    expect(all.judge(job, report([{ steps: [step("a", true)] }, { steps: [step("b", true)] }]), { "stdio:basic": 2 }).status).toBe("PASS");
+    for (const results of [[{ steps: [] }], [], [{ steps: [step("a", true)] }, { nothing: 1 }], [null]]) {
+      const out = all.judge(job, report(results), {});
+      expect({ results, status: out.status === "PASS" }).toEqual({ results, status: false });
+    }
+    expect(all.judge(job, report([{ steps: [] }]), {}).note).toMatch(/holds no step/);
+  });
+
+  it("says what a driver printed when it is not a report (a banner before the JSON, a cut-off report) next to the first line of its stderr", () => {
+    const job = { id: "probe", driver: "probe", scenario: null, args: [] };
+    const out = all.judge(job, { code: 0, ms: 1, timeoutS: 1, stderr: "", stdout: "\n> increadible@1.0.5 drive:probe\n{ \"ok\": tr" }, {});
+    expect(out.status).toBe("CANNOT RUN");
+    expect(out.note).toContain('stdout is not a report: "> increadible@1.0.5 drive:probe');
+    expect(all.judge(job, { code: 3, ms: 1, timeoutS: 1, stderr: "boom\nmore", stdout: "" }, {}).note).toBe("boom");
+    expect(all.judge(job, { code: 3, ms: 1, timeoutS: 1, stderr: "", stdout: "" }, {}).note).toBe("exit code 3");
+  });
+
   it("cuts control characters out of what it quotes from a driver's stderr", () => {
     const out = all.judge(job, { ...done("", 2), stderr: "boom \u001b[31mred\u001b[0m\n" }, {});
     expect(out.note).toBe("boom ?[31mred?[0m");
@@ -134,6 +157,11 @@ describe("judging one finished driver", () => {
 
 describe("the verdict", () => {
   const r = (status: string) => ({ status });
+  it("no job at all is not a pass: nothing was checked (exit 2)", () => {
+    expect(all.verdictOf([], [])).toEqual({ code: 2, verdict: "CANNOT RUN" });
+    expect(all.verdictOf([], ["increadible-drive-x"]).code).not.toBe(0);
+  });
+
   it("passes only when every job passed and nothing was left behind", () => {
     expect(all.verdictOf([r("PASS"), r("PASS")], [])).toEqual({ code: 0, verdict: "PASS" });
     expect(all.verdictOf([r("PASS")], ["increadible-drive-x"])).toEqual({ code: 1, verdict: "FAIL" });
@@ -217,6 +245,19 @@ describe("the process of one driver", () => {
     expect(Date.now() - started).toBeLessThan(12_000); // 1 s + 5 s, not the 20 s the process would have taken on its own
   }, 60_000);
 
+  it("ends a driver that ignores SIGTERM together with everything it started: a process group per driver (a stand-in for node that starts a sleeper and ignores the signal)", async () => {
+    const pidFile = path.join(dir, "sleeper.pid");
+    const stubborn = stub("group.sh", `trap "" TERM\nsleep 30 &\necho $! > ${pidFile}\nwait`);
+    const started = Date.now();
+    const finished = await all.runProcess(job, { timeoutS: 1, node: stubborn });
+    expect(finished.timedOut).toBe(true);
+    expect(Date.now() - started).toBeLessThan(12_000);
+    const sleeper = Number(fs.readFileSync(pidFile, "utf8"));
+    let alive = true;
+    for (let i = 0; i < 30 && alive; i++) { try { process.kill(sleeper, 0); await new Promise((r) => setTimeout(r, 100)); } catch { alive = false; } }
+    expect(alive).toBe(false); // killed with its parent: it would otherwise have run for 30 s
+  }, 60_000);
+
   it("keeps what the driver wrote, and the last of its stderr", async () => {
     const finished = await all.runProcess(job, { timeoutS: 30, node: stub("talk.sh", 'echo out; echo err >&2; exit 3') });
     expect(finished).toMatchObject({ code: 3, timedOut: false });
@@ -241,7 +282,7 @@ describe("the table", () => {
     expect(text.trimEnd().split("\n").pop()).toBe("FAIL: 1 of 3 jobs passed");
   });
   it("names what was left behind", () => {
-    expect(all.formatTable(rows.slice(0, 1), ["increadible-drive-abc"], { verdict: "FAIL" })).toContain("left behind in");
+    expect(all.formatTable(rows.slice(0, 1), ["increadible-drive-abc"], { verdict: "FAIL" })).toContain("left behind by a driver (removed afterwards): increadible-drive-abc");
   });
   it("shows at most five problems of a job", () => {
     const many = { ...rows[1], problems: Array.from({ length: 9 }, (_, i) => `p${i}`) };
@@ -268,7 +309,7 @@ describe("the work directories of the drivers", () => {
 
 // ---------------------------------------------------------------- the whole, as a user runs it
 
-const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "increadible-drive-all-test-"));
+const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "increadible-driveall-test-"));
 const server = path.join(tmp, "server");
 
 beforeAll(() => {
@@ -350,6 +391,87 @@ describe("drive-all as a process", () => {
     expect(ran.json.leftBehind).toHaveLength(1);
     expect(ran.json.leftBehind[0]).toMatch(/^increadible-drive-left-\d+$/);
     expect(ran.json.verdict).toBe("FAIL");
+    expect(fs.readdirSync(dir)).toEqual([]); // what it left was in a folder of this run's own, which is removed afterwards
+  });
+
+  /** A stand-in server (see the test above) that answers everything, and runs `extra` first. */
+  const fakeServer = (name: string, extra: string) => {
+    const fake = path.join(tmp, name);
+    fs.mkdirSync(path.join(fake, "dist", "src"), { recursive: true });
+    fs.writeFileSync(path.join(fake, "package.json"), JSON.stringify({ version: "1.2.3" }));
+    fs.writeFileSync(path.join(fake, "dist", "src", "main.js"), `
+      const fs = require("fs"); const os = require("os"); const path = require("path");
+      ${extra}
+      process.stdin.setEncoding("utf8"); let buf = "";
+      process.stdin.on("data", (d) => { buf += d; let i; while ((i = buf.indexOf("\\n")) >= 0) { const m = JSON.parse(buf.slice(0, i)); buf = buf.slice(i + 1); if (m.id === undefined) continue;
+        process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: m.id, result: m.method === "initialize" ? { protocolVersion: "x", capabilities: {}, serverInfo: { name: "increadible", version: "1.2.3" } } : {} }) + "\\n"); } });
+      process.stdin.on("end", () => process.exit(0));`);
+    return fake;
+  };
+
+  it("does not blame itself for the work directories of another run in the same temporary folder (found by two reviewers: two runs at once failed each other)", () => {
+    // the stand-in server makes a directory with the drivers' prefix in the folder ABOVE its own temporary folder: where a second run, a manual driver or a test would make theirs
+    const fake = fakeServer("neighbour", `fs.mkdirSync(path.join(path.dirname(process.env.TMPDIR), "increadible-drive-neighbour-" + process.pid));`);
+    const dir = privateTmp();
+    const ran = runAll(["--only", "stdio", "--scenario", "basic", "--root", fake, "--no-expect", "--json"], { TMPDIR: dir });
+    // (the stand-in is too bare to pass the scenario, so the verdict is a FAIL of the job; what is asserted is what was blamed on the run)
+    expect(ran.json.leftBehind).toEqual([]);
+    expect(fs.readdirSync(dir).filter((n) => n.startsWith("increadible-drive-neighbour-"))).toHaveLength(1); // it was made, and left alone
+  });
+
+  it("gives the drivers a temporary folder of this run's own, and removes it", () => {
+    const fake = fakeServer("where", `fs.writeFileSync(path.join(path.dirname(__dirname), "..", "tmpdir-seen.txt"), String(process.env.TMPDIR));`);
+    const dir = privateTmp();
+    runAll(["--only", "stdio", "--scenario", "basic", "--root", fake, "--no-expect", "--json"], { TMPDIR: dir });
+    const seen = fs.readFileSync(path.join(fake, "tmpdir-seen.txt"), "utf8");
+    expect(path.dirname(seen)).toBe(dir); // a folder inside the one drive-all was given...
+    expect(path.basename(seen)).toMatch(/^increadible-drive-/);
+    expect(fs.existsSync(seen)).toBe(false); // ...and gone afterwards
+    expect(fs.readdirSync(dir)).toEqual([]);
+  });
+
+  it("ends the drivers and their servers when it is interrupted, and removes its folder (SIGTERM: exit 143)", async () => {
+    // the stand-in server records its process id and never answers: the stdio driver waits for it
+    const fake = fakeServer("hang", `fs.writeFileSync(path.join(__dirname, "..", "..", "pid.txt"), String(process.pid)); setInterval(() => {}, 1000); process.stdin.on = () => process.stdin;`);
+    // (the line above stops the stand-in from answering: it replaces the listener registration after its own was not yet made)
+    const dir = privateTmp();
+    const child = cp.spawn(process.execPath, [path.join(root, "scripts", "drive-all.js"), "--only", "stdio", "--scenario", "basic", "--root", fake, "--no-expect", "--timeout-s", "60"], { env: { PATH: process.env.PATH ?? "", HOME: process.env.HOME ?? "", TMPDIR: dir }, stdio: "ignore" });
+    const pidFile = path.join(fake, "pid.txt");
+    for (let i = 0; i < 100 && !fs.existsSync(pidFile); i++) await new Promise((r) => setTimeout(r, 100));
+    expect(fs.existsSync(pidFile)).toBe(true);
+    const serverPid = Number(fs.readFileSync(pidFile, "utf8"));
+    child.kill("SIGTERM");
+    const code: number | null = await new Promise((resolve) => { child.on("close", (c) => resolve(c)); setTimeout(() => resolve(-1), 20_000).unref(); });
+    expect(code).toBe(143);
+    let alive = true;
+    for (let i = 0; i < 30 && alive; i++) { try { process.kill(serverPid, 0); await new Promise((r) => setTimeout(r, 100)); } catch { alive = false; } }
+    expect(alive).toBe(false); // the server the driver had started is gone
+    expect(fs.readdirSync(dir)).toEqual([]);
+  }, 60_000);
+
+  it("the longest deadline is a day: more would overflow the timer and end every job at once", () => {
+    for (const bad of ["86401", "2200000", "0"]) expect({ bad, status: runAll(["--list", "--timeout-s", bad]).status }).toEqual({ bad, status: 2 });
+    expect(runAll(["--list", "--timeout-s", "86400"]).status).toBe(0);
+  });
+
+  it("asks for the build each driver needs and no more: stdio main.js, http index.js, the probe both, the package none", () => {
+    const only = (entry: string) => { // a root that has just one of the two entry points
+      const root2 = path.join(tmp, "only-" + entry.replace(".", "-"));
+      fs.mkdirSync(path.join(root2, "dist", "src"), { recursive: true });
+      fs.writeFileSync(path.join(root2, "package.json"), JSON.stringify({ version: "1.2.3" }));
+      fs.writeFileSync(path.join(root2, "dist", "src", entry), "");
+      return root2;
+    };
+    const mainOnly = only("main.js");
+    const indexOnly = only("index.js");
+    for (const [driver, root2, missing] of [["http", mainOnly, "index.js"], ["stdio", indexOnly, "main.js"], ["probe", mainOnly, "index.js"], ["probe", indexOnly, "main.js"]] as const) {
+      const ran = runAll(["--only", driver, "--root", root2]);
+      expect({ driver, status: ran.status }).toEqual({ driver, status: 2 });
+      expect(ran.stderr).toContain(missing);
+    }
+    // each driver is satisfied by its own entry point: it gets as far as starting, then fails on the empty stand-in, which is exit 1, not 2
+    expect(runAll(["--only", "stdio", "--scenario", "basic", "--root", mainOnly, "--no-expect"]).status).toBe(1);
+    expect(runAll(["--only", "http", "--scenario", "basic", "--root", indexOnly, "--no-expect"]).status).toBe(1);
   });
 
   it("could not run (2) when there is no build, naming the command to run", () => {
