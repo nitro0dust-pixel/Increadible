@@ -20,7 +20,8 @@
     "drive:stdio": "node scripts/drive-stdio.js",
     "drive:http": "node scripts/drive-http.js",
     "drive:probe": "node scripts/drive-probe.js",
-    "drive:bundle": "node scripts/drive-bundle.js"
+    "drive:bundle": "node scripts/drive-bundle.js",
+    "drive:all": "node scripts/drive-all.js"
   },
   "keywords": [
     "claude",

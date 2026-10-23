@@ -12,6 +12,7 @@ out/
 *.d.ts
 !jest.config.js
 !scripts/*.js
+!workflows/*.js
 !.github/**/*.js
 
 # IDE

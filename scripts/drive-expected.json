@@ -1,0 +1,18 @@
+{
+  "description": "How many steps each job of scripts/drive-all.js must report. A driver that quietly runs fewer steps (or a scenario that lost some) fails the run. Change a number only together with the scenario or the driver that changed it, in the same pull request. 'probe' is the 27 checks of drive-probe.js; the other jobs are driver:scenario, the scenario's steps plus the steps the driver adds (stdio: handshake, shutdown and the stdout check; http: ready, health, auth, handshake, metrics and shutdown; bundle: the package, the data and the lock checks).",
+  "jobs": {
+    "stdio:basic": 19,
+    "stdio:gateway": 39,
+    "stdio:ab-statistics": 29,
+    "stdio:routing-rules": 31,
+    "http:basic": 22,
+    "http:gateway": 42,
+    "http:ab-statistics": 32,
+    "http:routing-rules": 34,
+    "probe": 27,
+    "bundle:basic": 22,
+    "bundle:gateway": 42,
+    "bundle:ab-statistics": 32,
+    "bundle:routing-rules": 34
+  }
+}
