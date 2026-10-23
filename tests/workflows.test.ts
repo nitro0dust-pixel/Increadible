@@ -57,8 +57,10 @@ describe("the workflow scripts as files", () => {
         expect(s.body).not.toMatch(/Date\.now|Math\.random|new Date\(\s*\)/);
       });
 
-      it("never pushes, merges or deploys: the only git and gh words in its instructions are the ones that forbid it or read", () => {
-        const bad = s.text.split("\n").filter((l) => /git push|gh pr (create|merge)|npm publish|kubectl apply|railway up|docker push/.test(l) && !/never|not |no |do not|forbid|without/i.test(l));
+      it("never pushes, merges or deploys: a sentence that names such a command also forbids it, with the forbidding word before it", () => {
+        const command = /git\s+(push|reset\s+--hard)|gh\s+pr\s+(create|merge)|npm\s+publish|kubectl\s+apply|railway\s+up|docker\s+push|--force/;
+        const forbidden = /\b(never|do not|must not|not allowed|without|forbid\w*)\b[^\n]*(git\s+(push|reset\s+--hard)|gh\s+pr\s+(create|merge)|npm\s+publish|kubectl\s+apply|railway\s+up|docker\s+push|--force)/i;
+        const bad = s.text.split(/[.;\n]/).filter((l) => command.test(l) && !forbidden.test(l)); // by sentence: a "never" earlier in the same line does not excuse a later command
         expect(bad).toEqual([]);
       });
     });
@@ -151,8 +153,18 @@ describe("drive-gate: who decides", () => {
     const whole = runOk("default");
     const verdictOf = async (answer: any) => (await run("drive-gate", {}, gate({ run: () => answer }))).result.verdict;
     expect(await verdictOf(whole)).toBe("PASS");
-    for (const answer of [{ ...whole, exit_code: "0" }, { ...whole, exit_code: undefined }, { ...whole, report_path: "" }, { ...whole, report_path: undefined }, { ...whole, sha256: "" }, { ...whole, label: "other" }, { ...whole, tracked_files_modified: undefined }, { ...whole, tracked_files_modified: "false" }, "exit 0", 0]) {
+    for (const answer of [{ ...whole, exit_code: "0" }, { ...whole, exit_code: undefined }, { ...whole, report_path: "" }, { ...whole, report_path: undefined }, { ...whole, sha256: "" }, { ...whole, sha256: undefined }, { ...whole, label: "other" }, "exit 0", 0]) {
       expect({ answer, got: await verdictOf(answer) }).toEqual({ answer, got: "FAIL" });
+      // and it is said to be unusable, and it is not listed as evidence (the verdict alone could come from another rule)
+      const { result } = await run("drive-gate", {}, gate({ run: () => answer }));
+      expect({ answer, evidence: result.evidence }).toEqual({ answer, evidence: [] });
+      expect({ answer, reasons: result.reasons.join(" ") }).toEqual({ answer, reasons: expect.stringMatching(/answer unusable|agent failed/) });
+    }
+    // a whole answer that does not say the tracked files are unchanged is evidence of a run, and a failure for its own reason
+    for (const answer of [{ ...whole, tracked_files_modified: undefined }, { ...whole, tracked_files_modified: "false" }, { ...whole, tracked_files_modified: true }]) {
+      const { result } = await run("drive-gate", {}, gate({ run: () => answer }));
+      expect({ answer, got: result.verdict }).toEqual({ answer, got: "FAIL" });
+      expect(result.reasons.join(" ")).toMatch(/modified tracked files/);
     }
   });
 
@@ -205,6 +217,7 @@ describe("drive-gate: who decides", () => {
   it("asks the Validation critic for the label, verdict and SHA-256 of each report, and tells the Security critic to wait for the other critics' drivers", async () => {
     const { calls } = await run("drive-gate", {}, gate());
     expect(calls.find((c) => c.label === "critic:validation")!.prompt).toMatch(/In `reports` give, for every report file named above/);
+    expect(calls.find((c) => c.label === "critic:validation")!.prompt).toMatch(/the `verdict` field you read in that JSON yourself, and the SHA-256 you computed yourself; the script compares them with what the runner said/);
     expect(calls.find((c) => c.label === "critic:security")!.prompt).toMatch(/wait until `pgrep -f drive-` prints nothing for 5 seconds/);
   });
 
@@ -500,6 +513,15 @@ describe("engineer-loop: who may approve, when it stops", () => {
     expect(second).toContain('"criterion":"C2"');
     expect(second).toContain("c1".padEnd(40, "0")); // it starts from the previous round's commit
     expect(calls.find((c) => c.label === "engineer:1")!.prompt).toContain("This is the first round");
+  });
+
+  it("tells the next Engineering round when a critic gave no answer: a gap is feedback too, and it names the critic", async () => {
+    const { result, calls } = await run("engineer-loop", start(), loop({ 1: { sec: null } }));
+    expect(result.status).toBe("APPROVED_FOR_HUMAN_REVIEW"); // round 2 is clean
+    expect(result.rounds_run).toBe(2);
+    const second = calls.find((c) => c.label === "engineer:2")!.prompt;
+    expect(second).toContain('"from":"orchestrator"');
+    expect(second).toContain("the Security agent gave no answer");
   });
 
   it("never lets the Engineering agent's own account decide: the critics are told not to trust it and are given the commit, not the summary", async () => {

@@ -127,13 +127,13 @@ ROLE: VALIDATION (independent). For each acceptance criterion say whether the ch
   const unmet = plan.criteria.filter((p) => { const mine = judged.filter((c) => c && c.id === p.id); return mine.length === 0 || mine.some((c) => c.met !== 'yes') }).map((p) => { const bad = judged.filter((c) => c && c.id === p.id).find((c) => c.met !== 'yes') || {}; return { id: p.id, met: bad.met || 'not judged', evidence: bad.evidence || '' } })
   const all = [].concat((secured && Array.isArray(secured.findings)) ? secured.findings : [], (validated && Array.isArray(validated.findings)) ? validated.findings : [])
   const blocking = all.filter((f) => severity(f) !== 'minor')
-  const approved = problems.length === 0 && blocking.length === 0 && unmet.length === 0 && gaps.length === 0 && !!tested
+  const approved = problems.length === 0 && blocking.length === 0 && unmet.length === 0 && gaps.length === 0
   const keys = [].concat(blocking.map((f) => 'f:' + findingKey(f)), unmet.map((c) => 'c:' + c.id), gaps.map((g) => 'g:' + g), problems.map((p) => 't:' + p), tested && Array.isArray(tested.failures) ? tested.failures.map((x) => 't:' + String(x).slice(0, 60)) : []).sort().join('|')
   rounds.push({ round: n, commit: built.commit, summary: built.summary, files: built.files, deviations: built.deviations, not_done: built.not_done, tests: tested, security: secured, validation: validated, unmet_criteria: unmet.map((c) => c.id), blocking: blocking.map((f) => ({ key: findingKey(f), severity: f && f.severity, title: f && f.title })), gaps, problems, approved })
   log(`round ${n}: tests ${tested ? (tested.passed ? 'pass' : 'FAIL') : 'no answer'}, ${blocking.length} blocking finding(s), ${unmet.length} criteria not met, ${gaps.length} gap(s) -> ${approved ? 'APPROVED' : 'recycle'}`)
   previous = built.commit
   if (approved) { status = 'APPROVED_FOR_HUMAN_REVIEW'; break }
-  if (lastKeys !== null && keys !== '' && keys === lastKeys) { status = 'STALLED_SAME_FINDINGS_TWICE'; break }
+  if (lastKeys !== null && keys === lastKeys) { status = 'STALLED_SAME_FINDINGS_TWICE'; break }
   lastKeys = keys
   feedback = [].concat(
     problems.length ? [{ from: 'testing', problems, failures: tested.failures, commands: (Array.isArray(tested.commands) ? tested.commands : []).filter((c) => !c || c.exit_code !== 0) }] : [],

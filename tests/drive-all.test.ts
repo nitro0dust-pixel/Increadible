@@ -258,6 +258,26 @@ describe("the process of one driver", () => {
     expect(alive).toBe(false); // killed with its parent: it would otherwise have run for 30 s
   }, 60_000);
 
+  it("endChildren, which runs when drive-all itself ends, stops a driver that ignores SIGTERM too: SIGTERM, a short wait, then SIGKILL, for the driver and what it started", async () => {
+    const pidFile = path.join(dir, "end.pid");
+    const sleeperFile = path.join(dir, "end-sleeper.pid");
+    const stubborn = stub("end.sh", `trap "" TERM\necho $$ > ${pidFile}\nsleep 30 &\necho $! > ${sleeperFile}\nwait`);
+    const finished = all.runProcess(job, { timeoutS: 60, node: stubborn });
+    for (let i = 0; i < 50 && !(fs.existsSync(pidFile) && fs.existsSync(sleeperFile)); i++) await new Promise((r) => setTimeout(r, 100));
+    expect(all.running.size).toBe(1);
+    const pids = [Number(fs.readFileSync(pidFile, "utf8")), Number(fs.readFileSync(sleeperFile, "utf8"))];
+    all.endChildren();
+    expect(all.running.size).toBe(0);
+    const done = await finished;
+    expect(done.timedOut).toBe(false);
+    expect(done.code).toBeNull(); // ended by a signal, not by itself
+    for (const pid of pids) {
+      let alive = true;
+      for (let i = 0; i < 30 && alive; i++) { try { process.kill(pid, 0); await new Promise((r) => setTimeout(r, 100)); } catch { alive = false; } }
+      expect({ pid, alive }).toEqual({ pid, alive: false });
+    }
+  }, 60_000);
+
   it("keeps what the driver wrote, and the last of its stderr", async () => {
     const finished = await all.runProcess(job, { timeoutS: 30, node: stub("talk.sh", 'echo out; echo err >&2; exit 3') });
     expect(finished).toMatchObject({ code: 3, timedOut: false });
@@ -393,6 +413,24 @@ describe("drive-all as a process", () => {
     expect(ran.json.verdict).toBe("FAIL");
     expect(fs.readdirSync(dir)).toEqual([]); // what it left was in a folder of this run's own, which is removed afterwards
   });
+
+  it("main() removes the folder it made for the run before it returns: the library's cleanup at exit is a second line, and a caller that goes on running leaves nothing behind", async () => {
+    const dir = privateTmp();
+    // the test's process.env is a copy that os.tmpdir() does not read: the temporary folder is redirected where main() asks for it
+    const where = jest.spyOn(require("os"), "tmpdir").mockReturnValue(dir); // (the module object itself: the namespace import has no writable properties)
+    const log = jest.spyOn(console, "log").mockImplementation(() => undefined);
+    let code: number | undefined;
+    let during: string[];
+    try {
+      const finished = all.main(["--only", "stdio", "--scenario", "basic", "--root", server, "--no-expect", "--json"]);
+      await new Promise((r) => setTimeout(r, 50));
+      during = fs.readdirSync(dir); // the run's own folder exists while it runs: the redirect works, so an empty folder afterwards means something
+      code = await finished;
+    } finally { where.mockRestore(); log.mockRestore(); }
+    expect(code).toBe(0);
+    expect(during.filter((n) => n.startsWith("increadible-drive-"))).toHaveLength(1);
+    expect(fs.readdirSync(dir)).toEqual([]);
+  }, 60_000);
 
   /** A stand-in server (see the test above) that answers everything, and runs `extra` first. */
   const fakeServer = (name: string, extra: string) => {
