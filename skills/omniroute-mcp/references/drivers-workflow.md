@@ -8,7 +8,7 @@ judges their own work. The workflows are an option: everything they rely on work
 
 | | |
 |---|---|
-| Status | `drive:all` and both workflow scripts are built and tested (section 11). The decision rules of the workflows are tested with stand-ins for the agents. **The two workflows have not been run with real agents: NOT VERIFIED** (section 11) |
+| Status | `drive:all` and both workflow scripts are built, tested and merged (PR #76; section 11). The decision rules of the workflows are tested with stand-ins for the agents. **The two workflows have not been run with real agents: NOT VERIFIED** (section 11) |
 | Cost | `drive:all` costs seconds and no tokens. `drive-gate` is 4 agents with the defaults (1 Testing runner, 3 critics). `engineer-loop` is 2 agents to prepare and 4 per round (default 3 rounds, at most 7): up to 30 agents. Read section 10 before starting one |
 | Nothing here deploys | No workflow is told to push, merge, open a pull request, publish an image or touch production or another repository. A deployment to production needs a human's explicit approval (section 8). What stops an agent that disobeys is **not** a technical barrier: see "The rules are prose" in section 8 |
 | Windows, a real provider, Claude Desktop itself | **NOT VERIFIED / NOT AVAILABLE** here, as in DRIVERS.md |
