@@ -270,6 +270,20 @@ describe("scripts/drive-http.js", () => {
       expect(text.stdout).toContain("PASS 17/17 (4 skipped: they write data)");
     });
 
+    it("skips a step that writes whatever it writes (true, \"ab-data\"), and then has no calls to count in /metrics (mutation run 4; \"rules\" cannot get here: such a scenario must be own-server, which --url refuses)", async () => {
+      const { url } = await start("remote-token-4714");
+      const scenario = writeScenario("rules-only.json", { name: "rules-only", steps: [
+        { name: "a measurement", tool: "record_metric", writes: "ab-data", arguments: { experiment_id: "x", variant_id: "A", metrics: { quality: 1 } } },
+        { name: "a plain write", tool: "create_experiment", writes: true, arguments: { id: "x" } },
+      ] });
+      const ran = drive("drive-http.js", ["--url", url, "--token-env", "DRIVE_TOKEN", "--scenario", scenario, "--json"], { DRIVE_TOKEN: "remote-token-4714" });
+      expect(ran.status).toBe(0);
+      const steps = ran.json.results[0].steps;
+      expect(steps.filter((s: any) => s.skipped).map((s: any) => s.name)).toEqual(["a measurement", "a plain write"]);
+      // no call was made, so there is nothing for the metrics step to count: it must not be added (and must not fail)
+      expect(steps.map((s: any) => s.name)).not.toContain("metrics: the calls were counted");
+    });
+
     it("writes only with --allow-writes", async () => {
       const { url, data } = await start("remote-token-4712");
       const ran = drive("drive-http.js", ["--url", url, "--token-env", "DRIVE_TOKEN", "--allow-writes", "--json"], { DRIVE_TOKEN: "remote-token-4712" });
@@ -650,6 +664,8 @@ describe("the review's findings", () => {
     it("warns when the token would go to another machine over http, and not for this machine or https", () => {
       const run = (url: string) => drive("drive-http.js", ["--url", url, "--token-env", "DRIVE_TOKEN", "--ready-timeout-ms", "300", "--timeout-ms", "300"], { DRIVE_TOKEN: "plain-http-token-1234" });
       expect(run("http://203.0.113.9:9").stdout).toContain("warning: the token is sent over plain http to an address that is not this machine");
+      expect(run("http://203.0.113.9:9").stderr).toContain("warning: the token is sent over plain http to an address that is not this machine"); // at once, before the first request, not only in the report at the end
+      expect(run("http://127.0.0.1:9").stderr).not.toContain("warning: the token is sent");
       expect(run("http://127.0.0.1:9").stdout).not.toContain("warning: the token is sent");
       expect(run("http://localhost:9").stdout).not.toContain("warning: the token is sent");
       expect(run("https://203.0.113.9:9").stdout).not.toContain("warning: the token is sent");

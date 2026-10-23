@@ -3,7 +3,7 @@
 # Request drivers: real calls to the server, from the command line
 
 Four small programs that start the real server (or reach one that is running), send it real JSON-RPC requests, check the answers
-against written expectations, and print a report. They are Stage 1 of the plan for drivers; what is not built yet is in
+against written expectations, and print a report. They are Stages 1 and 2 of the plan for drivers (the programs, then the deeper scenarios); what is not built yet is in
 section 10. Nothing here is a load test (that is `npm run loadtest`, [PERFORMANCE.md](../PERFORMANCE.md)) and nothing here proves
 that Claude Desktop accepts the package (that needs the app, [INSTALL-CLAUDE-DESKTOP.md](INSTALL-CLAUDE-DESKTOP.md)).
 
@@ -32,7 +32,7 @@ manifest sets (`AB_FSYNC=true` by default, `AB_LAZY_OPEN=true`).
 
 1. Node 22 or later (`node --version`); the repository root as the current directory.
 2. `npm ci` once.
-3. `npm run build` (stdio, http, probe). The build wipes `dist/`, so do not run it while a driver is running.
+3. `npm run build` (stdio, http, probe). The build wipes `dist/`, so do not run it while a driver is running; it also removes the package `npm run mcpb` wrote to `dist/mcpb/`, so build first and package after.
 4. `npm run mcpb` (bundle only). It builds `dist/mcpb/increadible-<version>.mcpb` from the committed sources and needs `npm ci` and the
    npm registry. The bundle driver can also do this itself with `--build`.
 
@@ -108,7 +108,7 @@ npm run drive:probe -- --transport http
 npm run drive:probe -- --list
 ```
 
-Expected: `PASS 27/27 (4 KNOWN: recorded deviations from the MCP spec, behaviour unchanged)`. Section 8 explains the four, and the three `INFO` lines.
+Expected: for the first command `PASS 27/27 (4 KNOWN: recorded deviations from the MCP spec, behaviour unchanged)`; with `--transport http`, `PASS 14/14 (3 KNOWN: recorded deviations from the MCP spec, behaviour unchanged)`; `--list` prints the checks with their kind (`known`, `observed`, `contract`) and no verdict. Section 8 explains the deviations and the `INFO` lines.
 
 ### 3.5 bundle
 
@@ -127,6 +127,24 @@ with exactly the manifest's command, arguments and environment; the scenario run
 `--build` makes the package first. The driver uses the Node that runs it (`--node PATH` to choose another); Claude Desktop uses its own, so
 the Node version in Claude Desktop is **not** tested here. **The package's code is run**: open only a package you built or trust. "Well-formed" means checksums and
 file names are sound, not that the package is safe, and the zip is inflated into memory whole (a package that expands to a huge size can exhaust it).
+
+### 3.6 The deeper scenarios (stage 2)
+
+Three more scenarios ship next to `basic` (section 5). Each goes through the driver that starts its own server: stdio, http (self-contained) or bundle.
+They are marked `"scope": "own-server"`, so `drive:http --url` **refuses** them (exit code 2): they assert that every gateway answer is sample data, add
+hundreds of measurements to the A/B data file, which is never compacted, or replace the routing rules, which the server saves to its rules file.
+
+```
+npm run drive:stdio -- --scenario gateway
+npm run drive:stdio -- --scenario ab-statistics
+npm run drive:http  -- --scenario routing-rules
+npm run drive:bundle -- --scenario routing-rules
+```
+
+Expected, on all three drivers: `PASS` with every step, and exit code 0. Counts seen on the authoring machine (Node 22, 2026-10-20): stdio `gateway` 39/39, `ab-statistics` 29/29, `routing-rules` 31/31;
+http 42/42, 32/32 and 34/34; bundle 42/42, 32/32 and 34/34 (the bundle driver adds the data checks: for `routing-rules` it looks for `rules.yaml` in the data folder instead of the A/B data file).
+
+**A folder that already holds the server's data is refused.** Two of them write: `ab-statistics` adds experiments under fixed names and hundreds of measurements, and `routing-rules` replaces the routing rules and asserts the built-in ones, so they need a server that starts empty (`gateway` writes nothing and runs in any folder). The files that count are the three the server will really use: those of `--data-dir` (`rules.yaml`, `experiments.yaml`, `ab-data.jsonl`) and any that `--env RULES_FILE=...`, `EXPERIMENTS_FILE=...` or `AB_DATA_FILE=...` names instead (a relative path is read from the server's root, as the server reads it). When one of them exists, a driver stops before starting anything (exit code 2, naming the file, the file untouched), whichever of the three the scenario would have touched: give an empty folder, or none and the driver makes its own. The guard rests on what a scenario declares (`scope` and `writes`, section 6): a scenario you write that changes data without declaring it is not guarded. Do not point `drive:bundle --data-dir` at the folder Claude Desktop uses for your real rules. A second run into the folder a first one used is refused for the same reason.
 
 ## 4. Reading a report
 
@@ -150,7 +168,18 @@ file names are sound, not that the package is safe, and the zip is inflated into
 A server that stopped answering is reported as `no answer to <method> within N ms` with the last lines of the server's own stderr (secrets
 replaced by `<hidden>`). stderr is not an error channel in the MCP stdio transport: a server may write logs there, and the driver only shows it when something failed.
 
-## 5. What the shipped scenario does
+## 5. What the shipped scenarios do
+
+| Scenario | What it checks | Runs against |
+|---|---|---|
+| `basic` | one pass through every part of the server (below) | any server |
+| `gateway` | discovery (all nine ids in order) and its search (by category, by name alone, by description alone), one call to each of the nine APIs, the cache (also with different params), an empty endpoint and null params, every error the tools name, aggregation (a partial failure keeps the other answers in the order asked; exactly 100 calls are accepted, 101 refused), and the counters API by API, compared with a count of the calls the scenario itself makes (total = successful + failed + cache hits, the rule in `docs/USING-THE-GATEWAY.md`) | a server the driver starts (`own-server`) |
+| `ab-statistics` | 60 + 60 known measurements in, the mean, standard deviation, 95 % interval, effect size, p-value, winner and recommendation checked against arithmetic worked out from those values (the test `tests/drive-scenarios.test.ts` repeats the arithmetic); the same values in both variants must give p = 1 and no winner; a third experiment whose means differ by 1/60 must give no winner either (significance, not just a difference); 16 users must get the variants recorded for them (a regression golden taken from version 1.0.5, not worked out: a change means existing users get other variants) and the same one again when asked twice; five refused calls that change nothing | `own-server` |
+| `routing-rules` | the three built-in rules; then a rule set of our own, sent in an order that disagrees with its priority numbers (so the order is the server's doing): priority order, a disabled rule, lists of values, ties (first in the list wins, and the other way round), a rule id that is also an `Object` property and its statistics, rule sets that are refused and change nothing, and no rules at all | `own-server` |
+
+The p-value is checked as a bound only (below one in a million): the server turns the t statistic into an approximate z score on purpose, so an exact value would be a claim about its approximation. The 95 % interval is checked as a band between the normal quantile (1.96) and 2.05.
+
+### The `basic` scenario
 
 `scripts/drive-scenarios/basic.json` is one pass through the three parts of the server: the
 protocol (ping, `tools/list`), routing, A/B testing (create, assign, record, read back) and the gateway (discover, call, aggregate,
@@ -187,9 +216,13 @@ separator or ending in `.json` is a file; anything else is the name of a shipped
 |---|---|
 | `name` | required, unique in the file |
 | `tool` + `arguments` | a `tools/call`; or `method` + `params` for any other request. Exactly one of `tool` and `method`; `params` on a tool step and `arguments` on a method step are refused |
-| `writes` | `true` when the step changes data that outlives the run **or needs data a skipped step made**: a step that uses a variable saved by a `writes` step must itself be marked `writes`, or against `--url` it fails with "unknown variable" |
+| `writes` | `false` is the same as leaving it out. `true` (or `"ab-data"`) when the step changes data that outlives the run **or needs data a skipped step made**: a step that uses a variable saved by a `writes` step must itself be marked `writes`, or against `--url` it fails with "unknown variable". `"rules"` marks a step that replaces the routing rules, and needs `"scope": "own-server"` on the scenario (the validation refuses it otherwise: it would replace the rules of whatever server it meets): the same skipping, and the bundle driver then looks for `rules.yaml` in the data folder instead of the A/B data file |
+| `each` | a list of 1 to 1000 values: the step runs once per value, with `${each}` (the value, keeping its type: a number stays a number, an object an object; `${each.user}` is a field of an object value) and `${index}` (from 0) available in `arguments`, `params` and `expect`, in the keys of an expectation's paths too (`"apis.${index}.id"`). One row in the report: `ok (60 calls)`, or how many failed with the first five problems, each with the number of its call and the value. A call the server does not answer ends the loop, and so does a mistake in the scenario (an unknown variable: nothing is sent, and the row says so); a looped step also stops after 120 s. Cannot go with `save`. Skipped as a whole where `writes` is skipped. A scenario may make 5000 requests in all (the second send of a `same_again` step counts) |
+| `same_again` | `true`: the request is sent a second time and the answer must be identical to the first (as JSON). For answers that hold no timestamp or counter; it is how stickiness is checked (the same user, the same variant) |
 | `save` | `{ "name": "dotted.path" }`: keeps a value from the answer for later steps as `${name}`. For a tool step the path walks the JSON the tool put in its text; for a method step, the raw `result` |
 | `expect` | what must hold (below). With none, the step must simply succeed: a result, and for a tool no `isError` |
+
+Names the runner puts into the variables itself, `each`, `index` and `run_id`, cannot be used by `save`. The keys at the top of the file are `name` (required), `description`, `steps` (required, not empty) and `scope`: `"any"` (the default) or `"own-server"`, for a scenario that must not run against a server the driver did not start. `drive:http --url` refuses an `own-server` scenario with exit code 2; the stdio and bundle drivers always start their own server.
 
 | `expect` key | Holds when | Allowed on |
 |---|---|---|
@@ -201,7 +234,7 @@ separator or ending in `.json` is a file; anything else is the name of a shipped
 | `tools_include` | `tools/list` names all of them | the method `tools/list` |
 
 Matchers: a plain value (compared as JSON; objects without regard to the order of their keys, arrays in order), or an object with `$type` (`string`, `number`, `boolean`, `array`, `object`, `null`), `$gte`, `$lte`,
-`$includes`, `$matches` (a regular expression, which must compile) or `$exists`. `${run_id}` (unique per run) and every saved name are replaced in `arguments`,
+`$near` (`[value, tolerance]`: a number within the tolerance on either side, ends included up to the rounding of floating-point sums; for statistics the server rounds), `$includes`, `$matches` (a regular expression, which must compile) or `$exists` (`true` or `false`). `$near` needs a tolerance of 0 or more. `tool_error` is `true` or `false`; `false` is what a step without it already means (`isError: true` fails the step). A `$matches` pattern is not bounded in time: scenario files are trusted like code, and a pattern that backtracks badly on text the server can echo would hang the driver. `${run_id}` (unique per run) and every saved name are replaced in `arguments`,
 `params` and `expect`. A file with a misspelled key (`argumnets`, `tool_eror`), a duplicate step name, an unknown matcher, a wrong type, or an expectation its kind of step can never
 evaluate (`json` on a method step, `message_contains` without `rpc_error`) is refused with the step named, before anything is started, because a check that
 silently checks nothing is worse than no check. For the same reason an expectation that holds for anything is refused too: an empty `contains`, `message_contains`, `tools_include`, `json` or `result`, an empty
@@ -214,11 +247,12 @@ a tool step, a `content` list; otherwise the step fails with `malformed`. Over H
 
 | Question | Answer |
 |---|---|
+| Can it overwrite my data? | An `own-server` scenario that writes refuses a `--data-dir` that already holds `rules.yaml`, `experiments.yaml` or `ab-data.jsonl` (section 3.6). `basic` and `gateway` have no such rule and never replace the routing rules; but `basic` run with `--data-dir` on a folder you care about appends one test experiment and one measurement to its A/B data file, which is append-only and never compacted: give it a scratch folder, or none. The files counted are the three the server will really use, including any named with `--env` (section 3.6). |
 | What does a run leave behind? | Nothing, unless you pass `--keep` or `--data-dir` (the bundle driver's `--data-dir` receives the server's data and nothing else; the package is unpacked into a folder of the driver's own). Its work directory is created with the prefix `increadible-drive-` and only such a directory is ever removed. Interrupted with Ctrl-C or `kill`, it cleans up (section 2); after `kill -9` it cannot. |
 | Which secrets can it show? | Those it knows. The values of the server's variables whose name contains TOKEN, SECRET, PASSWORD, KEY or CREDENTIAL, the random token of the http driver and a token from `--token-env` are replaced by `<hidden>` in everything the driver prints that came from a server (the answers, the problems, the summaries, the server's stderr), when they are four characters or longer, also when the server echoes them as JSON escapes them and before any text is cut short; a secret it was never told about, or a shorter one, cannot be hidden. Control characters other than tab and line breaks, including the C1 range some terminals obey, in such text are replaced by `?`, so a server cannot steer your terminal. The bundle driver shows a setting as `(set)` when the manifest marks it `sensitive`, when its name looks like a secret, and for `contact`. A test passes secrets in and looks for them in the output. |
 | What does the server inherit from your shell? | Only `PATH`, `HOME`, `USERPROFILE`, `SystemRoot`, `SYSTEMROOT`, `TEMP`, `TMP`, `TMPDIR`, `LANG` and `LC_ALL`, plus what you give with `--env`. Your tokens do not reach it. |
 | Does it open a port? | The http and the probe driver, on `127.0.0.1` and a free port, for the length of the run. |
-| Does it write to a deployment? | Not data, by default (section 3.3); the steps that run still change the target's in-memory statistics and counters. |
+| Does it write to a deployment? | Not data, by default (section 3.3); the steps that run still change the target's in-memory statistics and counters. A scenario that would do more (the three of section 3.6) carries `"scope": "own-server"` and `--url` refuses it. `scope` and `writes` are the scenario author's declarations: the driver cannot know that an unflagged `record_metric` step writes, so a scenario you write for `--url` must flag its writing steps itself. |
 | Does it call a real provider? | It never switches live calls on and refuses to. A server you point `--url` at may have them on (section 3.3). |
 | Can a server or a package hurt the machine running the driver? | The drivers read at most 8 MiB of an HTTP answer and give each exchange a deadline, but they print what a server sends (scrubbed as above) and `drive:bundle` runs the package's code. Do not point them at a server or a package you do not trust. |
 
@@ -247,28 +281,33 @@ If someone fixes one, the probe fails on that line (`expected: ...`) on purpose:
 ## 9. How these drivers were tested
 
 Every claim above has a test in `tests/drive-lib.test.ts` (the library, against small fake servers: no answer, a crash, stray output, a server that
-ignores every polite goodbye, an answer cut off or too large) or `tests/drive.test.ts` (the four drivers as processes, against the server compiled from the sources, a package
+ignores every polite goodbye, an answer cut off or too large) or `tests/drive-scenarios.test.ts` (the format of stage 2 and the three scenarios, against the server as it is and against a server broken on purpose, one place per test) or `tests/drive.test.ts` (the four drivers as processes, against the server compiled from the sources, a package
 built by `scripts/mcpb.js`, and stand-in servers that misbehave: one that echoes the bearer token, one that is slow so the driver can be interrupted mid-run). The tests that matter most break something on purpose and expect the driver to say so: a patched server that
 answers 403 instead of 401, 400 instead of 413, a different parse-error code, 405 for `GET /mcp`, a counter stuck at zero, an exit code of 5 on SIGTERM; a damaged package; a scenario that claims
 to write and does not.
 
-The drivers themselves were also broken one guard at a time, and each breakage had to make a test fail (`tests/drive-lib.test.ts` and `tests/drive.test.ts`):
+The drivers themselves were also broken one guard at a time, and each breakage had to make a test fail (`tests/drive-lib.test.ts`, `tests/drive.test.ts` and `tests/drive-scenarios.test.ts`):
 
 | Round | Date | Breakages | Caught at once | What the survivors were |
 |---|---|---|---|---|
 | 1 (first version of the drivers) | 2026-10-14 | 68 | 59 | 9 checks no test could make fail: the `$exists` matcher, the `result` expectation, a JSON answer that is not JSON-RPC, "how did the server end", the handshake's server name, the HTTP shutdown's exit code, the redaction of the random token, the bundle's lock-file check and data check. One test each was written; the first five were re-run and are caught, the other four are in round 2 |
 | 2 (the code after the first independent review) | 2026-10-20 | 56 listed, 25 run | 23 | The run was stopped after 25 breakages, because one of my own tests could hang Jest when it failed (fixed: it ends its stand-in server in a `finally`). Two survivors: the redaction of secrets inside arrays of an answer, and the scrubbing of a step's summary. One test each; both caught afterwards. |
 | 3 (the code after the second review; round 2's list again, 34 of its breakages, plus the second review's findings) | 2026-10-20 | 69 | 60 | 8 survivors and 1 breakage whose text did not match the file (the cleanup of servers, written again as two: the SIGTERM step and the SIGKILL step, both caught). The survivors: the second guard against a cut-off answer (**equivalent**, nothing can reach it: Node reports `aborted` first, on 22 and on 24; a comment in the test says so); the ready timeout the user gives (no test looked at the time); an empty data file (hidden by the run-id check next to it); a secret cut in half by the end of the stderr tail; a secret the server wrote as a JSON escape (`\u0073`); an answer that never ends (read until the deadline instead of cut at the limit); the bundle driver creating the data folder before it checks the settings; and the token over `--url` (the test existed, the breakage run had named the wrong one). Each has a test now and was broken again: 9 of the 10 re-runs are caught, the tenth is the equivalent one. **The folder test had been passing for the wrong reason**: it sat in a block that runs before the test package is built, so the driver stopped at a missing file and created nothing whatever the code did. It now runs after the build and also checks that the refusal names the setting. |
+| 4 (stage 2: the looped steps, `$near`, `scope`, the kinds of `writes`, the used-folder refusal) | 2026-10-20 | 25, then the 3 survivors again | 22; then 3 of 3 | Three survivors: a secret inside the preview of a looped value (the preview was cut before the secret was hidden), the run id of a `rules` step not binding the A/B data in the package driver, and the metrics count of `drive:http --url` including the steps it skipped. One test each (the third needed a second one: *every* kind of writing step is skipped against a running server); the three breakages were run again against the final tests and are all caught. |
+| 5 (stage 2 after its two independent reviews) | 2026-10-20 | 25 | 24 | One survivor: creating the package driver's data folder before the manifest's environment is checked. It is **equivalent for the shipped package**: that check can only refuse when the folder already holds the server's data (then it exists) or when the manifest itself switches live calls on (it does not, and `--setting live_apis` is refused earlier, before anything is read). The property it was aiming at, that a refused setting makes no data folder, got its own test (an unknown setting and a live one, each with a folder that does not exist yet), which fails when the folder is made before the settings are checked. |
+| 6 (the guards added for the final independent re-review) | 2026-10-20 | 21 | 19 | Two survivors, both equivalent: the http driver's own redaction of the handshake text and of `serverInfo`, because `HttpClient` already redacts every answer it parses (the stdio client does not, which is where the leak was and where the guards are tested); both stay as a second line. |
 
 Besides, two independent reviews by separate agents. The first (a tester, a security reviewer and a documentation follower; its code reviewer was cut off by the usage limit) found 46 issues in the first version; four skeptic agents each
 reproduced the finding they were given. The second (the code reviewer that had been cut off, and a regression tester that replayed all 45 ids of the first review against the fixed code: 33 fixed, 8 partly, 1 still broken) found no blocker and 27 further findings (11 from the code reviewer, 16 from the regression tester); three of them were sent to a skeptic agent for a second look. They are fixed, each with a test, and this document was corrected from them. Two things found by the tests themselves are worth saying: the first `basic` scenario could not be repeated against a running server (the second run hit the gateway's cache and
 failed `cached: false`), and the HTTP client returned an oversize answer as a result when the whole of it had already arrived.
 
+A third review looked at the final state of stage 2, with four reviewers (code, scenario truth, documentation, security) who each worked in their own copy of the repository and five skeptic agents for the findings rated blocker or major. It found 35 things and no blocker; the five rated major were confirmed by the skeptics as real and minor. Each defect was fixed with a test (round 6 above), four scenario steps that could not fail were made to (a refused number that is stored anyway, a search by name alone and by description alone, the exact provider shares), the documents were corrected, and what was left is stated in section 10 as not covered. The review also confirmed, by deriving every expectation of the three scenarios from the server's source and by about forty breakages of the compiled server of its own, that the numbers in them are right.
+
 ## 10. What is not built yet
 
 | Stage | Content | State |
 |---|---|---|
-| 2 | scenario drivers that go deeper: the gateway's error channels and limits, the A/B statistics against known data, routing rules | not started |
+| 2 | scenario drivers that go deeper: the gateway's error channels and limits, the A/B statistics against known data, routing rules | **built** (section 3.6): three scenarios and the format they needed (`each`, `$near`, `scope`, the kinds of `writes`). Not covered: the gateway's rate limits, retries and timeouts, which exist only on live calls (stage 4 tests them against a local stub); the guardrail and multi-variant paths of the A/B module; the A/B module's minimum of 30 samples per variant (every experiment goes from 60 in all to 120, so the "incomplete" answer for 30 is never asked for); a significance threshold between the p-values the three experiments give (1.9e-16, 0.96 and 1); the order of an aggregation's answers as distinct from the order its calls finish (sample data finishes in the order it starts); and the content of the answers of finnhub, weatherapi, thesportsdb, wikipedia and wikidata (the scenario shows that data is there, and pins the content only for coingecko, openweathermap and newsapi) |
 | 3 | the multi-agent workflow scripts that run the drivers in parallel and judge the reports, with their own documentation | not started. Until then the drivers can be run side by side by hand or in CI: each one picks its own port and work directory and they do not share files (twelve at once, three of each kind, and sixteen http runs at once, all passed in the review), so `npm run drive:stdio & npm run drive:probe & wait` (bash) is safe; two bundle runs at once are too |
 | 4 | an opt-in live driver for the gateway, tested against a local stub of a provider | not started. A call to a real provider needs the owner's decision per provider and stays **NOT VERIFIED** until the owner runs it |
 
@@ -277,7 +316,7 @@ failed `cached: false`), and the HTTP client returned an oversize answer as a re
 | Symptom | Cause | Fix |
 |---|---|---|
 | `.../dist/src/main.js does not exist: run "npm run build" in ... first` | no build, or the build is of another checkout | `npm run build` |
-| `.../increadible-<version>.mcpb does not exist` | no package built | `npm run mcpb`, or `--build`, or `--bundle FILE` |
+| `.../increadible-<version>.mcpb does not exist`, or `--bundle FILE does not exist` | no package built, or the file named is not there | `npm run mcpb`, or `--build`, or `--bundle FILE` with a file that exists |
 | `no answer to initialize within 20000 ms` and a stderr tail | the server started and did not answer (a crash, a wrong `--root`) | read the stderr tail under the report; run the server by hand: `node dist/src/main.js` |
 | `HTTP 401 without a JSON-RPC body` | the token is wrong or missing for `--url` | check the variable named by `--token-env`; the failing step is `handshake` |
 | `/ready did not answer 200 within ...` | nothing listens at the URL, or the server is still starting | wait and retry, or raise `--ready-timeout-ms` |

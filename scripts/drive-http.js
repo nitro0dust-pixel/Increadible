@@ -67,10 +67,12 @@ async function main(argv) {
   const timeoutMs = opts["timeout-ms"] !== undefined ? lib.parseInteger("timeout-ms", opts["timeout-ms"]) : 20000;
   const readyMs = opts["ready-timeout-ms"] !== undefined ? lib.parseInteger("ready-timeout-ms", opts["ready-timeout-ms"]) : 15000;
   const remote = opts.url !== undefined;
+  if (remote && scenario.scope === "own-server") throw new lib.UsageError(`the scenario "${scenario.name}" changes what the server holds beyond its own test data (its scope is "own-server"): it runs only against a server the driver starts itself, never with --url`);
   if (remote && (opts["data-dir"] || opts.env || opts.root || opts.keep)) throw new lib.UsageError("--data-dir, --env, --root and --keep belong to the self-contained mode; with --url the server is already running");
   if (!remote && (opts["token-env"] || opts["allow-writes"])) throw new lib.UsageError("--token-env and --allow-writes belong to --url");
   const extra = remote ? {} : lib.parseEnvPairs(opts.env);
   lib.assertNoLive(extra, "--env");
+  if (!remote) lib.assertFreshData(lib.dataFiles(opts["data-dir"] ? path.resolve(opts["data-dir"]) : undefined, extra, path.resolve(opts.root || lib.REPO_ROOT)), scenario); // the files the server will really use: --env can name others
 
   const notes = [`node: ${process.version}`];
   let baseUrl;
@@ -86,7 +88,11 @@ async function main(argv) {
     }
     notes.push(`server: already running; token ${token ? `from ${opts["token-env"]}` : "none"}`, `writes: ${opts["allow-writes"] ? "allowed" : "skipped"}`);
     const host = new URL(baseUrl).hostname;
-    if (token && baseUrl.startsWith("http:") && !["127.0.0.1", "localhost", "[::1]"].includes(host)) notes.push("warning: the token is sent over plain http to an address that is not this machine");
+    if (token && baseUrl.startsWith("http:") && !["127.0.0.1", "localhost", "[::1]"].includes(host)) {
+      const warning = "warning: the token is sent over plain http to an address that is not this machine";
+      notes.push(warning);
+      process.stderr.write(`${warning}\n`); // before the first request, not only in the report at the end
+    }
   } else {
     root = path.resolve(opts.root || lib.REPO_ROOT);
     entry = lib.entryPoint(root, "index.js");
@@ -136,7 +142,7 @@ async function main(argv) {
       try {
         const init = await client.initialize();
         serverInfo = init.serverInfo;
-        steps.push(lib.handshakeStep(init, version, Date.now() - started));
+        steps.push(lib.handshakeStep(init, version, Date.now() - started, secrets));
       } catch (error) {
         steps.push(lib.driverStep("handshake", [lib.redact(error.message, secrets)], "no handshake", Date.now() - started));
       }
@@ -146,7 +152,7 @@ async function main(argv) {
         if (token) { try { before = toolCalls((await client.request("GET", "/metrics")).text); } catch { before = undefined; } }
         const ran = await lib.runScenario(client, scenario, { secrets, vars: { run_id: lib.newRunId() }, skipWrites });
         steps.push(...ran.steps);
-        const toolSteps = scenario.steps.filter((s) => (s.tool !== undefined || s.method === "tools/call") && !(skipWrites && s.writes === true)).length;
+        const toolSteps = scenario.steps.filter((s) => (s.tool !== undefined || s.method === "tools/call") && !(skipWrites && lib.isWrite(s))).length;
         if (token && toolSteps > 0) {
           steps.push(await httpStep("metrics: the calls were counted", async (problems) => {
             const res = await client.request("GET", "/metrics");
@@ -170,7 +176,7 @@ async function main(argv) {
   }
   const results = [{ scenario: scenario.name, ok: steps.every((s) => s.ok), steps }];
   const ok = results[0].ok;
-  if (opts.json) console.log(JSON.stringify({ driver: "http", ok, target: baseUrl, server: serverInfo, notes, results, serverStderr: proc ? proc.stderrText() : undefined }, null, 2));
+  if (opts.json) console.log(JSON.stringify({ driver: "http", ok, target: baseUrl, server: lib.redactDeep(serverInfo, secrets), notes, results, serverStderr: proc ? proc.stderrText() : undefined }, null, 2));
   else {
     console.log(lib.formatReport({ driver: "http", target: baseUrl, results, notes }));
     if (!ok && proc && proc.stderr) console.log(`\nserver stderr (last lines):\n${proc.stderrText()}`);

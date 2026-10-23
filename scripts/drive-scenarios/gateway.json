@@ -1,0 +1,1362 @@
+{
+  "name": "gateway",
+  "description": "The API gateway on its sample data: discovery (all nine ids in the registry's order, so adding an API to the catalog means updating the counts and ids here), one call to each of the nine APIs, the cache (also with params), an empty endpoint and null params, every error the tools name, aggregation (partial failure, order, the limit of 100 from both sides), and the counters, which are compared API by API with a count of the calls this scenario itself makes by the rule in docs/USING-THE-GATEWAY.md (total = successful + failed + cache hits). It asserts that every answer is sample data (live calls off), which is also why it never runs against a server it did not start: with live APIs on, the same calls would reach real providers.",
+  "scope": "own-server",
+  "steps": [
+    {
+      "name": "discover: all nine APIs, in the registry's order",
+      "tool": "discover_apis",
+      "expect": {
+        "json": {
+          "length": 9,
+          "0.id": "openweathermap",
+          "1.id": "weatherapi",
+          "2.id": "coingecko",
+          "3.id": "finnhub",
+          "4.id": "newsapi",
+          "5.id": "hackernews",
+          "6.id": "wikipedia",
+          "7.id": "wikidata",
+          "8.id": "thesportsdb",
+          "0.auth": "api_key",
+          "2.auth": "none"
+        }
+      }
+    },
+    {
+      "name": "discover: a search finds the APIs by name or category",
+      "tool": "discover_apis",
+      "arguments": {
+        "query": "weather"
+      },
+      "expect": {
+        "json": {
+          "length": 2,
+          "0.id": "openweathermap",
+          "1.id": "weatherapi"
+        }
+      }
+    },
+    {
+      "name": "discover: the search ignores case",
+      "tool": "discover_apis",
+      "arguments": {
+        "query": "NEWS"
+      },
+      "expect": {
+        "json": {
+          "length": 2,
+          "0.id": "newsapi",
+          "1.id": "hackernews"
+        }
+      }
+    },
+    {
+      "name": "discover: a category",
+      "tool": "discover_apis",
+      "arguments": {
+        "query": "finance"
+      },
+      "expect": {
+        "json": {
+          "length": 2,
+          "0.id": "coingecko",
+          "1.id": "finnhub"
+        }
+      }
+    },
+    {
+      "name": "discover: a search finds an API by its name alone",
+      "tool": "discover_apis",
+      "arguments": {
+        "query": "coin"
+      },
+      "expect": {
+        "json": {
+          "length": 1,
+          "0.id": "coingecko"
+        }
+      }
+    },
+    {
+      "name": "discover: a search finds an API by its description alone",
+      "tool": "discover_apis",
+      "arguments": {
+        "query": "encyclopedia"
+      },
+      "expect": {
+        "json": {
+          "length": 1,
+          "0.id": "wikipedia"
+        }
+      }
+    },
+    {
+      "name": "discover: nothing matches",
+      "tool": "discover_apis",
+      "arguments": {
+        "query": "zzz-no-such-api"
+      },
+      "expect": {
+        "json": {
+          "length": 0
+        }
+      }
+    },
+    {
+      "name": "discover: a query that is not text",
+      "tool": "discover_apis",
+      "arguments": {
+        "query": 5
+      },
+      "expect": {
+        "tool_error": true,
+        "contains": "query must be a string"
+      }
+    },
+    {
+      "name": "call every API once: sample data, from the API, not from the cache",
+      "tool": "call_api",
+      "each": [
+        "openweathermap",
+        "weatherapi",
+        "coingecko",
+        "finnhub",
+        "newsapi",
+        "hackernews",
+        "wikipedia",
+        "wikidata",
+        "thesportsdb"
+      ],
+      "arguments": {
+        "api_id": "${each}",
+        "endpoint": "/driver-${run_id}"
+      },
+      "expect": {
+        "json": {
+          "source": "mock",
+          "cached": false,
+          "timestamp": {
+            "$type": "string"
+          },
+          "data": {
+            "$exists": true
+          }
+        }
+      }
+    },
+    {
+      "name": "the same call again is answered from the cache",
+      "tool": "call_api",
+      "arguments": {
+        "api_id": "coingecko",
+        "endpoint": "/driver-${run_id}"
+      },
+      "expect": {
+        "json": {
+          "source": "mock",
+          "cached": true
+        }
+      }
+    },
+    {
+      "name": "a different endpoint of the same API is not",
+      "tool": "call_api",
+      "arguments": {
+        "api_id": "coingecko",
+        "endpoint": "/other-${run_id}"
+      },
+      "expect": {
+        "json": {
+          "source": "mock",
+          "cached": false,
+          "data.bitcoin.usd": 43250.5
+        }
+      }
+    },
+    {
+      "name": "sample data: the weather API",
+      "tool": "call_api",
+      "arguments": {
+        "api_id": "openweathermap",
+        "endpoint": "/weather-${run_id}"
+      },
+      "expect": {
+        "json": {
+          "data.main.humidity": 65,
+          "data.weather.0.main": "Partly Cloudy"
+        }
+      }
+    },
+    {
+      "name": "sample data: the news API",
+      "tool": "call_api",
+      "arguments": {
+        "api_id": "newsapi",
+        "endpoint": "/news-${run_id}"
+      },
+      "expect": {
+        "json": {
+          "data.totalResults": 1,
+          "data.articles.0.title": {
+            "$type": "string"
+          }
+        }
+      }
+    },
+    {
+      "name": "params make a different call: {id: 1}",
+      "tool": "call_api",
+      "arguments": {
+        "api_id": "hackernews",
+        "endpoint": "/item-${run_id}",
+        "params": {
+          "id": 1
+        }
+      },
+      "expect": {
+        "json": {
+          "cached": false,
+          "data.data.id": 1
+        }
+      }
+    },
+    {
+      "name": "params make a different call: {id: 2} is not answered with the first one's data",
+      "tool": "call_api",
+      "arguments": {
+        "api_id": "hackernews",
+        "endpoint": "/item-${run_id}",
+        "params": {
+          "id": 2
+        }
+      },
+      "expect": {
+        "json": {
+          "cached": false,
+          "data.data.id": 2
+        }
+      }
+    },
+    {
+      "name": "the same params again are answered from the cache",
+      "tool": "call_api",
+      "arguments": {
+        "api_id": "hackernews",
+        "endpoint": "/item-${run_id}",
+        "params": {
+          "id": 1
+        }
+      },
+      "expect": {
+        "json": {
+          "cached": true,
+          "data.data.id": 1
+        }
+      }
+    },
+    {
+      "name": "an empty endpoint is allowed (the API's root)",
+      "tool": "call_api",
+      "arguments": {
+        "api_id": "wikipedia",
+        "endpoint": ""
+      },
+      "expect": {
+        "json": {
+          "source": "mock"
+        }
+      }
+    },
+    {
+      "name": "params that are null are allowed",
+      "tool": "call_api",
+      "arguments": {
+        "api_id": "wikidata",
+        "endpoint": "/null-${run_id}",
+        "params": null
+      },
+      "expect": {
+        "json": {
+          "source": "mock"
+        }
+      }
+    },
+    {
+      "name": "error: an API that does not exist",
+      "tool": "call_api",
+      "arguments": {
+        "api_id": "no-such-api",
+        "endpoint": "/x"
+      },
+      "expect": {
+        "tool_error": true,
+        "contains": "API not found: no-such-api"
+      }
+    },
+    {
+      "name": "error: the id is case sensitive",
+      "tool": "call_api",
+      "arguments": {
+        "api_id": "CoinGecko",
+        "endpoint": "/x"
+      },
+      "expect": {
+        "tool_error": true,
+        "contains": "API not found: CoinGecko"
+      }
+    },
+    {
+      "name": "error: no api_id",
+      "tool": "call_api",
+      "arguments": {
+        "endpoint": "/x"
+      },
+      "expect": {
+        "tool_error": true,
+        "contains": "api_id must be a string"
+      }
+    },
+    {
+      "name": "error: an api_id that is a number",
+      "tool": "call_api",
+      "arguments": {
+        "api_id": 5,
+        "endpoint": "/x"
+      },
+      "expect": {
+        "tool_error": true,
+        "contains": "api_id must be a string"
+      }
+    },
+    {
+      "name": "error: no endpoint",
+      "tool": "call_api",
+      "arguments": {
+        "api_id": "hackernews"
+      },
+      "expect": {
+        "tool_error": true,
+        "contains": "endpoint must be a string"
+      }
+    },
+    {
+      "name": "error: an endpoint that is a number",
+      "tool": "call_api",
+      "arguments": {
+        "api_id": "hackernews",
+        "endpoint": 5
+      },
+      "expect": {
+        "tool_error": true,
+        "contains": "endpoint must be a string"
+      }
+    },
+    {
+      "name": "error: params that are text",
+      "tool": "call_api",
+      "arguments": {
+        "api_id": "hackernews",
+        "endpoint": "/x",
+        "params": "a=1"
+      },
+      "expect": {
+        "tool_error": true,
+        "contains": "params must be an object"
+      }
+    },
+    {
+      "name": "aggregate: two calls, two answers",
+      "tool": "aggregate_apis",
+      "arguments": {
+        "apis": [
+          {
+            "id": "hackernews",
+            "endpoint": "/agg-a-${run_id}"
+          },
+          {
+            "id": "wikipedia",
+            "endpoint": "/agg-b-${run_id}"
+          }
+        ]
+      },
+      "expect": {
+        "json": {
+          "count": 2,
+          "data.0.source": "mock",
+          "data.1.source": "mock"
+        }
+      }
+    },
+    {
+      "name": "aggregate: an empty list is an empty answer",
+      "tool": "aggregate_apis",
+      "arguments": {
+        "apis": []
+      },
+      "expect": {
+        "json": {
+          "count": 0,
+          "data.length": 0
+        }
+      }
+    },
+    {
+      "name": "aggregate: one call fails, the others keep their answers, in the order asked, and the reply is not an error",
+      "tool": "aggregate_apis",
+      "arguments": {
+        "apis": [
+          {
+            "id": "coingecko",
+            "endpoint": "/p1-${run_id}"
+          },
+          {
+            "id": "no-such-api",
+            "endpoint": "/x"
+          },
+          {
+            "id": "openweathermap",
+            "endpoint": "/p2-${run_id}"
+          }
+        ]
+      },
+      "expect": {
+        "json": {
+          "count": 3,
+          "failed": 1,
+          "data.0.data.bitcoin.usd": 43250.5,
+          "data.1.error": "API not found: no-such-api",
+          "data.2.data.main.humidity": 65
+        }
+      }
+    },
+    {
+      "name": "aggregate: every call failed is an error that says so",
+      "tool": "aggregate_apis",
+      "arguments": {
+        "apis": [
+          {
+            "id": "no-such-api",
+            "endpoint": "/x"
+          }
+        ]
+      },
+      "expect": {
+        "tool_error": true,
+        "contains": "all 1 calls failed"
+      }
+    },
+    {
+      "name": "aggregate: a list that is not a list",
+      "tool": "aggregate_apis",
+      "arguments": {
+        "apis": "hackernews"
+      },
+      "expect": {
+        "tool_error": true,
+        "contains": "apis must be an array"
+      }
+    },
+    {
+      "name": "aggregate: an entry that is not an object",
+      "tool": "aggregate_apis",
+      "arguments": {
+        "apis": [
+          "hackernews"
+        ]
+      },
+      "expect": {
+        "tool_error": true,
+        "contains": "apis[0] must be an object"
+      }
+    },
+    {
+      "name": "aggregate: an entry without an id",
+      "tool": "aggregate_apis",
+      "arguments": {
+        "apis": [
+          {
+            "endpoint": "/x"
+          }
+        ]
+      },
+      "expect": {
+        "tool_error": true,
+        "contains": "apis[0].id must be a string"
+      }
+    },
+    {
+      "name": "aggregate: an entry without an endpoint, named by its place",
+      "tool": "aggregate_apis",
+      "arguments": {
+        "apis": [
+          {
+            "id": "hackernews",
+            "endpoint": "/x"
+          },
+          {
+            "id": "wikipedia"
+          }
+        ]
+      },
+      "expect": {
+        "tool_error": true,
+        "contains": "apis[1].endpoint must be a string"
+      }
+    },
+    {
+      "name": "aggregate: exactly 100 calls in one request are accepted",
+      "tool": "aggregate_apis",
+      "arguments": {
+        "apis": [
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-ok-0-${run_id}"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-ok-1-${run_id}"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-ok-2-${run_id}"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-ok-3-${run_id}"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-ok-4-${run_id}"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-ok-5-${run_id}"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-ok-6-${run_id}"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-ok-7-${run_id}"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-ok-8-${run_id}"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-ok-9-${run_id}"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-ok-10-${run_id}"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-ok-11-${run_id}"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-ok-12-${run_id}"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-ok-13-${run_id}"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-ok-14-${run_id}"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-ok-15-${run_id}"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-ok-16-${run_id}"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-ok-17-${run_id}"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-ok-18-${run_id}"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-ok-19-${run_id}"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-ok-20-${run_id}"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-ok-21-${run_id}"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-ok-22-${run_id}"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-ok-23-${run_id}"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-ok-24-${run_id}"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-ok-25-${run_id}"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-ok-26-${run_id}"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-ok-27-${run_id}"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-ok-28-${run_id}"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-ok-29-${run_id}"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-ok-30-${run_id}"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-ok-31-${run_id}"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-ok-32-${run_id}"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-ok-33-${run_id}"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-ok-34-${run_id}"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-ok-35-${run_id}"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-ok-36-${run_id}"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-ok-37-${run_id}"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-ok-38-${run_id}"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-ok-39-${run_id}"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-ok-40-${run_id}"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-ok-41-${run_id}"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-ok-42-${run_id}"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-ok-43-${run_id}"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-ok-44-${run_id}"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-ok-45-${run_id}"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-ok-46-${run_id}"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-ok-47-${run_id}"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-ok-48-${run_id}"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-ok-49-${run_id}"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-ok-50-${run_id}"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-ok-51-${run_id}"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-ok-52-${run_id}"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-ok-53-${run_id}"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-ok-54-${run_id}"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-ok-55-${run_id}"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-ok-56-${run_id}"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-ok-57-${run_id}"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-ok-58-${run_id}"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-ok-59-${run_id}"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-ok-60-${run_id}"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-ok-61-${run_id}"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-ok-62-${run_id}"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-ok-63-${run_id}"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-ok-64-${run_id}"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-ok-65-${run_id}"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-ok-66-${run_id}"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-ok-67-${run_id}"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-ok-68-${run_id}"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-ok-69-${run_id}"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-ok-70-${run_id}"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-ok-71-${run_id}"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-ok-72-${run_id}"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-ok-73-${run_id}"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-ok-74-${run_id}"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-ok-75-${run_id}"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-ok-76-${run_id}"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-ok-77-${run_id}"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-ok-78-${run_id}"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-ok-79-${run_id}"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-ok-80-${run_id}"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-ok-81-${run_id}"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-ok-82-${run_id}"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-ok-83-${run_id}"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-ok-84-${run_id}"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-ok-85-${run_id}"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-ok-86-${run_id}"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-ok-87-${run_id}"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-ok-88-${run_id}"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-ok-89-${run_id}"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-ok-90-${run_id}"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-ok-91-${run_id}"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-ok-92-${run_id}"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-ok-93-${run_id}"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-ok-94-${run_id}"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-ok-95-${run_id}"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-ok-96-${run_id}"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-ok-97-${run_id}"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-ok-98-${run_id}"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-ok-99-${run_id}"
+          }
+        ]
+      },
+      "expect": {
+        "json": {
+          "count": 100
+        }
+      }
+    },
+    {
+      "name": "aggregate: 101 calls in one request are refused",
+      "tool": "aggregate_apis",
+      "arguments": {
+        "apis": [
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-0"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-1"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-2"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-3"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-4"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-5"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-6"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-7"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-8"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-9"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-10"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-11"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-12"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-13"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-14"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-15"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-16"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-17"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-18"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-19"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-20"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-21"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-22"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-23"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-24"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-25"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-26"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-27"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-28"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-29"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-30"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-31"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-32"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-33"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-34"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-35"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-36"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-37"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-38"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-39"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-40"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-41"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-42"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-43"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-44"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-45"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-46"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-47"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-48"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-49"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-50"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-51"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-52"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-53"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-54"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-55"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-56"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-57"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-58"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-59"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-60"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-61"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-62"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-63"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-64"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-65"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-66"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-67"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-68"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-69"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-70"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-71"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-72"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-73"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-74"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-75"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-76"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-77"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-78"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-79"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-80"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-81"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-82"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-83"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-84"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-85"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-86"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-87"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-88"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-89"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-90"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-91"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-92"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-93"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-94"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-95"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-96"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-97"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-98"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-99"
+          },
+          {
+            "id": "hackernews",
+            "endpoint": "/limit-100"
+          }
+        ]
+      },
+      "expect": {
+        "tool_error": true,
+        "contains": "at most 100 calls"
+      }
+    },
+    {
+      "name": "statistics: the server counted what the driver asked for, API by API",
+      "tool": "get_api_stats",
+      "expect": {
+        "json": {
+          "total_calls": 126,
+          "successful": 120,
+          "failed": 4,
+          "cache_hit_rate": "0.02",
+          "live_calls": 0,
+          "live_apis.length": 0,
+          "rate_limited": 0,
+          "retries": 0,
+          "api_distribution.openweathermap": 3,
+          "api_distribution.weatherapi": 1,
+          "api_distribution.coingecko": 3,
+          "api_distribution.finnhub": 1,
+          "api_distribution.newsapi": 2,
+          "api_distribution.hackernews": 104,
+          "api_distribution.wikipedia": 3,
+          "api_distribution.wikidata": 2,
+          "api_distribution.thesportsdb": 1
+        }
+      }
+    }
+  ]
+}

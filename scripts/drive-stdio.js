@@ -28,6 +28,7 @@ async function main(argv) {
   const scenario = lib.loadScenario(opts.scenario || "basic");
   const version = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8")).version;
 
+  lib.assertFreshData(lib.dataFiles(opts["data-dir"] ? path.resolve(opts["data-dir"]) : undefined, extra, root), scenario); // the files the server will really use: --env can name others
   const own = !opts["data-dir"];
   const dir = own ? lib.makeWorkdir() : path.resolve(opts["data-dir"]);
   try {
@@ -41,7 +42,7 @@ async function main(argv) {
     });
     const notes = [`node: ${process.version}`, `data directory: ${dir}${own ? (opts.keep ? " (kept)" : " (removed afterwards)") : ""}`, `server environment: ${lib.describeEnv(env).join(", ")}`];
     const ok = run.results.every((r) => r.ok);
-    if (opts.json) console.log(JSON.stringify({ driver: "stdio", ok, target: entry, server: run.serverInfo, notes, results: run.results, serverStderr: run.stderr }, null, 2));
+    if (opts.json) console.log(JSON.stringify({ driver: "stdio", ok, target: entry, server: lib.redactDeep(run.serverInfo, secrets), notes, results: run.results, serverStderr: run.stderr }, null, 2));
     else {
       console.log(lib.formatReport({ driver: "stdio", target: entry, results: run.results, notes }));
       if (!ok && run.stderr) console.log(`\nserver stderr (last lines):\n${run.stderr}`);
