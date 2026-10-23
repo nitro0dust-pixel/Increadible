@@ -1,5 +1,5 @@
 # Dependencies
-node_modules/
+node_modules
 npm-debug.log
 yarn.lock
 pnpm-lock.yaml
@@ -12,6 +12,7 @@ out/
 *.d.ts
 !jest.config.js
 !scripts/*.js
+!workflows/*.js
 !.github/**/*.js
 
 # IDE

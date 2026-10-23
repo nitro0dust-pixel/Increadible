@@ -38,6 +38,7 @@ const REFERENCES = {
   "docs/GATEWAY-GATED-CATALOG.md": "gated-catalog.md",
   "docs/USING-THE-GATEWAY.md": "using-the-gateway.md",
   "docs/DRIVERS.md": "drivers.md",
+  "docs/DRIVERS-WORKFLOW.md": "drivers-workflow.md",
 };
 
 const header = (source) =>
