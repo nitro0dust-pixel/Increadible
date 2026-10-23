@@ -25,11 +25,11 @@ judges their own work. The workflows are an option: everything they rely on work
 
 ```
 npm run build
-npm run mcpb                          # only for the bundle jobs (and after every npm run build: the build removes dist/mcpb)
+npm run mcpb                          # only for the bundle jobs; run it after every build, because the build removes dist/mcpb
 npm run drive:all
 npm run drive:all -- --only stdio,http --scenario basic,gateway --concurrency 2
 npm run drive:all -- --list           # the jobs it would run
-npm run --silent drive:all -- --json > drive-all.json    # --silent: without it npm writes its own two banner lines first and the file is not JSON
+npm --silent run drive:all -- --json > drive-all.json    # --silent: without it npm writes its own two banner lines first and the file is not JSON
 node scripts/drive-all.js --json > drive-all.json        # the same, without npm
 ```
 
