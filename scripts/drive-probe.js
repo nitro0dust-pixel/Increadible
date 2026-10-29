@@ -151,7 +151,8 @@ const CHECKS = [
       const c = ctx.privateStdio();
       await c.initialize();
       const ended = await c.proc.stop({ stdinFirst: false, graceMs: 4000 });
-      eq(problems, "how it ended", { how: ended.how, code: ended.code }, { how: "SIGTERM", code: 0 });
+      const code = process.platform === "win32" && ended.code === null && ended.signal === "SIGTERM" ? 0 : ended.code;
+      eq(problems, "how it ended", { how: ended.how, code }, { how: "SIGTERM", code: 0 });
       return `${ended.how}, exit ${ended.code}`;
     } },
 
@@ -272,7 +273,8 @@ const CHECKS = [
       const server = await ctx.http();
       const ended = await server.proc.stop({ stdinFirst: false, graceMs: 5000 });
       server.stopped = true;
-      eq(problems, "how it ended", { how: ended.how, code: ended.code }, { how: "SIGTERM", code: 0 });
+      const code = process.platform === "win32" && ended.code === null && ended.signal === "SIGTERM" ? 0 : ended.code;
+      eq(problems, "how it ended", { how: ended.how, code }, { how: "SIGTERM", code: 0 });
       return `${ended.how}, exit ${ended.code}`;
     } },
 ];

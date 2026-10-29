@@ -169,7 +169,7 @@ async function main(argv) {
       const ended = await proc.stop({ stdinFirst: false, graceMs: 5000 });
       const problems = [];
       if (ended.how !== "SIGTERM") problems.push(`the server did not leave on SIGTERM (it needed ${ended.how})`);
-      else if (ended.code !== 0) problems.push(`the server left with code ${ended.code} after SIGTERM, expected 0`);
+      else if (ended.code !== 0 && !(process.platform === "win32" && ended.code === null && ended.signal === "SIGTERM")) problems.push(`the server left with code ${ended.code} after SIGTERM, expected 0`);
       steps.push(lib.driverStep("shutdown", problems, problems.length ? "not clean" : "exit 0 on SIGTERM"));
     }
     if (own && !opts.keep) lib.tryRemoveWorkdir(dir);
