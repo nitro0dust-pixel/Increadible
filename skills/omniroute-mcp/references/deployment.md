@@ -176,7 +176,7 @@ Beyond the tests, both kinds were decoded once (2026-10-10, in a scratch Go prog
 - Dependabot (`.github/dependabot.yml`) proposes npm, GitHub Actions and Docker updates weekly, never npm or Node
   major bumps. It reads that file from the repository's default branch, which is `main` since 2026-10-09, so it is active.
 
-## Railway (stages 1 and 2: private rehearsal, then live data; both verified 2026-10-10)
+## Railway (stages 1 and 2: private rehearsal, then live data; both verified 2026-10-10; checked again 2026-10-29)
 
 The owner chose Railway for the first hosted run and approved it in stages. **Stages 1 (private rehearsal) and 2 (the four keyless
 APIs live) are done**; stage 3 (a client connected end to end) needs the owner's approval.
@@ -216,6 +216,8 @@ answered `source: "live"` with no error: coingecko `/simple/price`, hackernews `
 `wbsearchentities`; `get_api_stats` then 4 calls, 4 successful, 4 live, 0 failed. Railway's DNS log shows that the container looked up
 exactly these four providers' hosts (`api.coingecko.com`, `hacker-news.firebaseio.com`, `en.wikipedia.org`, `www.wikidata.org`) and no
 other, so the calls left from Railway (region `sfo`) and only to the registered hosts.
+
+**Checked again on 2026-10-29** (from the owner's PC, with the PowerShell probe below; the authoring session could not reach the domain: its proxy answers 403, and the Railway connector was not connected to that session). The *Source* row above is the 2026-10-10 state. `GET /health` and `GET /ready` each answered `status: ok`; `POST /mcp` without the token answered 401; with the token, `get_api_stats` answered with the same 20 top-level fields and the same gate-record fields as the code on `main` (compared by running the compiled server), `live_apis` `["coingecko","hackernews","wikipedia","wikidata"]`, `user_agent_has_contact: true`, `max_retries` 1, `default_rate_limit` 5, and every call counter at 0 (no tool call since the process started). So the running build is **newer than `916206f`**: it has the changes of commit `62d448e` (2026-10-13: default rate limit, bounded retries, the Wikimedia User-Agent contact). **Not seen:** the count from `tools/list`, the deployment's commit and status in the dashboard, and the deploy log's `User-Agent contact: set` line, so **the exact deployed commit is NOT VERIFIED**: another account's draft PR #74 records `020e6e3`, which this check does not contradict but cannot tell from a later commit (between `020e6e3` and `main` only five `drive:*` script lines in `package.json` changed in what the image is built from). Nothing on Railway was changed.
 
 **Not checked:** the volume's backups, load, the price of the plan, and whether
 Claude Desktop or claude.ai can use this server remotely (it takes a static bearer token; claude.ai's remote connectors use OAuth).
@@ -323,7 +325,7 @@ anything, and there is no dashboard and no cost metric.
 
 ## Checking a running server from outside
 
-`npm run drive:http -- --url https://your-service.example --token-env NAME` ([docs/DRIVERS.md](docs/DRIVERS.md), section 3.3) sends the standard scenario to a server that is already running: `/ready`, `/health`, the refusal of a request without the token, the handshake, routing, the gateway on sample data, the errors, and `/metrics`. The token is read from the environment variable `NAME`, never from the command line. It **skips the steps that write A/B data** (the log is append-only) unless you add `--allow-writes`, and its gateway steps expect sample data, so against a server with live APIs switched on they fail on purpose. Expected against a default server: `PASS 17/17 (4 skipped: they write data)`. It has been run against a local server only, **not** against the Railway or Kubernetes rehearsals (NOT VERIFIED there), and it is not a load test ([PERFORMANCE.md](PERFORMANCE.md)).
+`npm run drive:http -- --url https://your-service.example --token-env NAME` ([docs/DRIVERS.md](docs/DRIVERS.md), section 3.3) sends the standard scenario to a server that is already running: `/ready`, `/health`, the refusal of a request without the token, the handshake, routing, the gateway on sample data, the errors, and `/metrics`. The token is read from the environment variable `NAME`, never from the command line. It **skips the steps that write A/B data** (the log is append-only) unless you add `--allow-writes`, and its gateway steps expect sample data, so against a server with live APIs switched on they fail on purpose. Expected against a default server: `PASS 17/17 (4 skipped: they write data)`. It has been run against a local server only, **not** against the Railway or Kubernetes rehearsals (NOT VERIFIED there; for the Railway rehearsal, whose live APIs are on, use the PowerShell probe in the section above instead), and it is not a load test ([PERFORMANCE.md](PERFORMANCE.md)).
 
 ## Rollback
 
