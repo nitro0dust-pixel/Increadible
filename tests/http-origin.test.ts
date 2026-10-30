@@ -122,8 +122,8 @@ describe("Origin (a web page's header; no other client sends one)", () => {
 
 describe("parseAllowedOrigins (ALLOWED_ORIGINS)", () => {
   it("reduces each entry to its canonical origin, drops duplicates and empty items, and reports nothing for a clean list", () => {
-    expect(index.parseAllowedOrigins(" https://App.Example.com , http://localhost:3000/,, https://app.example.com:443 , http://127.0.0.1:8080 ")).toEqual({
-      origins: ["https://app.example.com", "http://localhost:3000", "http://127.0.0.1:8080"],
+    expect(index.parseAllowedOrigins(" https://App.Example.com , http://localhost:3000/,, https://app.example.com:443 , http://127.0.0.1:8080 , HTTPS://Other.Example.COM, http://[::1]:3000, https://xn--bcher-kva.example")).toEqual({
+      origins: ["https://app.example.com", "http://localhost:3000", "http://127.0.0.1:8080", "https://other.example.com", "http://[::1]:3000", "https://xn--bcher-kva.example"],
       problems: [],
     });
     expect(index.parseAllowedOrigins(undefined)).toEqual({ origins: [], problems: [] });
@@ -131,12 +131,26 @@ describe("parseAllowedOrigins (ALLOWED_ORIGINS)", () => {
     expect(index.parseAllowedOrigins(" , ,")).toEqual({ origins: [], problems: [] });
   });
 
-  it("leaves out, and reports by name, an entry that is not a plain http(s) origin: a wildcard, null, a bare host, a path, a query, a fragment, credentials, another scheme", () => {
-    const bad = ["*", "null", "app.example.com", "https://app.example.com/app", "https://app.example.com?x=1", "https://app.example.com#top", "https://user:pw@app.example.com", "https://user@app.example.com", "ftp://app.example.com", "https://", "https://app example.com", "http://a.example//"];
+  it("leaves out, and reports by name, an entry that is not a plain http(s) origin: a wildcard, null, a bare host, a path, a query, a fragment, another scheme, a backslash, a bad port", () => {
+    const bad = [
+      "*", "null", "app.example.com", "https://app.example.com/app", "https://app.example.com?x=1", "https://app.example.com#top", "ftp://app.example.com", "https://",
+      "https://app example.com", "http://a.example//", "https://*.example.com", "https://example.com\\evil.com", "https://example.com:", "http://localhost:abc",
+      "https://example.com:99999", "https://example.com:8080:9", "http://[::1", "https://exa[mple.com",
+    ];
     const r = index.parseAllowedOrigins(["https://ok.example", ...bad].join(","));
     expect(r.origins).toEqual(["https://ok.example"]);
     expect(r.problems).toHaveLength(bad.length);
-    bad.forEach((entry, i) => expect(r.problems[i]).toContain(`"${entry}"`));
+    bad.forEach((entry, i) => expect({ entry, problem: r.problems[i] }).toEqual({ entry, problem: expect.stringContaining(`"${entry}"`) }));
+  });
+
+  it("refuses an entry with a user name or password, and never repeats it: a log line must not carry a credential", () => {
+    const secrets = ["https://user:s3cretpw@private-host.internal", "https://user@private-host.internal", "https://@private-host.internal", "https://:@private-host.internal", "https://:onlypw@private-host.internal"];
+    const r = index.parseAllowedOrigins(["https://ok.example", ...secrets].join(", "));
+    expect(r.origins).toEqual(["https://ok.example"]);
+    expect(r.problems).toHaveLength(secrets.length);
+    const text = r.problems.join("\n");
+    for (const forbidden of ["s3cretpw", "onlypw", "user", "private-host", "@"]) expect(text.replace(/it contains "@"/g, "")).not.toContain(forbidden);
+    expect(r.problems[0]).toMatch(/^number 2 \(it contains "@", so it is not shown\) is not an origin/); // the position in the list: item 1 is the valid one
   });
 });
 
@@ -159,6 +173,34 @@ describe("GET and DELETE on /mcp", () => {
         expect({ method, url, status: (await send(port, method, url, AUTH)).status }).toEqual({ method, url, status: 404 });
       }
       expect((await post(port, AUTH)).status).toBe(200);
+    });
+  });
+});
+
+describe("what a refusal costs and how it ends", () => {
+  it("a refused Origin costs no token of the rate limiter (it is answered before the limiter)", async () => {
+    await withServer(TOKEN, { rateLimitPerMinute: 1 }, async (port) => {
+      for (let i = 0; i < 3; i++) expect((await post(port, { ...AUTH, Origin: "http://evil.example" })).status).toBe(403);
+      expect((await post(port, AUTH)).status).toBe(200); // the one token of the bucket is still there
+      expect((await post(port, AUTH)).status).toBe(429);
+    });
+  });
+
+  it("closes the connection after each refusal (403, 405, 400), so a refused client cannot keep a socket open", async () => {
+    await withServer(TOKEN, {}, async (port) => {
+      const refusals = [
+        await post(port, { ...AUTH, Origin: "http://evil.example" }),
+        await send(port, "GET", "/mcp", AUTH),
+        await post(port, { ...AUTH, "MCP-Protocol-Version": "1999-01-01" }),
+      ];
+      expect(refusals.map((r) => r.status)).toEqual([403, 405, 400]);
+      for (const r of refusals) expect(r.headers.connection).toBe("close");
+    });
+  });
+
+  it("answers GET and DELETE on /mcp with a query string as it does without one", async () => {
+    await withServer(TOKEN, {}, async (port) => {
+      for (const method of ["GET", "DELETE"]) expect({ method, status: (await send(port, method, "/mcp?session=1", AUTH)).status }).toEqual({ method, status: 405 });
     });
   });
 });

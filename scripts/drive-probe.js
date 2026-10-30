@@ -278,7 +278,7 @@ const CHECKS = [
       return `${refused.status}, then 200 x2`;
     } },
   { id: "http.content-type-is-not-checked", transport: "http", kind: "observed", title: "a JSON body sent as text/plain is accepted",
-    note: "text/plain is a type a web page may send cross-origin without a preflight request, so together with http.origin-is-not-validated this matters for a server run without a token.",
+    note: "text/plain is a type a web page may send cross-origin without a preflight request, so the Origin check (http.foreign-origin-is-refused) refuses such a request now, so this is recorded only.",
     async run(ctx, problems) {
       const { client } = await ctx.http();
       const r = await client.request("POST", "/mcp", { headers: { "Content-Type": "text/plain" }, body: PING });

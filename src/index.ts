@@ -77,31 +77,32 @@ export function createRateLimiter(perMinute: number, now: () => number = Date.no
 }
 
 /**
- * `ALLOWED_ORIGINS`: a comma-separated list of the origins (scheme://host[:port], no path) a web page may send this server a request from.
- * Each entry is reduced to its canonical origin; an entry that is not an http(s) origin (a path, a query, a user name, `*`, `null`) is
- * reported in `problems` and left out. A request with an Origin header that is not in the list is refused with 403; a request without
- * one (every client that is not a web page) is not affected.
+ * `ALLOWED_ORIGINS`: a comma-separated list of the origins (scheme://host[:port], no path) whose requests may go on to the token check.
+ * Each entry is reduced to its canonical origin; an entry that is not a plain http(s) origin (a path, a query, credentials, a wildcard,
+ * a backslash, `null`) is reported in `problems` and left out. A request with an Origin header that is not in the list is refused with
+ * 403; a request without one is not affected. Listing an origin does not make this server answer a browser: it sends no CORS headers.
+ * An entry that contains `@` may carry a password, so a problem never repeats it.
  */
 export function parseAllowedOrigins(raw: string | undefined): { origins: string[]; problems: string[] } {
   const origins: string[] = [];
   const problems: string[] = [];
-  for (const part of (raw ?? "").split(",")) {
+  const shape = /^https?:\/\/(\[[0-9a-f:.]+\]|[^/?#\s\\@*:[\]]+)(:\d{1,5})?\/?$/i; // host (a name, an address or [IPv6]) and an optional port
+  (raw ?? "").split(",").forEach((part, position) => {
     const entry = part.trim();
-    if (entry === "") continue;
-    // scheme://host[:port] with at most one trailing slash: no path, query or fragment (a regular expression, because URL would
-    // normalise them away), and no user name or password.
+    if (entry === "") return;
     let url: URL | undefined;
     try {
-      if (/^https?:\/\/[^/?#\s]+\/?$/i.test(entry)) url = new URL(entry);
+      if (shape.test(entry)) url = new URL(entry); // a port above 65535 passes the shape and fails here
     } catch {
       /* reported below */
     }
-    if (!url || url.username !== "" || url.password !== "") {
-      problems.push(`"${entry}" is not an origin (expected scheme://host[:port], for example https://app.example.com)`);
-      continue;
+    if (!url) {
+      const shown = entry.includes("@") ? `number ${position + 1} (it contains "@", so it is not shown)` : `"${entry}"`;
+      problems.push(`${shown} is not an origin (expected scheme://host[:port], for example https://app.example.com)`);
+      return;
     }
     if (!origins.includes(url.origin)) origins.push(url.origin);
-  }
+  });
   return { origins, problems };
 }
 
@@ -110,7 +111,7 @@ export interface HttpOptions {
   requestTimeoutMs?: number;
   /** Global limit on POST /mcp (the bearer token is shared, so there is no per-client key). 0 or unset: off. */
   rateLimitPerMinute?: number;
-  /** Origins (canonical, lower case) whose pages may call this server; any other Origin header is refused with 403. None: no Origin header is accepted. */
+  /** Origins (lower case; `parseAllowedOrigins` makes them canonical) whose requests may go on to the token check; any other Origin header is refused with 403. None: no Origin header is accepted. */
   allowedOrigins?: readonly string[];
 }
 
@@ -153,8 +154,9 @@ export function createHttpServer(authToken?: string, options: HttpOptions = {}):
       if (probe && pathname === "/ready") {
         return draining ? json(503, { status: "draining" }) : json(200, { status: "ok" });
       }
-      // A web page always sends Origin; no other client does. Refusing every Origin that is not listed is what stops a page from
-      // reaching a server it can only reach through the visitor's browser (DNS rebinding), also one started without a token.
+      // A web page's POST always carries Origin; the clients of this server (Claude Desktop, scripts, servers) send none. Refusing every
+      // Origin that is not listed stops a page from posting to /mcp through the visitor's browser (also DNS rebinding), also on a server
+      // without a token. It does not cover a same-origin GET, which carries no Origin (/metrics holds counters only), nor the Host header.
       const origin = req.headers.origin;
       if (origin !== undefined && !allowedOrigins.has(origin.toLowerCase())) {
         return refuse(403, "origin_forbidden", { error: "Forbidden origin" });
@@ -303,7 +305,7 @@ export function run(): void {
     }
     startEventLoopMonitor(); // exposed on /metrics: a synchronous task that blocks the loop also blocks the probes
     const allowed = parseAllowedOrigins(process.env.ALLOWED_ORIGINS);
-    for (const problem of allowed.problems) console.error(`Ignoring ALLOWED_ORIGINS entry ${problem}`);
+    for (const note of allowed.problems) console.error(`Ignoring ALLOWED_ORIGINS entry ${note}`);
     const server = createHttpServer(token, {
       allowedOrigins: allowed.origins,
       headersTimeoutMs: envInt("HTTP_HEADERS_TIMEOUT_MS", DEFAULT_HEADERS_TIMEOUT_MS),

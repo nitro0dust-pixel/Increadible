@@ -123,6 +123,14 @@ describe("ALLOWED_ORIGINS", () => {
     expect((await request(port, "POST", "/mcp", PING)).status).toBe(200);
   });
 
+  it("never writes a credential from an entry to the log: an entry with a password is ignored without being repeated", async () => {
+    const port = await freePort();
+    const server = await start({ PORT: String(port), HOST: "127.0.0.1", ALLOWED_ORIGINS: "https://user:s3cretpw@private-host.internal, https://ok.example" });
+    expect(server.stderr()).toContain("Ignoring ALLOWED_ORIGINS entry number 1");
+    for (const forbidden of ["s3cretpw", "user:", "private-host"]) expect(server.stderr()).not.toContain(forbidden);
+    expect((await request(port, "POST", "/mcp", PING, { origin: "https://ok.example" })).status).toBe(200);
+  });
+
   it("names each entry it ignores at start-up, keeps the valid ones, and still starts", async () => {
     const port = await freePort();
     const server = await start({ PORT: String(port), HOST: "127.0.0.1", ALLOWED_ORIGINS: "*, https://app.example.com/path, https://ok.example, null" });

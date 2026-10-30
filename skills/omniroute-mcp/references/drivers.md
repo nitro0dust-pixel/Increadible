@@ -159,7 +159,7 @@ http 42/42, 32/32 and 34/34; bundle 42/42, 32/32 and 34/34 (the bundle driver ad
 
 ```
   7   routing: a code task gets a provider       PASS  ok                  2 ms
-  22  http.host-is-not-validated                 INFO  200                 2 ms
+  24  http.host-is-not-validated                 INFO  200                 2 ms
         . The specification speaks of Origin only; Host is recorded because a DNS-rebinding defence usually checks it too.
   12  A/B: create an experiment                  SKIP  skipped
   14  gateway: a call answers sample data        FAIL  ok                  1 ms
@@ -288,7 +288,7 @@ which this server refuses (`stdio.batch-refused`, `http.batch-and-scalars-refuse
 | Check | The server | The specification (revision 2025-11-25) asks | Note |
 |---|---|---|---|
 | `stdio.big-line-is-answered` (`INFO`) | a 5,000,000-byte line is answered | (nothing) | HTTP refuses more than 1,000,000 bytes with 413 |
-| `http.host-is-not-validated` (`INFO`) | a foreign `Host` is accepted | (nothing: the specification names `Origin` only) | a DNS-rebinding defence usually checks it too; with the `Origin` check in place a page cannot reach the server through the visitor's browser, and a client that is not a page is not a rebinding vector |
+| `http.host-is-not-validated` (`INFO`) | a foreign `Host` is accepted | (nothing: the specification names `Origin` only) | a DNS-rebinding defence usually checks it too. The `Origin` check stops a page from posting to `/mcp`; it does not cover a same-origin `GET`, which carries no `Origin` (`/metrics` holds counters only), so a `Host` check is what would close that |
 | `http.content-type-is-not-checked` (`INFO`) | a JSON body sent as `text/plain` is accepted | (nothing claimed) | a page can send `text/plain` cross-origin without a preflight request, but it also sends `Origin`, which is refused now |
 
 If someone changes one of these, the probe fails on that line (`expected: ...`) on purpose: update the check and this table in the same pull request.
@@ -298,7 +298,7 @@ If someone changes one of these, the probe fails on that line (`expected: ...`) 
 Every claim above has a test in `tests/drive-lib.test.ts` (the library, against small fake servers: no answer, a crash, stray output, a server that
 ignores every polite goodbye, an answer cut off or too large) or `tests/drive-scenarios.test.ts` (the format of stage 2 and the three scenarios, against the server as it is and against a server broken on purpose, one place per test) or `tests/drive.test.ts` (the four drivers as processes, against the server compiled from the sources, a package
 built by `scripts/mcpb.js`, and stand-in servers that misbehave: one that echoes the bearer token, one that is slow so the driver can be interrupted mid-run). The tests that matter most break something on purpose and expect the driver to say so: a patched server that
-answers 403 instead of 401, 400 instead of 413, a different parse-error code, 405 for `GET /mcp`, a counter stuck at zero, an exit code of 5 on SIGTERM; a damaged package; a scenario that claims
+answers 403 instead of 401, 400 instead of 413, a different parse-error code, 404 for `GET /mcp`, a counter stuck at zero, an exit code of 5 on SIGTERM; a damaged package; a scenario that claims
 to write and does not.
 
 The drivers themselves were also broken one guard at a time, and each breakage had to make a test fail (`tests/drive-lib.test.ts`, `tests/drive.test.ts` and `tests/drive-scenarios.test.ts`):
