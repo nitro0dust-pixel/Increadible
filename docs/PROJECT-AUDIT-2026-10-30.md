@@ -240,7 +240,7 @@ Master table; the detail follows. "Fix class": **A** in-repo and safe to do now 
 
 ## 9. Status of the fixes (updated as they land)
 
-Step 1 of section 8, the class A fixes, was done on 2026-10-30 in one pull request (its number and the CI run are in `docs/BUILD-HISTORY.md` and `ROADMAP.md`). Nothing in class B or C was started. A finding is **fixed** only where a run or a test shows it; where the fix has a part that needs the owner, that part stays open and is named.
+Step 1 of section 8, the class A fixes, was done on 2026-10-30 in one pull request ([#84](https://github.com/nitro0dust-pixel/Increadible/pull/84), merged as `dbb512a`; its CI runs are in `docs/BUILD-HISTORY.md` and `ROADMAP.md`). Nothing in class B or C was started. A finding is **fixed** only where a run or a test shows it; where the fix has a part that needs the owner, that part stays open and is named.
 
 | ID | Status | What was done | What stays open | Evidence |
 |---|---|---|---|---|
