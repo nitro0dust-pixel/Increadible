@@ -54,11 +54,11 @@ const toolCall = (name: unknown, args?: unknown) => rpc("tools/call", { name, ..
 describe("the protocol version it answers with", () => {
   const versionFor = async (requested: unknown) => ((await server.handleMessage(rpc("initialize", { protocolVersion: requested }))) as any).result.protocolVersion;
 
-  it("echoes a version that is a date, and offers its own for anything else", async () => {
+  it("echoes a version it speaks, and offers the latest it speaks (2025-11-25) for anything else, also for text that only looks like one", async () => {
     expect(await versionFor("2025-06-18")).toBe("2025-06-18");
     expect(await versionFor("2024-11-05")).toBe("2024-11-05");
-    for (const other of ["x2025-06-18", "2025-06-18x", "2025-6-18", "20250618", "2025-06-18\n", "", " 2025-06-18", 20250618, null, {}, undefined]) {
-      expect(await versionFor(other)).toBe("2024-11-05");
+    for (const other of ["x2025-06-18", "2025-06-18x", "2025-6-18", "20250618", "2025-06-18\n", "", " 2025-06-18", 20250618, null, {}, undefined, "2099-01-01"]) {
+      expect(await versionFor(other)).toBe("2025-11-25");
     }
   });
 });

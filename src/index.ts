@@ -2,7 +2,16 @@ import * as crypto from "crypto";
 import * as http from "http";
 import * as readline from "readline";
 import { Readable, Writable } from "stream";
-import { handleMessage, internalError, metrics, renderPrometheusMetrics, startEventLoopMonitor, JsonRpcResponse, SERVER_INFO } from "./server";
+import {
+  handleMessage,
+  internalError,
+  metrics,
+  renderPrometheusMetrics,
+  startEventLoopMonitor,
+  JsonRpcResponse,
+  SERVER_INFO,
+  SUPPORTED_PROTOCOL_VERSIONS,
+} from "./server";
 
 const MAX_BODY_BYTES = 1_000_000;
 // Time allowed to *receive* a request (not to handle it). Node's own defaults are 60 s and 300 s, which lets one slow client hold a socket for 5 minutes.
@@ -67,11 +76,43 @@ export function createRateLimiter(perMinute: number, now: () => number = Date.no
   };
 }
 
+/**
+ * `ALLOWED_ORIGINS`: a comma-separated list of the origins (scheme://host[:port], no path) whose requests may go on to the token check.
+ * Each entry is reduced to its canonical origin; an entry that is not a plain http(s) origin (a path, a query, credentials, a wildcard,
+ * a backslash, `null`) is reported in `problems` and left out. A request with an Origin header that is not in the list is refused with
+ * 403; a request without one is not affected. Listing an origin does not make this server answer a browser: it sends no CORS headers.
+ * An entry that contains `@` may carry a password, so a problem never repeats it.
+ */
+export function parseAllowedOrigins(raw: string | undefined): { origins: string[]; problems: string[] } {
+  const origins: string[] = [];
+  const problems: string[] = [];
+  const shape = /^https?:\/\/(\[[0-9a-f:.]+\]|[^/?#\s\\@*:[\]]+)(:\d{1,5})?\/?$/i; // host (a name, an address or [IPv6]) and an optional port
+  (raw ?? "").split(",").forEach((part, position) => {
+    const entry = part.trim();
+    if (entry === "") return;
+    let url: URL | undefined;
+    try {
+      if (shape.test(entry)) url = new URL(entry); // a port above 65535 passes the shape and fails here
+    } catch {
+      /* reported below */
+    }
+    if (!url) {
+      const shown = entry.includes("@") ? `number ${position + 1} (it contains "@", so it is not shown)` : `"${entry}"`;
+      problems.push(`${shown} is not an origin (expected scheme://host[:port], for example https://app.example.com)`);
+      return;
+    }
+    if (!origins.includes(url.origin)) origins.push(url.origin);
+  });
+  return { origins, problems };
+}
+
 export interface HttpOptions {
   headersTimeoutMs?: number;
   requestTimeoutMs?: number;
   /** Global limit on POST /mcp (the bearer token is shared, so there is no per-client key). 0 or unset: off. */
   rateLimitPerMinute?: number;
+  /** Origins (lower case; `parseAllowedOrigins` makes them canonical) whose requests may go on to the token check; any other Origin header is refused with 403. None: no Origin header is accepted. */
+  allowedOrigins?: readonly string[];
 }
 
 export interface DrainableServer extends http.Server {
@@ -87,6 +128,7 @@ export function createHttpServer(authToken?: string, options: HttpOptions = {}):
   // Node only checks timeouts every connectionsCheckingInterval (30 s by default), which would stretch a 10 s limit to 40 s.
   const checkEvery = Math.max(50, Math.min(5_000, Math.floor((headersTimeout || requestTimeout || 10_000) / 2)));
   const takeToken = createRateLimiter(options.rateLimitPerMinute ?? 0);
+  const allowedOrigins = new Set((options.allowedOrigins ?? []).map((o) => o.toLowerCase()));
   let draining = false;
 
   const server = http.createServer(
@@ -112,6 +154,13 @@ export function createHttpServer(authToken?: string, options: HttpOptions = {}):
       if (probe && pathname === "/ready") {
         return draining ? json(503, { status: "draining" }) : json(200, { status: "ok" });
       }
+      // A web page's POST always carries Origin; the clients of this server (Claude Desktop, scripts, servers) send none. Refusing every
+      // Origin that is not listed stops a page from posting to /mcp through the visitor's browser (also DNS rebinding), also on a server
+      // without a token. It does not cover a same-origin GET, which carries no Origin (/metrics holds counters only), nor the Host header.
+      const origin = req.headers.origin;
+      if (origin !== undefined && !allowedOrigins.has(origin.toLowerCase())) {
+        return refuse(403, "origin_forbidden", { error: "Forbidden origin" });
+      }
       if (authToken && !tokenMatches(req.headers.authorization, authToken)) {
         metrics.http_rejected.unauthorized = (metrics.http_rejected.unauthorized || 0) + 1;
         return json(401, { error: "Unauthorized" });
@@ -121,6 +170,11 @@ export function createHttpServer(authToken?: string, options: HttpOptions = {}):
         return res.end(renderPrometheusMetrics());
       }
       if (req.method === "POST" && pathname === "/mcp") {
+        // The revision a client says it speaks, sent on every request after `initialize`. Absent is fine (older clients).
+        const sent = req.headers["mcp-protocol-version"];
+        if (sent !== undefined && !(typeof sent === "string" && SUPPORTED_PROTOCOL_VERSIONS.includes(sent))) {
+          return refuse(400, "protocol_version", { error: "Unsupported MCP-Protocol-Version", supported: SUPPORTED_PROTOCOL_VERSIONS });
+        }
         const retryAfter = takeToken();
         if (retryAfter) return refuse(429, "rate_limited", { error: "Too many requests" }, { "Retry-After": String(retryAfter) });
 
@@ -152,6 +206,10 @@ export function createHttpServer(authToken?: string, options: HttpOptions = {}):
           }
         });
         return;
+      }
+      // The optional event stream (GET) and the end of a session (DELETE): this server offers neither, which is what 405 says.
+      if (pathname === "/mcp" && (req.method === "GET" || req.method === "DELETE")) {
+        return refuse(405, "method_not_allowed", { error: "Method not allowed" }, { Allow: "POST" });
       }
       json(404, { error: "Not found" });
     }
@@ -246,7 +304,10 @@ export function run(): void {
       console.error(`WARNING: serving on ${host} without authentication (ALLOW_UNAUTHENTICATED is set)`);
     }
     startEventLoopMonitor(); // exposed on /metrics: a synchronous task that blocks the loop also blocks the probes
+    const allowed = parseAllowedOrigins(process.env.ALLOWED_ORIGINS);
+    for (const note of allowed.problems) console.error(`Ignoring ALLOWED_ORIGINS entry ${note}`);
     const server = createHttpServer(token, {
+      allowedOrigins: allowed.origins,
       headersTimeoutMs: envInt("HTTP_HEADERS_TIMEOUT_MS", DEFAULT_HEADERS_TIMEOUT_MS),
       requestTimeoutMs: envInt("HTTP_REQUEST_TIMEOUT_MS", DEFAULT_REQUEST_TIMEOUT_MS),
       rateLimitPerMinute: envInt("RATE_LIMIT_PER_MINUTE", 0),

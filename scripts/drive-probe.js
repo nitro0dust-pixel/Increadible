@@ -38,24 +38,28 @@ const errorOf = (m) => (m && m.error ? { code: m.error.code, id: m.id } : { notA
 /** Each run(ctx, problems) pushes what is wrong and returns a short account of what it saw. ctx.stdio() / ctx.http() start a server once and share it. */
 const CHECKS = [
   // ---- stdio
-  { id: "stdio.version-is-echoed", transport: "stdio", kind: "contract", title: "initialize answers the version the client names (2025-06-18), and 2024-11-05 when none or a non-date is named",
+  { id: "stdio.version-is-echoed", transport: "stdio", kind: "contract", title: "initialize answers the version the client names when the server speaks it (each of the four it lists)",
     async run(ctx, problems) {
       const c = await ctx.stdio();
-      const named = await c.request("initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "probe", version: "1" } });
-      const none = await c.request("initialize");
-      const word = await c.request("initialize", { protocolVersion: "latest", capabilities: {}, clientInfo: { name: "probe", version: "1" } });
-      eq(problems, "version when named", named.result && named.result.protocolVersion, "2025-06-18");
-      eq(problems, "version when not named", none.result && none.result.protocolVersion, "2024-11-05");
-      eq(problems, "version when a non-date is named", word.result && word.result.protocolVersion, "2024-11-05");
-      return `${named.result && named.result.protocolVersion} / ${none.result && none.result.protocolVersion} / ${word.result && word.result.protocolVersion}`;
+      const seen = [];
+      for (const version of ["2024-11-05", "2025-03-26", "2025-06-18", "2025-11-25"]) {
+        const r = await c.request("initialize", { protocolVersion: version, capabilities: {}, clientInfo: { name: "probe", version: "1" } });
+        seen.push(r.result && r.result.protocolVersion);
+        eq(problems, `version when ${version} is named`, r.result && r.result.protocolVersion, version);
+      }
+      return seen.join(" / ");
     } },
-  { id: "stdio.date-shaped-version-is-echoed", transport: "stdio", kind: "known", title: "initialize echoes any date-shaped version, also one it cannot speak (1999-01-01)",
-    note: spec("Version negotiation asks a server that does not support the requested version to answer with another version it does support (the latest it supports, ideally). This server declares no set of supported versions and answers any YYYY-MM-DD it was asked, so it never negotiates.", LIFECYCLE),
+  { id: "stdio.unsupported-version-is-negotiated", transport: "stdio", kind: "contract", title: "initialize answers the latest version it speaks (2025-11-25) when none, a non-date or a date it cannot speak (1999-01-01) is named",
     async run(ctx, problems) {
       const c = await ctx.stdio();
-      const r = await c.request("initialize", { protocolVersion: "1999-01-01", capabilities: {}, clientInfo: { name: "probe", version: "1" } });
-      eq(problems, "protocolVersion", r.result && r.result.protocolVersion, "1999-01-01");
-      return `echoed ${r.result && r.result.protocolVersion}`;
+      const ask = (params) => c.request("initialize", params);
+      const named = await ask({ protocolVersion: "1999-01-01", capabilities: {}, clientInfo: { name: "probe", version: "1" } });
+      const none = await ask(undefined);
+      const word = await ask({ protocolVersion: "latest", capabilities: {}, clientInfo: { name: "probe", version: "1" } });
+      eq(problems, "version when 1999-01-01 is named", named.result && named.result.protocolVersion, "2025-11-25");
+      eq(problems, "version when none is named", none.result && none.result.protocolVersion, "2025-11-25");
+      eq(problems, "version when a non-date is named", word.result && word.result.protocolVersion, "2025-11-25");
+      return `${named.result && named.result.protocolVersion} / ${none.result && none.result.protocolVersion} / ${word.result && word.result.protocolVersion}`;
     } },
   { id: "stdio.string-id-is-echoed", transport: "stdio", kind: "contract", title: "a string id comes back as the same string",
     async run(ctx, problems) {
@@ -218,31 +222,43 @@ const CHECKS = [
       eq(problems, "ping afterwards", (await client.request("POST", "/mcp", { headers: JSON_HEADERS, body: PING })).status, 200);
       return "413, still serving";
     } },
-  { id: "http.unknown-routes", transport: "http", kind: "contract", title: "unknown paths, /mcp/ with a slash and OPTIONS get 404 and no CORS headers",
+  { id: "http.unknown-routes", transport: "http", kind: "contract", title: "unknown paths, /mcp/ with a slash and OPTIONS get 404 and no CORS headers; the same with an Origin header get 403 and no CORS headers",
     async run(ctx, problems) {
       const { client } = await ctx.http();
       for (const [method, route] of [["GET", "/nope"], ["POST", "/mcp/"], ["OPTIONS", "/mcp"]]) {
-        const r = await client.request(method, route, { headers: { ...JSON_HEADERS, Origin: "http://example.test" }, body: method === "POST" ? PING : undefined });
-        eq(problems, `${method} ${route}`, r.status, 404);
-        if (r.headers["access-control-allow-origin"]) problems.push(`${method} ${route}: a CORS header was sent`);
+        const body = method === "POST" ? PING : undefined;
+        const plain = await client.request(method, route, { headers: JSON_HEADERS, body });
+        eq(problems, `${method} ${route}`, plain.status, 404);
+        if (plain.headers["access-control-allow-origin"]) problems.push(`${method} ${route}: a CORS header was sent`);
+        const foreign = await client.request(method, route, { headers: { ...JSON_HEADERS, Origin: "http://example.test" }, body });
+        eq(problems, `${method} ${route} with an Origin`, foreign.status, 403);
+        if (foreign.headers["access-control-allow-origin"]) problems.push(`${method} ${route} with an Origin: a CORS header was sent`);
       }
-      return "404 x3";
+      return "404 x3, 403 x3";
     } },
-  { id: "http.get-mcp-is-404", transport: "http", kind: "known", title: "GET /mcp (the optional event stream) answers 404",
-    note: spec("The Streamable HTTP rules ask a server that offers no event stream to answer 405 Method Not Allowed to this GET. This server answers 404."),
+  { id: "http.get-and-delete-mcp-are-405", transport: "http", kind: "contract", title: "GET /mcp (the optional event stream) and DELETE /mcp (ending a session) answer 405 with Allow: POST",
     async run(ctx, problems) {
       const { client } = await ctx.http();
-      const r = await client.request("GET", "/mcp", { headers: { Accept: "text/event-stream" } });
-      eq(problems, "status", r.status, 404);
-      return "404";
+      const seen = [];
+      for (const method of ["GET", "DELETE"]) {
+        const r = await client.request(method, "/mcp", { headers: method === "GET" ? { Accept: "text/event-stream" } : {} });
+        eq(problems, `${method} status`, r.status, 405);
+        eq(problems, `${method} Allow`, r.headers.allow, "POST");
+        seen.push(r.status);
+      }
+      return seen.join(", ");
     } },
-  { id: "http.origin-is-not-validated", transport: "http", kind: "known", title: "a foreign Origin header is accepted (with the token)",
-    note: spec("The rules ask a server to validate the Origin header against DNS-rebinding attacks (and to answer 403 for an invalid one). This server does not; the bearer token protects /mcp and a web page cannot add it. Without a token (a loopback server started with ALLOW_UNAUTHENTICATED) a web page can reach it: see http.content-type-is-not-checked. Decision pending with the owner."),
+  { id: "http.foreign-origin-is-refused", transport: "http", kind: "contract", title: "a request with an Origin header is refused with 403 (also with the token), one without is served",
     async run(ctx, problems) {
       const { client } = await ctx.http();
-      const origin = await client.request("POST", "/mcp", { headers: { ...JSON_HEADERS, Origin: "http://evil.example" }, body: PING });
-      eq(problems, "foreign Origin", origin.status, 200);
-      return "200";
+      const seen = [];
+      for (const origin of ["http://evil.example", "null"]) {
+        const r = await client.request("POST", "/mcp", { headers: { ...JSON_HEADERS, Origin: origin }, body: PING });
+        eq(problems, `Origin ${origin}`, r.status, 403);
+        seen.push(r.status);
+      }
+      eq(problems, "no Origin", (await client.request("POST", "/mcp", { headers: JSON_HEADERS, body: PING })).status, 200);
+      return seen.join(", ") + ", then 200 without";
     } },
   { id: "http.host-is-not-validated", transport: "http", kind: "observed", title: "a foreign Host header is accepted (with the token)",
     note: "The specification speaks of Origin only; Host is recorded because a DNS-rebinding defence usually checks it too.",
@@ -252,16 +268,17 @@ const CHECKS = [
       eq(problems, "foreign Host", host.status, 200);
       return "200";
     } },
-  { id: "http.protocol-version-header-is-ignored", transport: "http", kind: "known", title: "an invalid MCP-Protocol-Version header (1999-01-01) is accepted",
-    note: spec("The rules ask a server to answer 400 to an invalid or unsupported MCP-Protocol-Version header. This server ignores the header."),
+  { id: "http.unsupported-protocol-version-header-is-refused", transport: "http", kind: "contract", title: "an MCP-Protocol-Version header the server does not speak (1999-01-01) gets 400; one it speaks (2025-11-25), or none, is served",
     async run(ctx, problems) {
       const { client } = await ctx.http();
-      const r = await client.request("POST", "/mcp", { headers: { ...JSON_HEADERS, "MCP-Protocol-Version": "1999-01-01" }, body: PING });
-      eq(problems, "status", r.status, 200);
-      return "200";
+      const refused = await client.request("POST", "/mcp", { headers: { ...JSON_HEADERS, "MCP-Protocol-Version": "1999-01-01" }, body: PING });
+      eq(problems, "unsupported version", refused.status, 400);
+      eq(problems, "supported version", (await client.request("POST", "/mcp", { headers: { ...JSON_HEADERS, "MCP-Protocol-Version": "2025-11-25" }, body: PING })).status, 200);
+      eq(problems, "no header", (await client.request("POST", "/mcp", { headers: JSON_HEADERS, body: PING })).status, 200);
+      return `${refused.status}, then 200 x2`;
     } },
   { id: "http.content-type-is-not-checked", transport: "http", kind: "observed", title: "a JSON body sent as text/plain is accepted",
-    note: "text/plain is a type a web page may send cross-origin without a preflight request, so together with http.origin-is-not-validated this matters for a server run without a token.",
+    note: "text/plain is a type a web page may send cross-origin without a preflight request, so the Origin check (http.foreign-origin-is-refused) refuses such a request now, so this is recorded only.",
     async run(ctx, problems) {
       const { client } = await ctx.http();
       const r = await client.request("POST", "/mcp", { headers: { "Content-Type": "text/plain" }, body: PING });

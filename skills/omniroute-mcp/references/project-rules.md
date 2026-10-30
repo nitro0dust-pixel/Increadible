@@ -57,7 +57,7 @@ image by digest and probes it again. The package `ghcr.io/nitro0dust-pixel/incre
 
 ## Architecture in one screen
 
-- `src/index.ts`: transports. stdio (newline-delimited JSON-RPC) or HTTP (`/health`, `/ready`, `/metrics`, `POST /mcp`, stateless);
+- `src/index.ts`: transports. stdio (newline-delimited JSON-RPC) or HTTP (`/health`, `/ready`, `/metrics`, `POST /mcp`, stateless; a request with an `Origin` is refused unless `ALLOWED_ORIGINS` lists it, `GET`/`DELETE /mcp` are 405, an unsupported `MCP-Protocol-Version` is 400);
   timeouts, optional rate limit, drain and hard-deadline shutdown, refusal to start open beyond loopback.
 - `src/server.ts`: the JSON-RPC handler, tool dispatch, metrics (counters, tool-latency histogram). A throwing tool becomes a tool
   error; the handler never throws.
@@ -71,7 +71,7 @@ image by digest and probes it again. The package `ghcr.io/nitro0dust-pixel/incre
 - Node: one major (24) across the Dockerfile, CI and `@types/node`, enforced by a test; `engines` is `>=22`.
 
 Configuration (names only; values come from the environment, never commit them): `PORT`, `HOST`, `AUTH_TOKEN`,
-`ALLOW_UNAUTHENTICATED`, `RULES_FILE`, `EXPERIMENTS_FILE`, `AB_DATA_FILE`, `AB_FSYNC`, `AB_LAZY_OPEN`, `AB_DATA_WARN_BYTES`,
+`ALLOW_UNAUTHENTICATED`, `ALLOWED_ORIGINS`, `RULES_FILE`, `EXPERIMENTS_FILE`, `AB_DATA_FILE`, `AB_FSYNC`, `AB_LAZY_OPEN`, `AB_DATA_WARN_BYTES`,
 `HTTP_HEADERS_TIMEOUT_MS`, `HTTP_REQUEST_TIMEOUT_MS`, `RATE_LIMIT_PER_MINUTE`, `SHUTDOWN_DRAIN_MS`, `SHUTDOWN_TIMEOUT_MS`,
 `GATEWAY_LIVE_APIS`, `GATEWAY_TIMEOUT_MS`, `GATEWAY_MAX_RESPONSE_BYTES`, `GATEWAY_USER_AGENT`, `GATEWAY_CONTACT`, `GATEWAY_RATE_LIMITS`, `GATEWAY_DEFAULT_RATE_LIMIT`, `GATEWAY_RETRIES`, `GATEWAY_RETRY_MAX_WAIT_MS`, `NODE_ENV` (production refuses Wikimedia calls without a contact) (and one `GATEWAY_KEY_<API>` per key-based API, named in `DEPLOYMENT.md`).
 Details and defaults: `README.md` and `DEPLOYMENT.md`.

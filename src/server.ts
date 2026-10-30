@@ -4,9 +4,19 @@ import * as gateway from "../features/09-api-gateway/src/mcp-server";
 import { VERSION } from "./version";
 
 export const SERVER_INFO = { name: "increadible", version: VERSION };
-const DEFAULT_PROTOCOL_VERSION = "2024-11-05";
-/** MCP protocol versions are dates. Anything else a client sends is not echoed back as the version this server speaks. */
-const PROTOCOL_VERSION_FORMAT = /^\d{4}-\d{2}-\d{2}$/;
+/**
+ * The MCP revisions this server answers as, oldest first. The handler is the same for all of them (tools only, no sessions, JSON answers),
+ * so the set is the published revisions before the stateless redesign of 2026-07-28, whose handshake is different. 2025-03-26 is listed
+ * although that revision asks a server to accept JSON-RPC batches, which this server refuses (the protocol probe records it).
+ */
+export const SUPPORTED_PROTOCOL_VERSIONS: readonly string[] = ["2024-11-05", "2025-03-26", "2025-06-18", "2025-11-25"];
+/** What `initialize` answers when the client asks for a revision this server does not speak: the latest it does (the lifecycle rules). */
+export const LATEST_PROTOCOL_VERSION = SUPPORTED_PROTOCOL_VERSIONS[SUPPORTED_PROTOCOL_VERSIONS.length - 1];
+
+/** Version negotiation: the same revision if this server speaks it, otherwise the latest it speaks (also for a missing or non-text version). */
+export function negotiateProtocolVersion(requested: unknown): string {
+  return typeof requested === "string" && SUPPORTED_PROTOCOL_VERSIONS.includes(requested) ? requested : LATEST_PROTOCOL_VERSION;
+}
 
 interface ToolModule {
   tools: Array<{ name: string; description: string; inputSchema: unknown }>;
@@ -172,7 +182,7 @@ async function handleRequest(msg: JsonRpcRequest): Promise<JsonRpcResponse | nul
         jsonrpc: "2.0",
         id,
         result: {
-          protocolVersion: typeof requested === "string" && PROTOCOL_VERSION_FORMAT.test(requested) ? requested : DEFAULT_PROTOCOL_VERSION,
+          protocolVersion: negotiateProtocolVersion(requested),
           capabilities: { tools: {} },
           serverInfo: SERVER_INFO,
         },
