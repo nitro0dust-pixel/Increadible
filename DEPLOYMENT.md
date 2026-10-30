@@ -232,6 +232,16 @@ $h = @{ Authorization = "Bearer $t" }
 (Invoke-RestMethod -Method Post "$u/mcp" -Headers $h -ContentType application/json -Body '{"jsonrpc":"2.0","id":1,"method":"tools/list"}').result.tools.Count
 ```
 
+With Node and a checkout of this repository (and `npm run build` is **not** needed: it is a plain script), the same checks, and the two the snippet leaves out (the server's name and the gateway statistics), are one read-only command, `npm run probe:remote` (see [Checking a running server from outside](#checking-a-running-server-from-outside)):
+
+```powershell
+$env:RAILWAY_TOKEN = Read-Host "AUTH_TOKEN"   # typed at the prompt, never pasted into a chat
+npm run probe:remote -- --url https://increadible-production.up.railway.app --token-env RAILWAY_TOKEN
+Remove-Item Env:RAILWAY_TOKEN
+```
+
+It has **not** been run against the Railway service (the authoring sandbox cannot reach it): NOT VERIFIED there.
+
 ## Kubernetes (staging verified locally only)
 
 Run this from a machine whose `kubectl` points at the cluster you intend (check `kubectl config current-context`).
@@ -323,7 +333,28 @@ anything, and there is no dashboard and no cost metric.
 
 ## Checking a running server from outside
 
-`npm run drive:http -- --url https://your-service.example --token-env NAME` ([docs/DRIVERS.md](docs/DRIVERS.md), section 3.3) sends the standard scenario to a server that is already running: `/ready`, `/health`, the refusal of a request without the token, the handshake, routing, the gateway on sample data, the errors, and `/metrics`. The token is read from the environment variable `NAME`, never from the command line. It **skips the steps that write A/B data** (the log is append-only) unless you add `--allow-writes`, and its gateway steps expect sample data, so against a server with live APIs switched on they fail on purpose. Expected against a default server: `PASS 17/17 (4 skipped: they write data)`. It has been run against a local server only, **not** against the Railway or Kubernetes rehearsals (NOT VERIFIED there; for the Railway rehearsal, whose live APIs are on, use the PowerShell probe in the section above instead), and it is not a load test ([PERFORMANCE.md](PERFORMANCE.md)).
+`npm run drive:http -- --url https://your-service.example --token-env NAME` ([docs/DRIVERS.md](docs/DRIVERS.md), section 3.3) sends the standard scenario to a server that is already running: `/ready`, `/health`, the refusal of a request without the token, the handshake, routing, the gateway on sample data, the errors, and `/metrics`. The token is read from the environment variable `NAME`, never from the command line. It **skips the steps that write A/B data** (the log is append-only) unless you add `--allow-writes`, and its gateway steps expect sample data, so against a server with live APIs switched on they fail on purpose. Expected against a default server: `PASS 17/17 (4 skipped: they write data)`. It has been run against a local server only, **not** against the Railway or Kubernetes rehearsals (NOT VERIFIED there; for the Railway rehearsal, whose live APIs are on, use `npm run probe:remote` below or the PowerShell probe in the section above instead), and it is not a load test ([PERFORMANCE.md](PERFORMANCE.md)).
+
+`npm run probe:remote -- --url https://your-service.example --token-env NAME` ([scripts/probe-remote.js](scripts/probe-remote.js)) is the check for a server whose gateway has live APIs on. It runs no scenario and sends only requests that read: `GET /health`, `GET /ready`, `POST /mcp` without the token, and, with the token, `initialize`, `tools/list` and the read-only tool `get_api_stats`; no provider is called and nothing is written. Six checks: health, readiness, the refusal of a request without the token (HTTP 401; a server that answers it is **open**, a failure anywhere but on this machine), the handshake (the server must call itself `increadible`), the number of tools (13; `--expect-tools N` for a build that has another number) and the gateway statistics (`live_apis` is a list; Wikipedia or Wikidata live needs `user_agent_has_contact: true`, that is `GATEWAY_CONTACT` set). Without `--token-env` the last three are skipped and the report says `skipped: no token given`. The token is read from the variable you name, never from the command line, and is never printed. Exit 0 all passed, 1 a check failed, 2 could not run. Expected against the Railway rehearsal: `PASS 6/6`. It was run against the real compiled server and against stand-ins in `tests/probe-remote.test.ts`; against Railway and Kubernetes it is NOT VERIFIED.
+
+## Rotating `AUTH_TOKEN`
+
+The server reads the token once, when it starts, so a new value takes effect only after a restart. Rotate it when it may have been seen (a chat, a shared screen, a log), when someone who knew it leaves, and on a schedule you choose. Make a new one with `openssl rand -hex 32`; do not paste it into a chat or a file.
+
+- **Kubernetes.** Replace the secret, then restart: a running pod keeps the old value until it restarts.
+
+  ```bash
+  kubectl -n "$NS" create secret generic increadible-secrets --from-literal=auth-token="$(openssl rand -hex 32)" --dry-run=client -o yaml | kubectl apply -f -
+  kubectl -n "$NS" rollout restart deploy/increadible
+  kubectl -n "$NS" rollout status deploy/increadible
+  ```
+
+- **Railway.** Change the `AUTH_TOKEN` variable on the service (Variables); Railway redeploys. Then run `npm run probe:remote` (or the PowerShell probe above) with the new token.
+- **Docker.** Start the container again with a new `-e AUTH_TOKEN=...`.
+- **Claude Desktop over stdio** uses no token.
+- **Clients.** One shared token means every client changes at once (a design limit, audit finding PA-10 in [docs/PROJECT-AUDIT-2026-10-30.md](docs/PROJECT-AUDIT-2026-10-30.md)).
+
+Check afterwards: `POST /mcp` without a token and with the old token answers 401, the new token is accepted, and `/health` stayed open throughout.
 
 ## Rollback
 

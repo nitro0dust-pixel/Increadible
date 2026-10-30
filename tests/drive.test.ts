@@ -525,6 +525,8 @@ describe("the review's findings", () => {
   });
 
   describe("an interrupted driver leaves nothing behind (T-02, SEC-03)", () => {
+    // The waits for a killed server to be gone are 20 s, not 5 s: under a full clean room plus a coverage run (2026-10-30) one of them
+    // gave up at 5 s although nothing was left behind. A leaked server still fails the test; only the patience is longer.
     it("http: SIGTERM to the driver mid-run ends the server it started and removes its work directory, exit code 143", async () => {
       const tmpdir = privateTmp();
       const fake = fakeRoot("interrupt-http", { "index.js": FAKE_HTTP });
@@ -537,7 +539,7 @@ describe("the review's findings", () => {
       run.child.kill("SIGTERM");
       const ended = await run.exit;
       expect(ended.code).toBe(143);
-      await waitFor("the server to be gone", () => !alive(pid), 5000);
+      await waitFor("the server to be gone", () => !alive(pid), 20_000);
       expect(pending(tmpdir)).toEqual([]);
     }, 60_000);
 
@@ -551,7 +553,7 @@ describe("the review's findings", () => {
       run.child.kill("SIGINT");
       const ended = await run.exit;
       expect(ended.code).toBe(130);
-      await waitFor("the server to be gone", () => !alive(pid), 5000);
+      await waitFor("the server to be gone", () => !alive(pid), 20_000);
       expect(pending(tmpdir)).toEqual([]);
     }, 60_000);
 
@@ -564,7 +566,7 @@ describe("the review's findings", () => {
       await new Promise((r) => setTimeout(r, 700));
       run.child.kill("SIGHUP");
       expect((await run.exit).code).toBe(129);
-      await waitFor("the server to be gone", () => !alive(pid), 5000);
+      await waitFor("the server to be gone", () => !alive(pid), 20_000);
       expect(pending(tmpdir)).toEqual([]);
     }, 60_000);
 
@@ -578,7 +580,7 @@ describe("the review's findings", () => {
       expect(alive(pid)).toBe(true);
       run.child.kill("SIGTERM");
       expect((await run.exit).code).toBe(143);
-      await waitFor("the stubborn server to be gone", () => !alive(pid), 5000);
+      await waitFor("the stubborn server to be gone", () => !alive(pid), 20_000);
       expect(pending(tmpdir)).toEqual([]);
     }, 60_000);
 

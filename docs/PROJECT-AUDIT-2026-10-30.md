@@ -238,6 +238,21 @@ Master table; the detail follows. "Fix class": **A** in-repo and safe to do now 
 
 **Production authority.** Nothing in this list deploys anything. Agents may research, change code, test and open pull requests; a merge needs CI green on the exact head with the logs read and the owner's GO, and production, live providers, rate limits, signing and the Railway service stay the owner's decisions.
 
+## 9. Status of the fixes (updated as they land)
+
+Step 1 of section 8, the class A fixes, was done on 2026-10-30 in one pull request (its number and the CI run are in `docs/BUILD-HISTORY.md` and `ROADMAP.md`). Nothing in class B or C was started. A finding is **fixed** only where a run or a test shows it; where the fix has a part that needs the owner, that part stays open and is named.
+
+| ID | Status | What was done | What stays open | Evidence |
+|---|---|---|---|---|
+| PA-01 | Fixed | the four waits for a process to be gone in `tests/drive.test.ts` ("an interrupted driver leaves nothing behind") end as soon as the process is gone and wait up to 20 s instead of 5 s | nothing | [V] the failure was seen once, under the load of a coverage run, and not reproduced in 12 further runs; a longer wait removes a timing assumption but is not a proof that it cannot recur |
+| PA-02 | Partly fixed | `CLAUDE.md` now says the Windows 11 run of 2026-10-29 covered the drivers, not `npm test`, so "not re-run since" | `npm test` on Windows 11 is still to be run by the owner (class C) | [V] the sentence; the Windows result stays [N] |
+| PA-03 | Fixed | the development-dependency row of `SECURITY.md` states today's figures: 6 low advisories in one chain (`deepmerge`, GHSA-gcqx-w48m-w2h4, under Jest), production 0, and that `npm audit fix --force` must not be run | the figure ages; re-run `npm audit` at each release | [V] `npm audit`; no test can guard a dated figure |
+| PA-07 | Partly fixed | the scanner row of `SECURITY.md` now says what is true: the image is pinned by digest and the pin ages; only verified secrets are reported (`--only-verified`) | whether to report unverified secrets too, and who bumps the digest, are the owner's (class C) | [V] the row |
+| PA-10 | Partly fixed | `DEPLOYMENT.md` has a section "Rotating `AUTH_TOKEN`": Kubernetes (replace the secret, then `rollout restart` and `rollout status`), Railway, Docker, Claude Desktop (none), and how to check | the throttle on failed logins and per-client tokens are class B and not started | [V] the section; the Kubernetes commands were not run (no cluster) |
+| PA-12 | Partly fixed | `npm run probe:remote` (`scripts/probe-remote.js`): six read-only checks of a running server; it sends only `GET /health`, `GET /ready` and `POST /mcp` (`initialize`, `tools/list`, `get_api_stats`), so it is safe against live APIs, unlike `drive:http --url` | the server does not report its own commit, so **the commit Railway runs is still NOT VERIFIED**; the owner reads it in the Railway dashboard. The tool has not been run against Railway | [V] `tests/probe-remote.test.ts` against the real compiled server and against stand-ins; 26 breakages of its guards, all caught (`docs/DRIVERS.md`, round 11) |
+| PA-20 | Partly fixed | `jest.config.js` has a `coverageThreshold` just under the measured figures (statements 95, branches 93, functions 93, lines 96), enforced under `--coverage`, which CI runs | mutation testing stays manual | [V] `npm test -- --coverage` passes with it; a guard test checks that the threshold exists |
+| PA-24 | Fixed | `SECURITY.md` no longer says the scanner image is unpinned | nothing | [V] a test fails while `SECURITY.md` calls the scanner unpinned and the workflow pins its image by digest; broken on purpose and caught |
+
 ## Appendix A. Commands and results
 
 | What | Command | Result |
