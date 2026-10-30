@@ -186,16 +186,39 @@ describe("what a refusal costs and how it ends", () => {
     });
   });
 
-  it("closes the connection after each refusal (403, 405, 400), so a refused client cannot keep a socket open", async () => {
-    await withServer(TOKEN, {}, async (port) => {
-      const refusals = [
-        await post(port, { ...AUTH, Origin: "http://evil.example" }),
-        await send(port, "GET", "/mcp", AUTH),
-        await post(port, { ...AUTH, "MCP-Protocol-Version": "1999-01-01" }),
-      ];
-      expect(refusals.map((r) => r.status)).toEqual([403, 405, 400]);
-      for (const r of refusals) expect(r.headers.connection).toBe("close");
-    });
+  it("closes the connection after each refusal (403, 405, 400), also for a client that asked to keep it open", async () => {
+    // A keep-alive client: with `agent: false` the client itself asks for "close" and Node echoes it, which would hide a server that forgot to.
+    const agent = new http.Agent({ keepAlive: true, maxSockets: 1 });
+    const keepAlive = (port: number, method: string, url: string, headers: Headers, body?: string) =>
+      new Promise<{ status: number; connection: string | undefined; closed: Promise<boolean> }>((resolve, reject) => {
+        const req = http.request({ host: "127.0.0.1", port, method, path: url, headers: { Connection: "keep-alive", ...headers }, agent }, (res) => {
+          const closed = new Promise<boolean>((done) => {
+            res.socket.once("close", () => done(true));
+            setTimeout(() => done(false), 2000).unref();
+          });
+          res.resume();
+          res.on("end", () => resolve({ status: res.statusCode!, connection: res.headers.connection, closed }));
+        });
+        req.on("error", reject);
+        req.end(body);
+      });
+    try {
+      await withServer(TOKEN, {}, async (port) => {
+        const refusals = [
+          await keepAlive(port, "POST", "/mcp", { ...AUTH, Origin: "http://evil.example" }, PING),
+          await keepAlive(port, "GET", "/mcp", AUTH),
+          await keepAlive(port, "POST", "/mcp", { ...AUTH, "MCP-Protocol-Version": "1999-01-01" }, PING),
+        ];
+        expect(refusals.map((r) => r.status)).toEqual([403, 405, 400]);
+        for (const r of refusals) expect(r.connection).toBe("close");
+        for (const r of refusals) expect(await r.closed).toBe(true);
+        // and a request that is served keeps the connection, so the check above tells the two apart
+        const served = await keepAlive(port, "POST", "/mcp", AUTH, PING);
+        expect([served.status, served.connection]).toEqual([200, "keep-alive"]);
+      });
+    } finally {
+      agent.destroy();
+    }
   });
 
   it("answers GET and DELETE on /mcp with a query string as it does without one", async () => {
