@@ -19,7 +19,7 @@ This is the second audit report of the repository and the first that covers the 
 | Node 22 and Node 24 from a clean checkout | PASS on both | [V] `bash scripts/cleanroom.sh 554ee19` twice |
 | Coverage of the server code | 96.73% statements, 94.85% branches, 94.75% functions, 97.94% lines; no threshold enforced | [V] `npm test -- --coverage` |
 | Production dependency vulnerabilities | 0 (one production dependency: `yaml`) | [V] `npm audit --omit=dev` |
-| Development dependency vulnerabilities | 6 low, all in the test toolchain; not mentioned in any document (PA-03) | [V] `npm audit` |
+| Development dependency vulnerabilities | 6 low, all in the test toolchain; SECURITY.md still describes the state of 2026-10-09 (20 moderate, another chain) (PA-03) | [V] `npm audit` |
 | Claude Desktop package | builds, 246 files, every checksum matches, manifest agrees with `package.json`; unsigned | [V] `npm run mcpb`, `node scripts/mcpb.js inspect`, `problems` |
 | Request drivers | `drive:all` 13 of 13 jobs, `drive:live` 9 of 9 checks (local stub; no real provider called) | [V] |
 | Global skill | in step with the documents (16 references when checked; 17 with this report added) | [V] `node scripts/skill.js check` |
@@ -42,7 +42,7 @@ This is the second audit report of the repository and the first that covers the 
 | 7 | PA-19: two sessions on two accounts write the same record files | Medium (process) | owner decision |
 | 8 | PA-13 and PA-14: one replica, a data file that is never compacted, no verified backup, no cluster rollout of the production manifest | Medium | owner / design |
 | 9 | PA-09: the Railway container runs as root | Medium | image change, owner approval |
-| 10 | PA-01, PA-02, PA-03, PA-20: an intermittent test, a stale Windows sentence, an undocumented dev advisory, no coverage threshold | Low | in-repo, no decision needed |
+| 10 | PA-01, PA-02, PA-03, PA-20, PA-24: an intermittent test, a stale Windows sentence, stale rows in SECURITY.md (one says a control is missing that exists), no coverage threshold | Low | in-repo, no decision needed |
 
 ## 2. Scope, method and limits
 
@@ -145,7 +145,7 @@ Master table; the detail follows. "Fix class": **A** in-repo and safe to do now 
 |---|---|---|---|---|
 | PA-01 | Low | defect (test) | a process-cleanup test waits only 5 s and failed once under heavy load | A |
 | PA-02 | Low | stale record | CLAUDE.md says 8 tests fail on Windows and "not reproduced here"; the 2026-10-29 Windows run did not re-run the test suite | A, then C |
-| PA-03 | Low | undocumented risk | 6 low advisories in the development toolchain, not mentioned anywhere | A |
+| PA-03 | Low | stale record | SECURITY.md describes 20 moderate development advisories (2026-10-09); today there are 6 low, in another chain (`deepmerge` under Jest) | A |
 | PA-04 | Medium | security gap | `Origin` is not validated on `POST /mcp` | B |
 | PA-05 | Low to Medium | protocol deviation | version negotiation, `GET /mcp` answers 404, the protocol-version header is ignored, batches unsupported; a newer MCP revision may drop the handshake | B |
 | PA-06 | Medium | supply chain | base image, GitHub Actions and the production manifest not pinned by digest or commit | C (needs lookups) |
@@ -166,6 +166,7 @@ Master table; the detail follows. "Fix class": **A** in-repo and safe to do now 
 | PA-21 | Info | upkeep | dependency majors are never proposed; a manual cadence is needed | C |
 | PA-22 | Low | verification gap | on Windows a signalled child ends without running the server's handler; the drivers accept that, so graceful shutdown on Windows is unproven | C |
 | PA-23 | Info | environment | Gmail and the Railway console could not be reached from the authoring session | C |
+| PA-24 | Low | stale record (security document) | SECURITY.md says the secret scanner image is not pinned; it has been pinned by digest since 2026-10-09 | A |
 
 ### Defects and stale records
 
@@ -173,7 +174,7 @@ Master table; the detail follows. "Fix class": **A** in-repo and safe to do now 
 
 **PA-02 (Low, [V]). A stale sentence.** [CLAUDE.md](../CLAUDE.md), "Environment gotchas", still says `npm test` has 8 failing tests in four suites on Windows and "not reproduced here". On 2026-10-29 the drivers and the stub driver passed on Windows 11 [R], but the record does not say the test suite was run there. *Fix (A):* reword to "last reported 2026-10-09; not re-run since", and (C) have the owner run `npm test` on Windows 11 once and record the result.
 
-**PA-03 (Low, [V]). Development advisories nobody wrote down.** `npm audit` reports 6 low-severity findings, all one chain: `deepmerge` (prototype poisoning through `mergeObject`, GHSA-gcqx-w48m-w2h4) used by `jest-config`, `@jest/core`, `jest`, `jest-cli` and `ts-jest`. Production has 0; the image and the package carry none of it. npm's suggested remedy (`npm audit fix --force`) would install `jest@25.1.0`, a three-major downgrade, and must not be run. The earlier audit recorded 42 advisories fixed to 20 and later to none high ([AUDIT.md](../AUDIT.md) F-03); this residue is new and is in no document. *Fix (A):* record it in [SECURITY.md](../SECURITY.md) with the reasoning (test-time only, no untrusted input reaches `deepmerge`), and look again when Jest releases a version that does not depend on it.
+**PA-03 (Low, [V]). The development advisories in SECURITY.md are the old ones.** [SECURITY.md](../SECURITY.md) ("What is not done") says: 20 moderate advisories, none high or critical, one chain (`sprintf-js`) without a patch, as of 2026-10-09. Today `npm audit` reports 6 low-severity findings in a different single chain: `deepmerge` (prototype poisoning through `mergeObject`, GHSA-gcqx-w48m-w2h4) used by `jest-config`, `@jest/core`, `jest`, `jest-cli` and `ts-jest`. Production has 0; the image and the package carry none of it. npm's suggested remedy (`npm audit fix --force`) would install `jest@25.1.0`, a five-major downgrade, and must not be run. *Fix (A):* replace the row with today's figures and the reasoning (test-time only; no untrusted input reaches `deepmerge`), and look again when Jest ships a release that does not depend on it.
 
 ### Security and hardening
 
@@ -223,11 +224,13 @@ Master table; the detail follows. "Fix class": **A** in-repo and safe to do now 
 
 **PA-23 (Info). What the authoring session could not reach.** Gmail was never connected to the session, the Railway connector was not connected, and the sandbox's proxy refuses the Railway domain. Anything those would show (Railway notices, deployment logs) is outside this audit. *Fix (C):* connect the connectors at the start of a session; the owner can run the probe from their PC.
 
+**PA-24 (Low, [V]). A security document that understates a control.** The same "What is not done" table in [SECURITY.md](../SECURITY.md) has the row "The secret scanner image is not pinned: recorded as D-5 in AUDIT.md; owner decision". It has been pinned by digest since pull request 39 (2026-10-09): the `version:` input in `ci-cd.yml` is `3.99.2@sha256:47a84bc1...`, and a test fails if it is unpinned again. A reader, or someone reporting a problem, is told that a control is missing that exists. Nothing tests SECURITY.md against the workflow. *Fix (A):* correct the row (and PA-07's remaining point, that the pin ages); add a test that fails if SECURITY.md says the scanner is unpinned while the workflow pins it.
+
 ## 8. Recommended order of work
 
 | Step | What | Items | Class | Effort |
 |---|---|---|---|---|
-| 1. Now, in the repository, no decision needed | raise the two process-cleanup waits; correct the Windows sentence; record the dev advisory; add a coverage threshold; write the `AUTH_TOKEN` rotation runbook; add the remote probe command; record these fixes | PA-01, PA-02 (first half), PA-03, PA-10 (runbook), PA-12 (tool), PA-20 | A | small to medium, one pull request |
+| 1. Now, in the repository, no decision needed | raise the four process-cleanup waits; correct the Windows sentence; correct SECURITY.md (the advisory row and the scanner row); add a coverage threshold; write the `AUTH_TOKEN` rotation runbook; add the remote probe command; record these fixes | PA-01, PA-02 (first half), PA-03, PA-10 (runbook), PA-12 (tool), PA-20, PA-24 | A | small to medium, one pull request |
 | 2. The owner's quick actions | read Railway's deployment commit and status; run `npm test` on Windows 11; switch on private vulnerability reporting; name the record keeper | PA-12, PA-02, PA-11, PA-19 | C | minutes |
 | 3. Approvals that unlock work | allow the digest and commit lookups and pin the base image, actions and manifest; choose an image scanner; approve the `Origin` check, the protocol fixes and the root-to-node entrypoint | PA-04, PA-05, PA-06, PA-08, PA-09 | B and C | one pull request each |
 | 4. Verification that needs the owner's resources | a real cluster rollout; the first real run of the workflows; the backup test | PA-13, PA-14, PA-18 | C | a session each |
