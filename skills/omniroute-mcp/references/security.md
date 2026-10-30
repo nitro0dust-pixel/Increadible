@@ -31,9 +31,9 @@ title. Only the latest `main` is supported.
 
 | Gap | State |
 |---|---|
-| Development dependencies | 20 moderate advisories, none high or critical (`npm audit`, 2026-10-09); one chain (`sprintf-js`) has no patched version; not reachable by any input. A critical `handlebars` advisory (through `ts-jest`) was fixed by updating it to 4.7.10 (PR #40) |
+| Development dependencies | 6 low advisories in one chain: `deepmerge` (GHSA-gcqx-w48m-w2h4, prototype poisoning through `mergeObject`) used by `jest-config`, hence by `jest` and `ts-jest` (`npm audit`, 2026-10-30). Production has 0. Test-time only: no input from outside reaches it. npm's suggested fix would install `jest@25.1.0`, a downgrade: do not run `npm audit fix --force`; look again when Jest ships a release that does not depend on it. Earlier states: 42 advisories on 2026-10-07 and 20 moderate on 2026-10-09 (`AUDIT.md` F-03); a critical `handlebars` advisory was fixed by updating it to 4.7.10 (PR #40) |
 | Container image vulnerability scan | not done (needs a tool choice: open decision) |
-| The secret scanner image is not pinned | recorded as D-5 in `AUDIT.md`; owner decision |
+| The secret scanner's image pin ages | pinned by digest (`3.99.2@sha256:47a84bc1...`, owner decision of 2026-10-09, `AUDIT.md` D-5), while Dependabot bumps the action itself (3.99.7); the digest is not moved by Dependabot, so it stays old until someone bumps it on purpose. CI reports only secrets the provider confirms are live (`--only-verified`) |
 | GitHub Actions are pinned by version tag, not by commit SHA | open decision |
 | Image signing; reading the SBOM attestation back | not done / `NOT VERIFIED` |
 | TLS, ingress and a NetworkPolicy | TLS and ingress not built. Egress: the manifests allow DNS only, and `k8s/egress-live-cilium.yaml` allows HTTPS to the four keyless providers on a Cilium cluster (`DEPLOYMENT.md`); never applied to a cluster, so **NOT VERIFIED**. Railway has no egress policy |

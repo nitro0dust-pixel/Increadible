@@ -700,6 +700,20 @@ describe("the documentation set", () => {
     }
   });
 
+  it("SECURITY.md does not call the secret scanner unpinned while the workflow pins its image by digest", () => {
+    const pinned = /version:\s*\d+\.\d+\.\d+@sha256:[0-9a-f]{64}/.test(read(".github/workflows/ci-cd.yml"));
+    expect(pinned).toBe(true);
+    expect(read("SECURITY.md")).not.toMatch(/secret scanner image is not pinned/i);
+  });
+
+  it("holds coverage to a threshold set under the measured figures", () => {
+    const global = (require("../jest.config.js") as { coverageThreshold?: { global?: Record<string, number> } }).coverageThreshold?.global;
+    expect(global).toBeDefined();
+    for (const key of ["statements", "branches", "functions", "lines"]) {
+      expect({ key, sensible: typeof global?.[key] === "number" && global[key] >= 90 && global[key] <= 100 }).toEqual({ key, sensible: true });
+    }
+  });
+
   it("has the documents a person needs from nothing to a running Claude Desktop", () => {
     for (const file of ["README.md", "ROADMAP.md", "docs/INSTALL-CLAUDE-DESKTOP.md", "docs/TROUBLESHOOTING.md", "docs/ARCHITECTURE.md", "docs/BUILD-HISTORY.md", "DEPLOYMENT.md", "CONTRIBUTING.md", "SECURITY.md", "CLAUDE.md", "CHANGELOG.md", ".github/pull_request_template.md"]) {
       expect({ file, exists: fs.existsSync(path.join(root, file)) }).toEqual({ file, exists: true });

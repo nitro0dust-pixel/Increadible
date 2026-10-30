@@ -22,7 +22,8 @@
     "drive:probe": "node scripts/drive-probe.js",
     "drive:bundle": "node scripts/drive-bundle.js",
     "drive:all": "node scripts/drive-all.js",
-    "drive:live": "node scripts/drive-live.js"
+    "drive:live": "node scripts/drive-live.js",
+    "probe:remote": "node scripts/probe-remote.js"
   },
   "keywords": [
     "claude",
