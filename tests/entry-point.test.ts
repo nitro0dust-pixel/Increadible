@@ -103,6 +103,36 @@ describe("AUTH_TOKEN", () => {
   });
 });
 
+describe("ALLOWED_ORIGINS", () => {
+  const ORIGIN = (value: string) => ({ authorization: "Bearer s3cret", origin: value });
+
+  it("lets a listed Origin through and refuses every other one in the real process; a request with no Origin is not affected", async () => {
+    const port = await freePort();
+    await start({ PORT: String(port), HOST: "127.0.0.1", AUTH_TOKEN: "s3cret", ALLOWED_ORIGINS: "https://app.example.com, http://localhost:3000" });
+    expect((await request(port, "POST", "/mcp", PING, ORIGIN("https://app.example.com"))).status).toBe(200);
+    expect((await request(port, "POST", "/mcp", PING, ORIGIN("http://localhost:3000"))).status).toBe(200);
+    expect((await request(port, "POST", "/mcp", PING, ORIGIN("http://evil.example"))).status).toBe(403);
+    expect((await request(port, "POST", "/mcp", PING, ORIGIN("https://app.example.com:8443"))).status).toBe(403);
+    expect((await request(port, "POST", "/mcp", PING, { authorization: "Bearer s3cret" })).status).toBe(200);
+  });
+
+  it("refuses every Origin when it is not set (also on a server started without a token)", async () => {
+    const port = await freePort();
+    await start({ PORT: String(port), HOST: "127.0.0.1" });
+    expect((await request(port, "POST", "/mcp", PING, { origin: "http://localhost:3000" })).status).toBe(403);
+    expect((await request(port, "POST", "/mcp", PING)).status).toBe(200);
+  });
+
+  it("names each entry it ignores at start-up, keeps the valid ones, and still starts", async () => {
+    const port = await freePort();
+    const server = await start({ PORT: String(port), HOST: "127.0.0.1", ALLOWED_ORIGINS: "*, https://app.example.com/path, https://ok.example, null" });
+    for (const entry of ["*", "https://app.example.com/path", "null"]) expect(server.stderr()).toContain(`Ignoring ALLOWED_ORIGINS entry "${entry}" is not an origin`);
+    expect(server.stderr()).not.toContain('"https://ok.example"');
+    expect((await request(port, "POST", "/mcp", PING, { origin: "https://ok.example" })).status).toBe(200);
+    expect((await request(port, "POST", "/mcp", PING, { origin: "https://app.example.com" })).status).toBe(403); // the entry with a path was not taken as its origin
+  });
+});
+
 describe("what the server says when it starts", () => {
   it("names the address it listens on", async () => {
     const port = await freePort();

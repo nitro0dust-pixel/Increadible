@@ -101,6 +101,13 @@ grep -q 'increadible_tool_call_duration_seconds_bucket{tool="get_api_stats",le="
   || { echo "metrics missing the +Inf latency bucket" >&2; exit 1; }
 grep -q 'increadible_http_rejected_total{reason="unauthorized"} 1' <<<"$METRICS" \
   || { echo "metrics did not count the unauthorized /metrics request" >&2; exit 1; }
+echo "[hardening] a request with an Origin is refused (403) before the token is looked at; GET /mcp is 405; an unsupported MCP-Protocol-Version is 400"
+PINGMSG='{"jsonrpc":"2.0","id":1,"method":"ping"}'
+[ "$(code "${AUTH[@]}" -H "Origin: http://evil.example" -d "$PINGMSG" "http://127.0.0.1:$PORT/mcp")" = 403 ] || { echo "a request with an Origin must be refused" >&2; exit 1; }
+[ "$(code -H "Origin: http://evil.example" -d "$PINGMSG" "http://127.0.0.1:$PORT/mcp")" = 403 ] || { echo "the Origin check must come before the token check" >&2; exit 1; }
+[ "$(code "${AUTH[@]}" "http://127.0.0.1:$PORT/mcp")" = 405 ] || { echo "GET /mcp must answer 405" >&2; exit 1; }
+[ "$(code "${AUTH[@]}" -H "MCP-Protocol-Version: 1999-01-01" -d "$PINGMSG" "http://127.0.0.1:$PORT/mcp")" = 400 ] || { echo "an unsupported MCP-Protocol-Version must be refused" >&2; exit 1; }
+[ "$(code "${AUTH[@]}" -H "MCP-Protocol-Version: 2025-11-25" -d "$PINGMSG" "http://127.0.0.1:$PORT/mcp")" = 200 ] || { echo "a supported MCP-Protocol-Version must be served" >&2; exit 1; }
 echo "[event loop] a stalled process must show as a late tick on /metrics (SIGSTOP for 1.3 s, then SIGCONT)"
 LOOP=$(sed -n 's/^increadible_event_loop_delay_seconds_count //p' <<<"$METRICS")
 [ -n "$LOOP" ] || { echo "metrics missing the event loop delay histogram: the monitor did not start" >&2; exit 1; }

@@ -2,7 +2,16 @@ import * as crypto from "crypto";
 import * as http from "http";
 import * as readline from "readline";
 import { Readable, Writable } from "stream";
-import { handleMessage, internalError, metrics, renderPrometheusMetrics, startEventLoopMonitor, JsonRpcResponse, SERVER_INFO } from "./server";
+import {
+  handleMessage,
+  internalError,
+  metrics,
+  renderPrometheusMetrics,
+  startEventLoopMonitor,
+  JsonRpcResponse,
+  SERVER_INFO,
+  SUPPORTED_PROTOCOL_VERSIONS,
+} from "./server";
 
 const MAX_BODY_BYTES = 1_000_000;
 // Time allowed to *receive* a request (not to handle it). Node's own defaults are 60 s and 300 s, which lets one slow client hold a socket for 5 minutes.
@@ -67,11 +76,42 @@ export function createRateLimiter(perMinute: number, now: () => number = Date.no
   };
 }
 
+/**
+ * `ALLOWED_ORIGINS`: a comma-separated list of the origins (scheme://host[:port], no path) a web page may send this server a request from.
+ * Each entry is reduced to its canonical origin; an entry that is not an http(s) origin (a path, a query, a user name, `*`, `null`) is
+ * reported in `problems` and left out. A request with an Origin header that is not in the list is refused with 403; a request without
+ * one (every client that is not a web page) is not affected.
+ */
+export function parseAllowedOrigins(raw: string | undefined): { origins: string[]; problems: string[] } {
+  const origins: string[] = [];
+  const problems: string[] = [];
+  for (const part of (raw ?? "").split(",")) {
+    const entry = part.trim();
+    if (entry === "") continue;
+    // scheme://host[:port] with at most one trailing slash: no path, query or fragment (a regular expression, because URL would
+    // normalise them away), and no user name or password.
+    let url: URL | undefined;
+    try {
+      if (/^https?:\/\/[^/?#\s]+\/?$/i.test(entry)) url = new URL(entry);
+    } catch {
+      /* reported below */
+    }
+    if (!url || url.username !== "" || url.password !== "") {
+      problems.push(`"${entry}" is not an origin (expected scheme://host[:port], for example https://app.example.com)`);
+      continue;
+    }
+    if (!origins.includes(url.origin)) origins.push(url.origin);
+  }
+  return { origins, problems };
+}
+
 export interface HttpOptions {
   headersTimeoutMs?: number;
   requestTimeoutMs?: number;
   /** Global limit on POST /mcp (the bearer token is shared, so there is no per-client key). 0 or unset: off. */
   rateLimitPerMinute?: number;
+  /** Origins (canonical, lower case) whose pages may call this server; any other Origin header is refused with 403. None: no Origin header is accepted. */
+  allowedOrigins?: readonly string[];
 }
 
 export interface DrainableServer extends http.Server {
@@ -87,6 +127,7 @@ export function createHttpServer(authToken?: string, options: HttpOptions = {}):
   // Node only checks timeouts every connectionsCheckingInterval (30 s by default), which would stretch a 10 s limit to 40 s.
   const checkEvery = Math.max(50, Math.min(5_000, Math.floor((headersTimeout || requestTimeout || 10_000) / 2)));
   const takeToken = createRateLimiter(options.rateLimitPerMinute ?? 0);
+  const allowedOrigins = new Set((options.allowedOrigins ?? []).map((o) => o.toLowerCase()));
   let draining = false;
 
   const server = http.createServer(
@@ -112,6 +153,12 @@ export function createHttpServer(authToken?: string, options: HttpOptions = {}):
       if (probe && pathname === "/ready") {
         return draining ? json(503, { status: "draining" }) : json(200, { status: "ok" });
       }
+      // A web page always sends Origin; no other client does. Refusing every Origin that is not listed is what stops a page from
+      // reaching a server it can only reach through the visitor's browser (DNS rebinding), also one started without a token.
+      const origin = req.headers.origin;
+      if (origin !== undefined && !allowedOrigins.has(origin.toLowerCase())) {
+        return refuse(403, "origin_forbidden", { error: "Forbidden origin" });
+      }
       if (authToken && !tokenMatches(req.headers.authorization, authToken)) {
         metrics.http_rejected.unauthorized = (metrics.http_rejected.unauthorized || 0) + 1;
         return json(401, { error: "Unauthorized" });
@@ -121,6 +168,11 @@ export function createHttpServer(authToken?: string, options: HttpOptions = {}):
         return res.end(renderPrometheusMetrics());
       }
       if (req.method === "POST" && pathname === "/mcp") {
+        // The revision a client says it speaks, sent on every request after `initialize`. Absent is fine (older clients).
+        const sent = req.headers["mcp-protocol-version"];
+        if (sent !== undefined && !(typeof sent === "string" && SUPPORTED_PROTOCOL_VERSIONS.includes(sent))) {
+          return refuse(400, "protocol_version", { error: "Unsupported MCP-Protocol-Version", supported: SUPPORTED_PROTOCOL_VERSIONS });
+        }
         const retryAfter = takeToken();
         if (retryAfter) return refuse(429, "rate_limited", { error: "Too many requests" }, { "Retry-After": String(retryAfter) });
 
@@ -152,6 +204,10 @@ export function createHttpServer(authToken?: string, options: HttpOptions = {}):
           }
         });
         return;
+      }
+      // The optional event stream (GET) and the end of a session (DELETE): this server offers neither, which is what 405 says.
+      if (pathname === "/mcp" && (req.method === "GET" || req.method === "DELETE")) {
+        return refuse(405, "method_not_allowed", { error: "Method not allowed" }, { Allow: "POST" });
       }
       json(404, { error: "Not found" });
     }
@@ -246,7 +302,10 @@ export function run(): void {
       console.error(`WARNING: serving on ${host} without authentication (ALLOW_UNAUTHENTICATED is set)`);
     }
     startEventLoopMonitor(); // exposed on /metrics: a synchronous task that blocks the loop also blocks the probes
+    const allowed = parseAllowedOrigins(process.env.ALLOWED_ORIGINS);
+    for (const problem of allowed.problems) console.error(`Ignoring ALLOWED_ORIGINS entry ${problem}`);
     const server = createHttpServer(token, {
+      allowedOrigins: allowed.origins,
       headersTimeoutMs: envInt("HTTP_HEADERS_TIMEOUT_MS", DEFAULT_HEADERS_TIMEOUT_MS),
       requestTimeoutMs: envInt("HTTP_REQUEST_TIMEOUT_MS", DEFAULT_REQUEST_TIMEOUT_MS),
       rateLimitPerMinute: envInt("RATE_LIMIT_PER_MINUTE", 0),
