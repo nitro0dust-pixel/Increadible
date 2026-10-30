@@ -22,6 +22,7 @@ third-party projects (or are our integration guides for them) and are not listed
 | What changed for an operator | [CHANGELOG.md](../CHANGELOG.md) |
 | How a version becomes a release: who tags, which commit, how the package hash is checked | [RELEASING.md](RELEASING.md) |
 | The audit: findings, fixes, what was not verified | [AUDIT.md](../AUDIT.md) |
+| The whole-project audit of 2026-10-30: who did what and why, how each part is built (languages and logic), the history in phases, what was re-checked, and every open gap and error with its recommended fix | [PROJECT-AUDIT-2026-10-30.md](PROJECT-AUDIT-2026-10-30.md) |
 | What was measured and what the numbers do not say | [PERFORMANCE.md](../PERFORMANCE.md) |
 | Third-party tools that run beside this server | [COMPANIONS.md](../COMPANIONS.md) |
 | Calling the API gateway from a Claude chat: prompts, answers, mock versus real, the statistics | [USING-THE-GATEWAY.md](USING-THE-GATEWAY.md) |
