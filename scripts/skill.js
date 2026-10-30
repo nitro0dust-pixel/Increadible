@@ -33,6 +33,7 @@ const REFERENCES = {
   "DEPLOYMENT.md": "deployment.md",
   "ROADMAP.md": "roadmap.md",
   "AUDIT.md": "audit.md",
+  "docs/PROJECT-AUDIT-2026-10-30.md": "project-audit-2026-10-30.md",
   "GATEWAY.md": "gateway.md",
   "docs/RELEASING.md": "releasing.md",
   "docs/GATEWAY-GATED-CATALOG.md": "gated-catalog.md",
