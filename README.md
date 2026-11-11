@@ -71,8 +71,10 @@ PORT=3000 HOST=0.0.0.0 AUTH_TOKEN=change-me node dist/src/index.js
 
 `HOST` defaults to `127.0.0.1`. If you bind to `0.0.0.0` (or any non-loopback address) you must set `AUTH_TOKEN`: the server
 refuses to start otherwise, unless `ALLOW_UNAUTHENTICATED=1` says something in front authenticates. Other HTTP settings:
-`HTTP_HEADERS_TIMEOUT_MS`, `HTTP_REQUEST_TIMEOUT_MS`, `RATE_LIMIT_PER_MINUTE` (off by default), `SHUTDOWN_DRAIN_MS` and
+`ALLOWED_ORIGINS`, `HTTP_HEADERS_TIMEOUT_MS`, `HTTP_REQUEST_TIMEOUT_MS`, `RATE_LIMIT_PER_MINUTE` (off by default), `SHUTDOWN_DRAIN_MS` and
 `SHUTDOWN_TIMEOUT_MS`; see "HTTP hardening" in `DEPLOYMENT.md`.
+
+**Web pages and protocol versions.** A request that carries an `Origin` header (a web page's POST always does; Claude Desktop, scripts and servers send none) is refused with `403` unless its origin is listed in `ALLOWED_ORIGINS` (comma-separated http(s) origins, for example `https://app.example.com`; nothing is listed by default). The check comes before the token check and also protects a server started without a token. **Listing an origin only lets its requests go on to the token check: the server sends no CORS headers, so a page cannot read the answers** (a browser client needs a proxy that handles CORS), and a client whose `Origin` is not an http(s) one (an extension, Electron, a webview) cannot be listed. `GET` and `DELETE` on `/mcp` answer `405` with `Allow: POST` (no event stream, no sessions). An `MCP-Protocol-Version` header naming a revision the server does not speak is refused with `400`; the server speaks `2024-11-05`, `2025-03-26`, `2025-06-18` and `2025-11-25`, and `initialize` answers the revision the client names if it is one of them and `2025-11-25` otherwise.
 Emitted metrics: `increadible_uptime_seconds`, `increadible_tool_calls_total{tool}`,
 `increadible_tool_errors_total{tool}`, `increadible_tool_call_duration_seconds{tool}` (histogram),
 `increadible_event_loop_delay_seconds` (histogram: how late the event loop ran a 10 ms timer; HTTP mode),

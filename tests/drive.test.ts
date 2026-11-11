@@ -333,17 +333,18 @@ describe("scripts/drive-http.js", () => {
 });
 
 describe("scripts/drive-probe.js", () => {
-  it("passes on the server as it is, with the four recorded deviations marked KNOWN and three observations marked INFO", () => {
+  it("passes on the server as it is: no recorded deviation is left (nothing is KNOWN), three observations are marked INFO", () => {
     const ran = drive("drive-probe.js", ["--root", server, "--json"]);
     expect(ran.stderr).toBe("");
     expect(ran.status).toBe(0);
     expect(names(ran)).toEqual(probe.CHECKS.map((c: any) => c.id));
     const byStatus = (status: string) => ran.json.results[0].steps.filter((s: any) => s.status === status).map((s: any) => s.name);
-    expect(byStatus("KNOWN")).toEqual(["stdio.date-shaped-version-is-echoed", "http.get-mcp-is-404", "http.origin-is-not-validated", "http.protocol-version-header-is-ignored"]);
+    expect(byStatus("KNOWN")).toEqual([]);
     expect(byStatus("INFO")).toEqual(["stdio.big-line-is-answered", "http.host-is-not-validated", "http.content-type-is-not-checked"]);
-    // each deviation says what the specification asks, for which revision, and where
-    for (const step of ran.json.results[0].steps.filter((s: any) => s.status === "KNOWN")) expect(step.notes[0]).toMatch(/Source \(revision \d{4}-\d{2}-\d{2}\): https:\/\/modelcontextprotocol\.io\/specification\//);
-    expect(ran.json.results[0].steps.find((s: any) => s.name === "stdio.date-shaped-version-is-echoed").notes[0]).toContain("/basic/lifecycle#version-negotiation");
+    // the four deviations of the first version of the probe are contracts now, under names that say what the server does
+    const contracts = byStatus("PASS");
+    for (const id of ["stdio.unsupported-version-is-negotiated", "http.get-and-delete-mcp-are-405", "http.foreign-origin-is-refused", "http.unsupported-protocol-version-header-is-refused"]) expect(contracts).toContain(id);
+    for (const id of ["stdio.date-shaped-version-is-echoed", "http.get-mcp-is-404", "http.origin-is-not-validated", "http.protocol-version-header-is-ignored"]) expect(names(ran)).not.toContain(id);
   });
 
   it("lists the checks and takes one transport at a time", () => {
@@ -358,7 +359,10 @@ describe("scripts/drive-probe.js", () => {
       { what: "401 becomes 403", file: "index.js", from: 'json(401, { error: "Unauthorized" })', to: 'json(403, { error: "Unauthorized" })', transport: "http", fails: ["http.metrics-need-the-token", "http.mcp-needs-the-token"] },
       { what: "413 becomes 400", file: "index.js", from: 'refuse(413, "payload_too_large"', to: 'refuse(400, "payload_too_large"', transport: "http", fails: ["http.oversize-body"] },
       { what: "stdio parse error becomes -32600", file: "index.js", from: 'send({ jsonrpc: "2.0", id: null, error: { code: -32700', to: 'send({ jsonrpc: "2.0", id: null, error: { code: -32600', transport: "stdio", fails: ["stdio.parse-error"] },
-      { what: "GET /mcp answers 405 (a recorded deviation is fixed: the record must be updated)", file: "index.js", from: 'json(404, { error: "Not found" });', to: 'json(req.method === "GET" && pathname === "/mcp" ? 405 : 404, { error: "Not found" });', transport: "http", fails: ["http.get-mcp-is-404"] },
+      { what: "GET and DELETE on /mcp answer 404 again", file: "index.js", from: 'return refuse(405, "method_not_allowed", { error: "Method not allowed" }, { Allow: "POST" });', to: 'return json(404, { error: "Not found" });', transport: "http", fails: ["http.get-and-delete-mcp-are-405"] },
+      { what: "the Origin check is gone", file: "index.js", from: 'if (origin !== undefined && !allowedOrigins.has(origin.toLowerCase())) {', to: 'if (false) {', transport: "http", fails: ["http.unknown-routes", "http.foreign-origin-is-refused"] },
+      { what: "an unsupported MCP-Protocol-Version header is accepted again", file: "index.js", from: 'if (sent !== undefined && !(typeof sent === "string" && server_1.SUPPORTED_PROTOCOL_VERSIONS.includes(sent))) {', to: 'if (false) {', transport: "http", fails: ["http.unsupported-protocol-version-header-is-refused"] },
+      { what: "initialize echoes any text as the version again", file: "server.js", from: "protocolVersion: negotiateProtocolVersion(requested),", to: 'protocolVersion: typeof requested === "string" ? requested : "2025-11-25",', transport: "stdio", fails: ["stdio.unsupported-version-is-negotiated"] },
     ];
     for (const c of cases) {
       it(c.what, () => {

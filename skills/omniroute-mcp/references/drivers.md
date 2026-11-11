@@ -117,7 +117,7 @@ npm run drive:probe -- --transport http
 npm run drive:probe -- --list
 ```
 
-Expected: for the first command `PASS 27/27 (4 KNOWN: recorded deviations from the MCP spec, behaviour unchanged)`; with `--transport http`, `PASS 14/14 (3 KNOWN: recorded deviations from the MCP spec, behaviour unchanged)`; `--list` prints the checks with their kind (`known`, `observed`, `contract`) and no verdict. Section 8 explains the deviations and the `INFO` lines.
+Expected: for the first command `PASS 27/27`; with `--transport http`, `PASS 14/14`; `--list` prints the checks with their kind (`contract`, `observed`, and `known` for a recorded deviation, of which there is none today) and no verdict. Section 8 explains the `INFO` lines and what changed.
 
 ### 3.5 bundle
 
@@ -159,8 +159,8 @@ http 42/42, 32/32 and 34/34; bundle 42/42, 32/32 and 34/34 (the bundle driver ad
 
 ```
   7   routing: a code task gets a provider       PASS  ok                  2 ms
-  22  http.get-mcp-is-404                        KNOWN 404                 2 ms
-        . The Streamable HTTP rules ask a server that offers no event stream to answer 405 ...
+  24  http.host-is-not-validated                 INFO  200                 2 ms
+        . The specification speaks of Origin only; Host is recorded because a DNS-rebinding defence usually checks it too.
   12  A/B: create an experiment                  SKIP  skipped
   14  gateway: a call answers sample data        FAIL  ok                  1 ms
         - json.source: expected "mock", got "live"
@@ -171,7 +171,7 @@ http 42/42, 32/32 and 34/34; bundle 42/42, 32/32 and 34/34 (the bundle driver ad
 | `PASS` | the check held | no |
 | `FAIL` | the check did not hold; the lines under it say what was expected and what came | **yes** |
 | `SKIP` | a write step was left out on purpose (`--url` without `--allow-writes`) | no, but the total says how many |
-| `KNOWN` | (probe only) the server differs from what the MCP specification asks, exactly as recorded | no; a *different* behaviour than the recorded one is a `FAIL` |
+| `KNOWN` | (probe only; none is recorded today) the server differs from what the MCP specification asks, exactly as recorded | no; a *different* behaviour than the recorded one is a `FAIL` |
 | `INFO` | (probe only) behaviour recorded without any specification claim | no, same rule |
 
 A server that stopped answering is reported as `no answer to <method> within N ms` with the last lines of the server's own stderr (secrets
@@ -267,32 +267,38 @@ a tool step, a `content` list; otherwise the step fails with `malformed`. Over H
 
 ## 8. The deviations the probe records
 
-Four checks are marked `KNOWN` and three `INFO`. They are what this server does today where the MCP specification asks for something
-else (or says nothing). The statements are from the specification sources as published for **revision 2025-11-25** (the transports page and the lifecycle page),
+**No check is marked `KNOWN` today; three are `INFO`.** The probe was written on 2026-10-14 with four recorded deviations from the MCP specification
+(`KNOWN`). All four were fixed on 2026-10-30 (audit findings PA-04 and PA-05) and are contracts now, under names that say what the server does:
+
+| Was (`KNOWN`) | Is (contract) | What the server does now |
+|---|---|---|
+| `stdio.date-shaped-version-is-echoed` | `stdio.unsupported-version-is-negotiated` (and `stdio.version-is-echoed` for the four it speaks) | `initialize` answers the revision the client names when it is `2024-11-05`, `2025-03-26`, `2025-06-18` or `2025-11-25`, and `2025-11-25` for anything else (a date it cannot speak, a word, nothing) |
+| `http.get-mcp-is-404` | `http.get-and-delete-mcp-are-405` | `GET /mcp` and `DELETE /mcp` answer `405` with `Allow: POST` |
+| `http.origin-is-not-validated` | `http.foreign-origin-is-refused` | a request with an `Origin` header is refused with `403` unless `ALLOWED_ORIGINS` lists it (`DEPLOYMENT.md`, "HTTP hardening") |
+| `http.protocol-version-header-is-ignored` | `http.unsupported-protocol-version-header-is-refused` | an `MCP-Protocol-Version` header the server does not speak gets `400` |
+
+The statements about the specification are from the sources as published for **revision 2025-11-25** (the transports page and the lifecycle page),
 read from the specification repository on 2026-10-14 by an independent reviewer because the website itself was not reachable from the sandbox; **read the page itself before relying on a
 line of it.** A newer revision, 2026-07-28, is marked latest in the repository's documentation index (NOT VERIFIED on the website); as read, its changelog drops the
 initialize handshake and `ping` (stateless servers, `server/discover`), requires an `MCP-Protocol-Version` header on every POST and answers GET and DELETE with 405. This server
-speaks the earlier, stateful protocol, and the probe's HTTP client is **not a fully conformant client**: it sends neither `MCP-Protocol-Version` nor `Accept: application/json, text/event-stream`,
-both of which revision 2025-11-25 asks of a client. Whether to change anything is the owner's decision; nothing here changes the server.
+speaks the earlier, stateful protocol (it does not list 2026-07-28), and the probe's HTTP client is **not a fully conformant client**: it sends neither `MCP-Protocol-Version` (except in the check that tests it) nor `Accept: application/json, text/event-stream`,
+both of which revision 2025-11-25 asks of a client. One limit stays and is **not** a `KNOWN` line: `2025-03-26` is listed although that revision, from memory and **NOT VERIFIED against its text**, asks a server to accept JSON-RPC batches,
+which this server refuses (`stdio.batch-refused`, `http.batch-and-scalars-refused`; revision 2025-06-18 removed batches).
 
 | Check | The server | The specification (revision 2025-11-25) asks | Note |
 |---|---|---|---|
-| `stdio.date-shaped-version-is-echoed` (`KNOWN`) | `initialize` answers any `YYYY-MM-DD` it is given (`1999-01-01`); anything else, and nothing, gets `2024-11-05` | version negotiation (lifecycle page): the same version if it supports it, otherwise another version it supports | the server declares no set of supported versions, so it never negotiates |
-| `http.get-mcp-is-404` (`KNOWN`) | `GET /mcp` answers 404 | an event stream, or `405 Method Not Allowed` | a client built on the reference TypeScript SDK (1.20.2; its source was read by a reviewer, **not run against this server**) opens this GET after initializing and reports any status other than 405 as an error |
-| `http.origin-is-not-validated` (`KNOWN`) | a foreign `Origin` is accepted | the server validates `Origin` (DNS rebinding) and answers 403 for an invalid one | `/mcp` needs the bearer token, which a web page cannot add; a reviewer showed that a server started without one (`ALLOW_UNAUTHENTICATED` on loopback) answers a POST sent with `Origin` and `Host` of another site, and with `Content-Type: text/plain`, which a web page may send without a preflight request |
-| `http.protocol-version-header-is-ignored` (`KNOWN`) | an invalid `MCP-Protocol-Version` header is accepted | `400 Bad Request` | |
 | `stdio.big-line-is-answered` (`INFO`) | a 5,000,000-byte line is answered | (nothing) | HTTP refuses more than 1,000,000 bytes with 413 |
-| `http.host-is-not-validated` (`INFO`) | a foreign `Host` is accepted | (nothing: the specification names `Origin` only) | a DNS-rebinding defence usually checks it too |
-| `http.content-type-is-not-checked` (`INFO`) | a JSON body sent as `text/plain` is accepted | (nothing claimed) | see the `Origin` row |
+| `http.host-is-not-validated` (`INFO`) | a foreign `Host` is accepted | (nothing: the specification names `Origin` only) | a DNS-rebinding defence usually checks it too. The `Origin` check stops a page from posting to `/mcp`; it does not cover a same-origin `GET`, which carries no `Origin` (`/metrics` holds counters only), so a `Host` check is what would close that |
+| `http.content-type-is-not-checked` (`INFO`) | a JSON body sent as `text/plain` is accepted | (nothing claimed) | a page can send `text/plain` cross-origin without a preflight request, but it also sends `Origin`, which is refused now |
 
-If someone fixes one, the probe fails on that line (`expected: ...`) on purpose: update the check and this table in the same pull request.
+If someone changes one of these, the probe fails on that line (`expected: ...`) on purpose: update the check and this table in the same pull request.
 
 ## 9. How these drivers were tested
 
 Every claim above has a test in `tests/drive-lib.test.ts` (the library, against small fake servers: no answer, a crash, stray output, a server that
 ignores every polite goodbye, an answer cut off or too large) or `tests/drive-scenarios.test.ts` (the format of stage 2 and the three scenarios, against the server as it is and against a server broken on purpose, one place per test) or `tests/drive.test.ts` (the four drivers as processes, against the server compiled from the sources, a package
 built by `scripts/mcpb.js`, and stand-in servers that misbehave: one that echoes the bearer token, one that is slow so the driver can be interrupted mid-run). The tests that matter most break something on purpose and expect the driver to say so: a patched server that
-answers 403 instead of 401, 400 instead of 413, a different parse-error code, 405 for `GET /mcp`, a counter stuck at zero, an exit code of 5 on SIGTERM; a damaged package; a scenario that claims
+answers 403 instead of 401, 400 instead of 413, a different parse-error code, 404 for `GET /mcp`, a counter stuck at zero, an exit code of 5 on SIGTERM; a damaged package; a scenario that claims
 to write and does not.
 
 The drivers themselves were also broken one guard at a time, and each breakage had to make a test fail (`tests/drive-lib.test.ts`, `tests/drive.test.ts` and `tests/drive-scenarios.test.ts`):
@@ -310,6 +316,7 @@ The drivers themselves were also broken one guard at a time, and each breakage h
 | 9 (stage 3: `scripts/drive-all.js` after its two independent reviews: a temporary folder of the run's own, a process group per driver, more verdict rules) | 2026-10-23 | 26 | 24 | Two survivors, each given a test and run again (both caught): the SIGKILL that `endChildren` sends to a driver that ignores SIGTERM when `drive-all` itself ends (a stand-in driver that ignores the signal and starts a sleeper; both must be gone), and the removal of the run's own folder when `main()` returns (the library's cleanup at exit hides it). **My first test for the second was vacuous**: it set `TMPDIR` in the test's `process.env`, which is a copy that `os.tmpdir()` does not read, so the folder was never in the place the test looked at; the mutation run showed it passing with the removal deleted, and the test now redirects `os.tmpdir()` itself and first checks that the folder exists while the run is going. |
 | 10 (stage 3: the two workflow scripts after the same reviews: answers checked for their shape, hashes, criteria matched by id, severity that fails closed, runners in sequence) | 2026-10-23 | 66 | 60 | Six survivors. Four got a test and are caught: a Testing answer whose `exit_code` is a string or whose `sha256` is missing (the verdict was FAIL by another rule, so the test now also asks that it is not listed as evidence and is called unusable), the instruction to the Validation critic to give the label, verdict and SHA-256 of each report it read, and the feedback of a critic's silence to the next Engineering round. Two were **equivalent** (`!!tested` in the approval and `keys !== ''` in the stall rule: every other way to a missing answer or to a non-approval already puts a gap or a key in place); both guards were removed from `engineer-loop.js` instead of being kept as checks that cannot fail. |
 | 11 (`scripts/probe-remote.js`, the read-only check of a running server) | 2026-10-30 | 26 | 24 | Two survivors, each given a test and run again (both caught): the check that the server calls itself `increadible`, and the check that no two tools share a name. The real server cannot make either fail, so a stand-in server that answers with a wrong name and with a repeated tool name was added to `tests/probe-remote.test.ts`. The other 24 breakages (the loopback test and both of its anchors, the refusal without the token, the redaction of the token, the plain-http warning, the health and readiness bodies, the tool count, the Wikimedia contact rule, a request that writes or reads another path, the exit code, a token on the command line) were caught at once. |
+| 12 (PA-04 and PA-05: the `Origin` check, `GET`/`DELETE /mcp` 405, the `MCP-Protocol-Version` header, version negotiation and `ALLOWED_ORIGINS`; `src/index.ts` and `src/server.ts`, run against `tests/http-origin.test.ts`, `tests/protocol.test.ts`, `tests/server-boundaries.test.ts` and, for the start-up wiring, `tests/entry-point.test.ts`) | 2026-10-30 | 31; then 41 against the code after an independent review | 31 of 31; then 39 of 41 at once | **First list:** none survived. An independent reviewer then showed six breakages that list did not cover (an uppercase scheme, a password-only entry, a URL that fails to parse, a refused Origin spending a rate-limit token, `GET /mcp?x=1`, a refusal without `Connection: close`), and found the parser too permissive (wildcards, `@`, a backslash, a trailing colon) and an entry with a password echoed to the log; all fixed, with the documentation overclaims (no CORS headers; a same-origin `GET` carries no `Origin`). **Second list (41):** two were not caught at once: the `Connection: close` test was vacuous (its client asked for `close` itself, so Node echoed it back; rewritten with a keep-alive client, killed on the second run) and one breakage had a stale anchor (re-run, killed). One further breakage survives and is judged **equivalent but not verified for a half-sent request body**: dropping the explicit `req.destroy()` of a refusal, because `Connection: close` already makes Node close the socket after the response (a line that existed before this change). The probe's own breakage table in `tests/drive.test.ts` gained four rows that break the compiled server and each fail exactly the check named. The sources were restored byte for byte after each round. |
 
 Besides, two independent reviews by separate agents. The first (a tester, a security reviewer and a documentation follower; its code reviewer was cut off by the usage limit) found 46 issues in the first version; four skeptic agents each
 reproduced the finding they were given. The second (the code reviewer that had been cut off, and a regression tester that replayed all 45 ids of the first review against the fixed code: 33 fixed, 8 partly, 1 still broken) found no blocker and 27 further findings (11 from the code reviewer, 16 from the regression tester); three of them were sent to a skeptic agent for a second look. They are fixed, each with a test, and this document was corrected from them. Two things found by the tests themselves are worth saying: the first `basic` scenario could not be repeated against a running server (the second run hit the gateway's cache and

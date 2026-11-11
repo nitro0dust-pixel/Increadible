@@ -251,7 +251,7 @@ describe("Dockerfile and package.json", () => {
 
   it("documents every HTTP hardening env var the code reads", () => {
     const code = read("src/index.ts");
-    for (const name of ["HTTP_HEADERS_TIMEOUT_MS", "HTTP_REQUEST_TIMEOUT_MS", "RATE_LIMIT_PER_MINUTE", "SHUTDOWN_DRAIN_MS", "SHUTDOWN_TIMEOUT_MS", "ALLOW_UNAUTHENTICATED"]) {
+    for (const name of ["HTTP_HEADERS_TIMEOUT_MS", "HTTP_REQUEST_TIMEOUT_MS", "RATE_LIMIT_PER_MINUTE", "SHUTDOWN_DRAIN_MS", "SHUTDOWN_TIMEOUT_MS", "ALLOW_UNAUTHENTICATED", "ALLOWED_ORIGINS"]) {
       expect(code).toContain(name);
       expect(read("DEPLOYMENT.md")).toContain(name);
       expect(read("README.md")).toContain(name);
@@ -268,6 +268,8 @@ describe("Dockerfile and package.json", () => {
     expect(smoke).toContain('reason="unauthorized"');
     expect(smoke).toContain("increadible_event_loop_delay_seconds_count");
     expect(smoke).toContain('kill -STOP "$PID"'); // a stalled process must show as a late tick
+    expect(smoke).toContain("Origin: http://evil.example"); // a web page's request is refused before the token is looked at
+    expect(smoke).toContain("MCP-Protocol-Version: 1999-01-01");
     const probe = read("scripts/probe-image.sh");
     expect(probe).toContain('"name":"discover_apis","arguments":{"query":123}');
     expect(probe).toContain("Refusing to listen");

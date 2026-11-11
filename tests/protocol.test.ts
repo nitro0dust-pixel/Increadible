@@ -85,19 +85,29 @@ describe("initialize", () => {
   const version = async (protocolVersion: unknown) =>
     ((await server.handleMessage({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion } })) as any).result.protocolVersion;
 
-  it("echoes a protocol version that is a date, as MCP versions are", async () => {
-    for (const v of ["2024-11-05", "2025-03-26", "2025-06-18", "2099-01-01"]) expect(await version(v)).toBe(v);
+  it("echoes a protocol version that it speaks, one of the four it lists", async () => {
+    expect(server.SUPPORTED_PROTOCOL_VERSIONS).toEqual(["2024-11-05", "2025-03-26", "2025-06-18", "2025-11-25"]);
+    for (const v of server.SUPPORTED_PROTOCOL_VERSIONS) expect(await version(v)).toBe(v);
   });
 
-  it("answers with its own default for anything else, instead of claiming to speak it", async () => {
-    for (const v of ["latest", "", {}, 20241105, null, ["2025-03-26"], "2025-3-26", "2025-03-26T00:00:00Z", "x".repeat(5000), "2025-03-26\n"]) {
-      expect(await version(v)).toBe("2024-11-05");
+  it("answers the latest version it speaks to one it does not (a date from the future, or the past), instead of claiming to speak it", async () => {
+    for (const v of ["2099-01-01", "1999-01-01", "2025-11-26", "2024-11-04"]) expect(await version(v)).toBe("2025-11-25");
+  });
+
+  it("answers the latest version it speaks to anything that is not a version at all", async () => {
+    for (const v of ["latest", "", {}, 20241105, null, ["2025-03-26"], "2025-3-26", "2025-03-26T00:00:00Z", "x".repeat(5000), "2025-03-26\n", " 2025-03-26", "2025-06-18 "]) {
+      expect(await version(v)).toBe("2025-11-25");
     }
   });
 
-  it("answers with the default when the client sends no version", async () => {
+  it("answers the latest version it speaks when the client sends no version", async () => {
     const r: any = await server.handleMessage({ jsonrpc: "2.0", id: 1, method: "initialize" });
-    expect(r.result.protocolVersion).toBe("2024-11-05");
+    expect(r.result.protocolVersion).toBe("2025-11-25");
+    expect(server.LATEST_PROTOCOL_VERSION).toBe("2025-11-25");
+  });
+
+  it("negotiates by exact match on its list, not by prototype or substring: inherited names are not versions", async () => {
+    for (const v of ["constructor", "__proto__", "length", "toString", "2025-06-18,2025-11-25"]) expect(await version(v)).toBe("2025-11-25");
   });
 });
 
@@ -170,7 +180,7 @@ describe("HTTP routes and the bearer token", () => {
       expect((await send(port, "POST", "/mcp?session=1", auth, ping)).status).toBe(200);
       expect((await send(port, "GET", "/metrics?x=1", auth)).status).toBe(200);
       expect((await send(port, "HEAD", "/mcp", auth)).status).toBe(404); // HEAD is not POST
-      expect((await send(port, "GET", "/mcp", auth)).status).toBe(404);
+      expect((await send(port, "GET", "/mcp", auth)).status).toBe(405); // the optional event stream is not offered (tests/http-origin.test.ts)
     });
   });
 
