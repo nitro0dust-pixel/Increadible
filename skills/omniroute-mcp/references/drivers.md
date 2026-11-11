@@ -124,7 +124,7 @@ Expected: for the first command `PASS 27/27`; with `--transport http`, `PASS 14/
 ```
 npm run mcpb
 npm run drive:bundle
-npm run drive:bundle -- --bundle ./dist/mcpb/increadible-1.0.5.mcpb --setting durable_writes=false
+npm run drive:bundle -- --bundle ./dist/mcpb/increadible-1.0.6.mcpb --setting durable_writes=false
 npm run drive:bundle -- --data-dir ./drive-data
 ```
 
