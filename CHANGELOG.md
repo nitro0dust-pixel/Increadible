@@ -10,7 +10,7 @@ Entries marked **behaviour change** can affect an existing deployment.
 
 ## [Unreleased]
 
-Changes on `main` after `v1.0.5` (the tag is on `61ff561`). None of them is released yet: the next version is 1.0.6 or later, because a version number names one file only once it is released (`docs/RELEASING.md`, section 4).
+**Version 1.0.6** (bumped in the release-preparation pull request, not yet tagged): `package.json`, `package-lock.json`, `mcpb/manifest.json` and `src/version.ts`. The entries below move to `[1.0.6]` once the owner has installed the package in Claude Desktop, a tool has answered, and the tag is pushed (`docs/RELEASING.md`). Everything below is on `main` after `v1.0.5` (tag on `61ff561`); a package built from `main` before this bump is also called 1.0.5 but is not the released file (`docs/RELEASING.md`, section 4). The behaviour changes under Changed (Origin, `GET`/`DELETE` on `/mcp`, protocol version) are the only changes to the server code since 1.0.5.
 
 ### Added
 - **`npm run probe:remote` (`scripts/probe-remote.js`, `tests/probe-remote.test.ts`)** ([#84](https://github.com/nitro0dust-pixel/Increadible/pull/84)): six read-only checks of a server that is already running (health, ready, the 401 without a token, the handshake, the tool count, the gateway statistics). It sends only `GET /health`, `GET /ready` and `POST /mcp` with `initialize`, `tools/list` and `get_api_stats`, so it is safe against a server whose live APIs are on (unlike `drive:http --url`); the token is read from a named environment variable and never printed; exit 0 all passed, 1 a check failed, 2 could not run. Not run against Railway or a cluster (NOT VERIFIED there).
