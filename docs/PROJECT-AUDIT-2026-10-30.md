@@ -240,7 +240,7 @@ Master table; the detail follows. "Fix class": **A** in-repo and safe to do now 
 
 ## 9. Status of the fixes (updated as they land)
 
-Step 1 of section 8, the class A fixes, was done on 2026-10-30 in one pull request ([#84](https://github.com/nitro0dust-pixel/Increadible/pull/84), merged as `dbb512a`; its CI runs are in `docs/BUILD-HISTORY.md` and `ROADMAP.md`). Of class B, PA-04 and PA-05 were done the same day, after the owner asked for the next recommended step (rows at the end of the table); nothing else in class B or C was started. A finding is **fixed** only where a run or a test shows it; where the fix has a part that needs the owner, that part stays open and is named.
+Step 1 of section 8, the class A fixes, was done on 2026-10-30 in one pull request ([#84](https://github.com/nitro0dust-pixel/Increadible/pull/84), merged as `dbb512a`; its CI runs are in `docs/BUILD-HISTORY.md` and `ROADMAP.md`). Of class B, PA-04 and PA-05 were done the same day, after the owner asked for the next recommended step (rows at the end of the table; [#86](https://github.com/nitro0dust-pixel/Increadible/pull/86), merged as `ba773b3` on 2026-11-11 after its CI could not get a runner on 2026-10-30); nothing else in class B or C was started. A finding is **fixed** only where a run or a test shows it; where the fix has a part that needs the owner, that part stays open and is named.
 
 | ID | Status | What was done | What stays open | Evidence |
 |---|---|---|---|---|
